@@ -11,7 +11,7 @@ function invalid(message, instance) {
 }
 function validateManifest(manifest) {
   const version = manifest?.schemaVersion, content = manifest?.content;
-  if (![4, 5, 7].includes(version) || !record(content) || content.kind !== "composition") invalid("不支持的场景播放协议");
+  if (![4, 5, 7, 8].includes(version) || !record(content) || content.kind !== "composition") invalid("不支持的场景播放协议");
   if (content.units !== "meters" || typeof content.loop !== "boolean") invalid("场景单位或循环参数无效");
   if (content.durationSeconds !== null && !finite(content.durationSeconds, Number.MIN_VALUE, 600)) invalid("场景时长必须大于 0 且不超过 600 秒");
   const list = content.instances, groupList = version === 4 || content.groups === undefined ? [] : content.groups;
@@ -21,7 +21,7 @@ function validateManifest(manifest) {
   if (!record(resources) || Object.keys(resources).length > 8 || !record(content.assets) || Object.keys(content.assets).length > 8) invalid("场景资源列表无效");
   const ids = new Set(), groups = new Map();
   let keyCount = 0, animated = false;
-  const transform = node => {
+  const transform = (node, scalarTracks = false) => {
     if (!record(node) || !identifier(node.id) || ids.has(node.id)) invalid("场景对象标识无效或重复", node);
     ids.add(node.id);
     for (const field of ["position", "rotation", "scale"]) {
@@ -31,12 +31,13 @@ function validateManifest(manifest) {
     if (node.tracks !== undefined) {
       if (!record(node.tracks)) invalid("场景关键帧无效", node);
       for (const [channel, frames] of Object.entries(node.tracks)) {
-        if (!channels.includes(channel) || !Array.isArray(frames) || !frames.length) invalid("场景关键帧通道无效", node);
+        const scalar = scalarTracks && ["opacity", "volume"].includes(channel);
+        if ((!channels.includes(channel) && !scalar) || !Array.isArray(frames) || !frames.length) invalid("场景关键帧通道无效", node);
         animated = true; keyCount += frames.length;
         if (keyCount > 2400) invalid("场景关键帧数量不能超过 2400", node);
         let previous = -1;
         for (const frame of frames) {
-          if (!record(frame) || !finite(frame.time, 0, 600) || frame.time <= previous || !finite(frame.value, channel.startsWith("scale.") ? Number.MIN_VALUE : -100, 100)) invalid("场景关键帧时间或数值无效", node);
+          if (!record(frame) || !finite(frame.time, 0, 600) || frame.time <= previous || !finite(frame.value, scalar ? 0 : channel.startsWith("scale.") ? Number.MIN_VALUE : -100, scalar ? 1 : 100)) invalid("场景关键帧时间或数值无效", node);
           if (!Array.isArray(frame.handles) || frame.handles.length !== 4 || !frame.handles.every(value => finite(value, -100, 100)) || !finite(frame.handles[0], 0, 1) || !finite(frame.handles[2], 0, 1) || typeof frame.connectedRight !== "boolean") invalid("场景关键帧曲线无效", node);
           previous = frame.time;
         }
@@ -53,10 +54,13 @@ function validateManifest(manifest) {
   }
   const kindOf = inst => inst.text !== undefined ? "text" : resources[inst.asset]?.kind ?? "model";
   for (const inst of list) {
-    transform(inst);
+    transform(inst, version === 8);
     if (version !== 4 && inst.parent !== undefined && !groups.has(inst.parent)) invalid("场景对象的父分组不存在", inst);
     const kind = kindOf(inst);
-    if (version !== 7 && (kind !== "model" || inst.timing !== undefined || inst.media !== undefined)) invalid("此场景需要演出播放协议 7", inst);
+    if (version < 7 && (kind !== "model" || inst.timing !== undefined || inst.media !== undefined)) invalid("此场景需要演出播放协议 7", inst);
+    if (version !== 8 && (inst.opacity !== undefined || inst.tracks?.opacity !== undefined || inst.tracks?.volume !== undefined || inst.media?.spatial !== undefined)) invalid("此场景需要参数动画与空间音频播放协议 8", inst);
+    if (inst.opacity !== undefined && !finite(inst.opacity, 0, 1)) invalid("场景透明度无效", inst);
+    if (inst.tracks?.volume !== undefined && !["audio", "video"].includes(kind)) invalid("音量关键帧仅适用于音频与视频", inst);
     if (inst.text !== undefined) {
       const text = inst.text;
       if (inst.asset !== undefined || inst.animation != null || inst.media !== undefined || !record(text)) invalid("空间文字不能同时引用素材或媒体参数", inst);
@@ -76,6 +80,10 @@ function validateManifest(manifest) {
       animated = true;
       const media = inst.media;
       if (!["audio", "video"].includes(kind) || inst.animation != null || !record(media) || !finite(media.trimStartSeconds, 0, 86400) || (media.trimEndSeconds !== null && (!finite(media.trimEndSeconds, 0, 86400) || media.trimEndSeconds <= media.trimStartSeconds)) || !finite(media.playbackRate, .1, 4) || !finite(media.volume, 0, 1) || typeof media.loop !== "boolean" || typeof media.muted !== "boolean") invalid("场景媒体播放参数无效", inst);
+      if (media.spatial !== undefined) {
+        const spatial = media.spatial;
+        if (!record(spatial) || typeof spatial.enabled !== "boolean" || !finite(spatial.refDistance, .1, 100) || !finite(spatial.maxDistance, spatial.refDistance, 1000) || !finite(spatial.rolloffFactor, 0, 10)) invalid("场景空间音频参数无效", inst);
+      }
     }
     if (inst.animation != null) {
       animated = true;

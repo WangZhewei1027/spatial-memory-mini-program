@@ -1,7 +1,7 @@
 // One scene clock drives model animation, spatial surfaces and native media.
 // The host owns placement/frame scheduling; this player owns every loaded instance.
 const { THREE } = require("../three-runtime/runtime");
-const { createSceneCore, clipTime: coreClipTime, samplePresentation, mediaPreloadIds } = require("./vendor/scene-core");
+const { createSceneCore, clipTime: coreClipTime, samplePresentation, sampleSpatialAudio, mediaPreloadIds } = require("./vendor/scene-core");
 const { disposeTree } = require("../three-runtime/resources");
 const { groundOffset } = require("../three-runtime/pivot");
 const { validateManifest } = require("./manifest");
@@ -27,11 +27,12 @@ function tagError(error, fields) {
   return Object.assign(error instanceof Error ? error : new Error(error?.errMsg || String(error)), fields);
 }
 
-function createCompositionPlayer(manifest, { modelCache, canvas = modelCache?.canvas, onState, surfaceFactory } = {}) {
+function createCompositionPlayer(manifest, { modelCache, canvas = modelCache?.canvas, onState, surfaceFactory, getListenerCamera } = {}) {
   const content = manifest && manifest.content;
   const root = new THREE.Group();
   root.name = `scene:${manifest?.assetId || ""}`;
   const instances = [], groups = new Map(), animated = [], unbind = [];
+  const listener = { position: new THREE.Vector3(), forward: new THREE.Vector3(), up: new THREE.Vector3() };
   let core = null, mediaContext = null, cancelLoading = null;
   const duration = Number.isFinite(content?.durationSeconds) && content.durationSeconds > 0 ? content.durationSeconds : null;
   const sceneLoop = !!content?.loop;
@@ -159,7 +160,7 @@ function createCompositionPlayer(manifest, { modelCache, canvas = modelCache?.ca
         const object = handle?.object || surface?.object;
         if (!object?.isObject3D) throw tagError(new Error("场景资源没有可渲染对象"), { alias, instanceId: inst.id, kind: "resource" });
         const instanceRoot = new THREE.Group(); instanceRoot.name = `instance:${inst.id}`;
-        const entry = { id: inst.id, alias, kind, inst, instanceRoot, object, handle, surface, mixer: null, action: null, materials: [] };
+        const entry = { id: inst.id, alias, kind, inst, instanceRoot, object, handle, surface, mixer: null, action: null, materials: [], worldPosition: new THREE.Vector3() };
         instances.push(entry); acquired.splice(acquired.indexOf(loaded), 1);
         if (handle) {
           // A model clone shares cache materials; fade settings must never mutate another instance.
@@ -213,6 +214,14 @@ function createCompositionPlayer(manifest, { modelCache, canvas = modelCache?.ca
     let currentEntry;
     try {
       const prepared = new Set(mediaPreloadIds(instances.filter(entry => entry.kind === "audio" || entry.kind === "video").map(entry => entry.inst), time, duration, core?.looping ?? sceneLoop));
+      const camera = getListenerCamera?.();
+      if (camera) {
+        // Include both the AR placement and animated parent groups in source positions.
+        root.updateWorldMatrix(true, true);
+        camera.getWorldPosition(listener.position);
+        camera.getWorldDirection(listener.forward);
+        listener.up.setFromMatrixColumn(camera.matrixWorld, 1).normalize();
+      }
       for (const entry of instances) {
         currentEntry = entry;
         const presentation = samplePresentation(entry.inst, time, duration);
@@ -223,7 +232,11 @@ function createCompositionPlayer(manifest, { modelCache, canvas = modelCache?.ca
           original.material.opacity = original.opacity * presentation.opacity;
           original.material.depthWrite = original.depthWrite && presentation.opacity === 1;
         }
-        entry.surface?.sync(time, playing, duration, prepared.has(entry.id));
+        if (camera && entry.inst.media?.spatial?.enabled) {
+          entry.worldPosition.setFromMatrixPosition(entry.instanceRoot.matrixWorld);
+          const spatial = sampleSpatialAudio(entry.inst.media.spatial, entry.worldPosition, listener);
+          entry.surface?.sync(time, playing, duration, prepared.has(entry.id), spatial);
+        } else entry.surface?.sync(time, playing, duration, prepared.has(entry.id));
         if (disposed || state === "error") return false;
       }
       for (const animation of animated) {
@@ -266,10 +279,13 @@ function createCompositionPlayer(manifest, { modelCache, canvas = modelCache?.ca
     core.seek(0); t = 0; startCore();
   }
   function update(dt) {
-    if (state !== "playing" || !(dt > 0) || !Number.isFinite(dt)) return;
-    core.advance(dt); t = core.time;
+    if (!core || !["ready", "playing", "paused", "ended"].includes(state) || dt < 0 || !Number.isFinite(dt)) return;
+    const playing = state === "playing";
+    if (playing && dt > 0) { core.advance(dt); t = core.time; }
     const ended = !sceneLoop && duration !== null && t >= duration;
-    if (evaluate(t, !ended) && ended) setState("ended");
+    // The listener can move while the scene clock is paused or on a zero-delta
+    // camera frame. Refresh gain without advancing time or resuming sound.
+    if (evaluate(t, playing && !ended) && ended && state !== "ended") setState("ended");
   }
   function dispose() {
     if (disposed) return;

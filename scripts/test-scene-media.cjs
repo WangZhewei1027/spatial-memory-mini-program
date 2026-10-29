@@ -82,6 +82,20 @@ async function main() {
     assert.deepEqual(native.seeks, [3, 7]); native.currentTime = 7; native.emit('Seeked');
     assert.equal(native.plays, 0, 'late seek cannot undo a pause'); a.dispose(); native.emit('Canplay'); assert.equal(native.destroys, 1);
   }
+  for (const kind of ['audio', 'video']) {
+    const state = platform();
+    const key = (time, value) => ({ time, value, handles: [0, 0, 1, 1], connectedRight: true });
+    const a = await createSceneSurface(instance({ opacity: 0, tracks: { volume: [key(2, .2), key(4, .8)] } }), resource(kind));
+    a.sync(3, true, 20, true, { gain: .5, pan: 1 }); await flush();
+    const native = kind === 'audio' ? state.audio[0] : state.players[0];
+    near(native.volume, .125, 'volume automation × cue fade × distance');
+    assert.ok(kind === 'audio' ? native.plays > 0 : native.starts > 0, 'zero visual opacity does not mute the soundtrack');
+    a.sync(3, true, 20, true, { gain: .25, pan: -1 }); await flush(); near(native.volume, .0625);
+    assert.equal(state.downloads, 0, 'spatial gain preserves streaming');
+    a.sync(3, false, 20, true, { gain: .25, pan: -1 }); await flush();
+    assert.ok(kind === 'audio' ? native.paused : native.volume === 0, 'pause remains silent after spatial updates');
+    a.dispose();
+  }
   {
     const state = platform(); const a = await createSceneSurface(instance({ media: { ...settings, loop: true, playbackRate: 2 } }), resource('audio'));
     a.sync(7, true, 20); await flush(); near(a.audio.sourceTime, 4); near(state.audio[0].playbackRate, 2); a.dispose();
@@ -144,6 +158,6 @@ async function main() {
     const state = platform(); const a = await createSceneSurface({ id: 'text', text: { content: 'AB\nCD', fontSize: 1, width: 2, align: 'left', color: '#ffffff' } });
     assert.equal(state.audio.length, 0); assert.equal(a.materials[0].depthWrite, false); a.dispose();
   }
-  console.log('scene media: incremental MP4 metadata, native streaming, silent lookahead, trim/rate/fades/seek, cancellation and teardown passed');
+  console.log('scene media: incremental MP4 metadata, streaming, silent lookahead, volume keyframes/spatial gain independent of opacity, trim/rate/fades/seek, cancellation and teardown passed');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

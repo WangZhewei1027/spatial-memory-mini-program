@@ -538,6 +538,58 @@ async function main() {
     console.log("PASS schema 7 absolute cues, model/text fades, independent materials, native sync, seeking and async failure cleanup");
   }
 
+  // Schema 8 samples visual automation and positions sound in placed, animated world space.
+  {
+    const key = (time, value) => ({ time, value, handles: [0, 0, 1, 1], connectedRight: true });
+    const base = { position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], animation: null };
+    const manifest = compositionManifest({ durationSeconds: 8, instances: [
+      { ...base, id: "model", asset: "dancer", opacity: .1, tracks: { opacity: [key(0, .2), key(4, .8)] } },
+      { ...base, id: "sound", asset: "music", parent: "group", tracks: { "position.x": [key(0, 1), key(4, 3)], volume: [key(0, 1), key(4, .2)] },
+        media: { trimStartSeconds: 0, trimEndSeconds: null, playbackRate: 1, volume: .8, muted: false, loop: false,
+          spatial: { enabled: true, refDistance: 1, maxDistance: 100, rolloffFactor: 1 } } },
+    ] });
+    manifest.schemaVersion = 8;
+    manifest.content.groups = [{ id: "group", name: "Group", position: [1, 0, 0], rotation: [0, 0, 0], scale: [2, 2, 2] }];
+    manifest.content.assets.music = { assetId: "music" }; manifest.resources.music = { kind: "audio", url: "fixture.mp3" };
+    const camera = new THREE.PerspectiveCamera(); camera.position.set(10, 0, -1);
+    const calls = [], cache = fakeCache(THREE);
+    const player = createCompositionPlayer(manifest, { modelCache: cache, getListenerCamera: () => camera,
+      surfaceFactory: async () => ({ object: new THREE.Group(), materials: [], sync(...args) { calls.push(args); }, dispose() {} }),
+    });
+    await player.load(); assert.equal(player.state, "ready");
+    player.root.position.set(10, 0, 0); player.root.rotation.y = Math.PI / 2;
+    player.seek(2);
+    near(player.instances[0].materials[0].material.opacity, .5, "model opacity interpolates at the shared playhead");
+    near(calls.at(-1)[4].gain, .25, "world-space source includes placement, group scale and animated position");
+    near(calls.at(-1)[4].pan, 0, "sound in front is centered");
+    camera.position.set(6, 0, -5); player.update(0);
+    near(calls.at(-1)[4].gain, .25); near(calls.at(-1)[4].pan, 1, "sound on the camera right has positive pan");
+    assert.equal(player.time, 2); assert.equal(player.state, "paused"); assert.equal(calls.at(-1)[1], false, "a zero-delta listener refresh stays paused");
+    camera.rotation.y = Math.PI; player.update(.1);
+    near(calls.at(-1)[4].pan, -1, "turning the listener reverses relative sides");
+    assert.equal(player.time, 2, "positive frame deltas do not advance a paused scene");
+    player.play(); camera.position.set(2, 0, -5); player.update(0);
+    assert.ok(calls.at(-1)[4].gain < .13, "moving the phone updates attenuation during playback");
+    assert.equal(player.time, 2); assert.equal(calls.at(-1)[1], true, "zero-delta camera refresh retains playback");
+    player.dispose(); assert.equal(cache.stats.live, 0);
+    const invalid = [
+      data => { data.schemaVersion = 7; },
+      data => { data.content.instances[0].opacity = -1; },
+      data => { data.content.instances[0].tracks.opacity[0].value = 2; },
+      data => { data.content.instances[0].tracks.volume = [key(0, .5)]; },
+      data => { data.content.groups[0].tracks = { opacity: [key(0, .5)] }; },
+      data => { data.content.instances[1].media.spatial.maxDistance = .5; },
+      data => { data.content.instances[1].media.spatial.refDistance = 0; },
+      data => { data.content.instances[1].media.spatial.rolloffFactor = Infinity; },
+    ];
+    for (const change of invalid) {
+      const broken = structuredClone(manifest); change(broken);
+      const invalidPlayer = createCompositionPlayer(broken, { modelCache: cache, surfaceFactory: async () => { throw new Error("validation must happen before native allocation"); } });
+      await invalidPlayer.load(); assert.equal(invalidPlayer.state, "error"); assert.equal(invalidPlayer.diagnostics.kind, "protocol"); invalidPlayer.dispose();
+    }
+    console.log("PASS schema 8 opacity/volume validation, animated world-space sources and camera-relative spatial audio");
+  }
+
   // Bad external hierarchy/media data is refused before any resource/native operation.
   {
     const basic = { id: "text", position: [0, 0, 0], rotation: [0, 0, 0], scale: [1, 1, 1], animation: null,

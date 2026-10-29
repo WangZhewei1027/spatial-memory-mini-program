@@ -80,7 +80,7 @@ Page({
       const manifest = await this.readManifest();
       if (this._dead || generation !== this._generation) return;
       if (!manifest.content?.instances?.length) throw new Error("场景为空");
-      const player = this._player = createCompositionPlayer(manifest, { modelCache: this._cache, canvas: this._canvas });
+      const player = this._player = createCompositionPlayer(manifest, { modelCache: this._cache, canvas: this._canvas, getListenerCamera: () => this._camera });
       await player.load();
       if (this._dead || generation !== this._generation) { player.dispose(); return; }
       if (player.state !== "ready") throw new Error(player.diagnostics?.message || "场景内容加载失败");
@@ -88,6 +88,7 @@ Page({
       // Reload after disposal check to leave a real, interactive render for inspection.
       const preview = this._player = createCompositionPlayer(manifest, {
         modelCache: this._cache, canvas: this._canvas,
+        getListenerCamera: () => this._camera,
         onState: (state, message, current) => {
           if (state === "error" && !this._dead && generation === this._generation && this._player === current) {
             this.clearScene(); this.fail(new Error(message));

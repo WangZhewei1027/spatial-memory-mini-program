@@ -1,6 +1,6 @@
 const { THREE } = require("../three-runtime/runtime");
 const { loadTexture, disposeTree } = require("../three-runtime/resources");
-const { samplePresentation, mediaTime } = require("./vendor/scene-core");
+const { sampleFade, sampleVolume, mediaTime } = require("./vendor/scene-core");
 const { createSceneMediaContext, createAudioPlayback } = require("./media-audio");
 const { createVideoPlayback } = require("./media-video");
 const { createVideoSoundtrack } = require("./media-video-audio");
@@ -74,13 +74,15 @@ async function createSceneSurface(instance, resource, options = {}) {
   }
   function syncMedia() {
     if (!latest || disposed) return;
-    const { time, playing, sceneDuration } = latest;
-    const presentation = samplePresentation(instance, time, sceneDuration);
+    const { time, playing, sceneDuration, spatial } = latest;
+    const presentation = sampleFade(instance, time, sceneDuration);
     const duration = video?.duration ?? audio?.duration;
     const sourceTime = mediaTime(presentation.visible ? time : 0, settings, instance.timing, duration);
     const end = Math.min(duration ?? Infinity, settings.trimEndSeconds === null ? Infinity : settings.trimEndSeconds);
     const shouldPlay = playing && presentation.visible && (settings.loop || sourceTime < end);
-    audio?.sync(sourceTime, shouldPlay, settings.volume * presentation.opacity);
+    // Visual opacity is independent from soundtrack volume. Native streaming
+    // audio exposes gain only; keep streaming instead of downloading PCM to pan.
+    audio?.sync(sourceTime, shouldPlay, sampleVolume(instance, time) * presentation.opacity * (spatial?.gain ?? 1));
     video?.sync(sourceTime, shouldPlay, duration);
   }
   function prepare() {
@@ -126,9 +128,9 @@ async function createSceneSurface(instance, resource, options = {}) {
     return {
       object, materials,
       get audio() { return audio; }, get video() { return video; },
-      sync(time, playing, sceneDuration, prepared = true) {
+      sync(time, playing, sceneDuration, prepared = true, spatial) {
         if (disposed) return;
-        latest = { time, playing, sceneDuration };
+        latest = { time, playing, sceneDuration, spatial };
         if (!prepared) {
           mediaGeneration++; cancelPending(); audio?.dispose(); video?.dispose(); audio = video = null; preparing = null;
           return;

@@ -5,11 +5,12 @@ const { createCompositionPlayer } = require("../../../lib/scene-runtime/composit
 // One scene placement occupies one queue slot; all children share its lifetime.
 module.exports = {
   async _loadScenePlayer(asset, manifest) {
-    if ((manifest?.schemaVersion !== 4 && manifest?.schemaVersion !== 5 && manifest?.schemaVersion !== 7) || manifest.assetId !== asset.id || manifest.content?.kind !== "composition")
+    if (![4, 5, 7, 8].includes(manifest?.schemaVersion) || manifest.assetId !== asset.id || manifest.content?.kind !== "composition")
       throw new Error("不支持的场景内容");
     if (manifest.content.instances?.length === 0) return null;
     const player = createCompositionPlayer(manifest, {
       modelCache: this._modelCache, canvas: this._canvas,
+      getListenerCamera: () => this.getCamTransform(),
       onState: (state, message, current) => this._scenePlayerState(asset, state, message, current),
     });
     try {

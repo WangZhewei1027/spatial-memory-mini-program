@@ -44,7 +44,7 @@ function verifyScenePlayer(player, manifest, cache) {
       assert(near(entry.action.time, 0), `${entry.id}：延迟开始前保持首帧`);
     }
   }
-  if (manifest.schemaVersion === 7) {
+  if (manifest.schemaVersion >= 7) {
     player.pause();
     for (const entry of player.instances) {
       if (!entry.inst.timing) continue;
