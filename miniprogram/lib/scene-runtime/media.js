@@ -2,7 +2,8 @@ const { THREE } = require("../three-runtime/runtime");
 const { loadTexture, disposeTree } = require("../three-runtime/resources");
 const { samplePresentation, mediaTime } = require("./vendor/scene-core");
 const { createSceneMediaContext, createAudioPlayback } = require("./media-audio");
-const { createVideoPlayback, inspectSoundtrack } = require("./media-video");
+const { createVideoPlayback } = require("./media-video");
+const { createVideoSoundtrack } = require("./media-video-audio");
 
 const DEFAULT_MEDIA = { trimStartSeconds: 0, trimEndSeconds: null, playbackRate: 1, volume: 1, muted: false, loop: false };
 
@@ -44,7 +45,10 @@ async function createSceneSurface(instance, resource, options = {}) {
   const object = new THREE.Group(), materials = [];
   const kind = instance.text ? "text" : resource?.kind;
   const settings = { ...DEFAULT_MEDIA, ...instance.media };
-  let audio = null, video = null, disposed = false;
+  let audio = null, video = null, disposed = false, mediaGeneration = 0, preparing = null, latest = null;
+  let videoMaterial, resizeVideo;
+  const pendingCancels = new Set();
+  function cancelPending() { for (const cancel of pendingCancels) cancel(); pendingCancels.clear(); }
   const ownsContext = !options.mediaContext;
   const mediaContext = options.mediaContext || createSceneMediaContext();
   const unregister = mediaContext.onDispose(dispose);
@@ -63,10 +67,44 @@ async function createSceneSurface(instance, resource, options = {}) {
   }
   function dispose() {
     if (disposed) return;
-    disposed = true; audio?.dispose(); video?.dispose();
+    disposed = true; mediaGeneration++; cancelPending(); audio?.dispose(); video?.dispose();
     unregister();
     disposeTree(object); object.clear();
     if (ownsContext) mediaContext.dispose();
+  }
+  function syncMedia() {
+    if (!latest || disposed) return;
+    const { time, playing, sceneDuration } = latest;
+    const presentation = samplePresentation(instance, time, sceneDuration);
+    const duration = video?.duration ?? audio?.duration;
+    const sourceTime = mediaTime(presentation.visible ? time : 0, settings, instance.timing, duration);
+    const end = Math.min(duration ?? Infinity, settings.trimEndSeconds === null ? Infinity : settings.trimEndSeconds);
+    const shouldPlay = playing && presentation.visible && (settings.loop || sourceTime < end);
+    audio?.sync(sourceTime, shouldPlay, settings.volume * presentation.opacity);
+    video?.sync(sourceTime, shouldPlay, duration);
+  }
+  function prepare() {
+    const generation = ++mediaGeneration;
+    const localContext = { ...context, isCancelled: () => generation !== mediaGeneration || context.isCancelled(),
+      onCancel(cleanup) { pendingCancels.add(cleanup); return () => pendingCancels.delete(cleanup); },
+    };
+    preparing = (async () => {
+      let nextAudio, nextVideo;
+      try {
+        if (kind === "audio") nextAudio = await createAudioPlayback(resource.url, settings, localContext);
+        else {
+          nextVideo = await createVideoPlayback(resource.url, videoMaterial, resizeVideo, localContext);
+          if (!settings.muted && nextVideo.hasAudio) nextAudio = settings.playbackRate === 1 && nextVideo.path === resource.url
+            ? await createVideoSoundtrack(nextVideo.path, localContext)
+            : await createAudioPlayback(nextVideo.path, settings, { ...localContext, forceBuffered: true });
+        }
+        if (localContext.isCancelled()) { nextAudio?.dispose(); nextVideo?.dispose(); return; }
+        audio = nextAudio || null; video = nextVideo || null; syncMedia();
+      } catch (error) {
+        nextAudio?.dispose(); nextVideo?.dispose();
+        if (!localContext.isCancelled()) context.onError(error);
+      } finally { if (generation === mediaGeneration) preparing = null; }
+    })();
   }
   try {
     if (kind === "text") {
@@ -79,26 +117,24 @@ async function createSceneSurface(instance, resource, options = {}) {
       const resize = plane(new THREE.MeshBasicMaterial({ map: texture, transparent: true, side: THREE.DoubleSide, toneMapped: false }), 2, 1.5);
       resize(texture.image.width, texture.image.height);
     } else if (kind === "audio") {
-      audio = await createAudioPlayback(resource.url, settings, context);
+      // Native sources are allocated only when their timeline preload window opens.
     } else if (kind === "video") {
-      const material = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, toneMapped: false });
-      const resize = plane(material, 2, 1.125);
-      video = await createVideoPlayback(resource.url, material, resize, context);
-      if (!settings.muted && await inspectSoundtrack(video.path)) audio = await createAudioPlayback(video.path, settings, context);
+      videoMaterial = new THREE.MeshBasicMaterial({ side: THREE.DoubleSide, toneMapped: false });
+      resizeVideo = plane(videoMaterial, 2, 1.125);
     } else throw new Error(`不支持的演出素材类型: ${kind}`);
     if (context.isCancelled()) throw new Error("演出素材加载已取消");
     return {
       object, materials,
       get audio() { return audio; }, get video() { return video; },
-      sync(time, playing, sceneDuration) {
+      sync(time, playing, sceneDuration, prepared = true) {
         if (disposed) return;
-        const presentation = samplePresentation(instance, time, sceneDuration);
-        const duration = video?.duration ?? audio?.duration;
-        const sourceTime = mediaTime(time, settings, instance.timing, duration);
-        const end = Math.min(duration ?? Infinity, settings.trimEndSeconds === null ? Infinity : settings.trimEndSeconds);
-        const shouldPlay = playing && presentation.visible && (settings.loop || sourceTime < end);
-        audio?.sync(sourceTime, shouldPlay, settings.volume * presentation.opacity);
-        video?.sync(sourceTime, shouldPlay, duration);
+        latest = { time, playing, sceneDuration };
+        if (!prepared) {
+          mediaGeneration++; cancelPending(); audio?.dispose(); video?.dispose(); audio = video = null; preparing = null;
+          return;
+        }
+        if ((kind === "audio" || kind === "video") && !audio && !video && !preparing) prepare();
+        syncMedia();
       },
       dispose,
     };

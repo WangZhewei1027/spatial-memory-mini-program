@@ -1,213 +1,149 @@
-const assert = require("node:assert/strict");
-const { createSceneSurface, createSceneMediaContext } = require("../miniprogram/lib/scene-runtime/media");
-const { doubleSpeedBuffer } = require("../miniprogram/lib/scene-runtime/media-audio");
-const flush = () => new Promise(resolve => setImmediate(resolve));
-function deferred() { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; }
-function near(actual, expected) { assert.ok(Math.abs(actual - expected) < 1e-8, `${actual} != ${expected}`); }
-function buffer(channels = 2, length = 200, sampleRate = 10) {
-  const data = Array.from({ length: channels }, () => Float32Array.from({ length }, (_, i) => i / length));
-  return { numberOfChannels: channels, length, sampleRate, duration: length / sampleRate, getChannelData: channel => data[channel] };
+const assert = require('node:assert/strict');
+const { createSceneSurface, createSceneMediaContext } = require('../miniprogram/lib/scene-runtime/media');
+const { inspectMoov, inspectRemoteMp4 } = require('../miniprogram/lib/scene-runtime/media-mp4');
+const flush = async () => { for (let i = 0; i < 60; i++) await Promise.resolve(); };
+const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-6, `${a} != ${b}`);
+function box(kind, ...data) { const payload = Buffer.concat(data); const b = Buffer.alloc(8 + payload.length); b.writeUInt32BE(b.length); b.write(kind, 4); payload.copy(b, 8); return b; }
+function mp4(sound = true, tail = false) {
+  const mvhd = Buffer.alloc(20); mvhd.writeUInt32BE(1000, 12); mvhd.writeUInt32BE(20000, 16);
+  const hdlr = Buffer.alloc(12); hdlr.write(sound ? 'soun' : 'vide', 8);
+  const moov = box('moov', box('mvhd', mvhd), box('trak', box('mdia', box('hdlr', hdlr))));
+  const ftyp = box('ftyp', Buffer.alloc(8)), mdat = box('mdat', Buffer.alloc(100));
+  return Buffer.concat(tail ? [ftyp, mdat, moov] : [ftyp, moov, mdat]);
 }
-function platform(options = {}) {
-  const state = { contexts: [], decoders: [], removed: [], canvases: [], containers: [] };
+function platform({ sound = true, tail = false, delayedSeek = false, delayedRange = false, legacy = false, delayedStart = false } = {}) {
+  const bytes = mp4(sound, tail), state = { ranges: [], audio: [], decoders: [], players: [], downloads: 0, aborts: 0 };
   global.wx = {
-    downloadFile({ url, success }) { success({ statusCode: 200, tempFilePath: `/tmp/${url.split('/').pop()}` }); },
-    getFileSystemManager() { return { readFile({ success }) { success({ data: new ArrayBuffer(8) }); }, unlink({ filePath }) { state.removed.push(filePath); } }; },
-    getVideoInfo({ success }) { success({ width: 1920, height: 1080, duration: 20, fps: 30 }); },
-    createMediaContainer() {
-      const container = { destroyed: 0, extractDataSource({ success }) { success({ tracks: options.silent ? [{ kind: "video" }] : [{ kind: "video" }, { kind: "audio" }] }); }, destroy() { this.destroyed++; } };
-      state.containers.push(container); return container;
-    },
-    createWebAudioContext() {
-      const context = {
-        currentTime: 0, state: options.suspended ? "suspended" : "running", destination: {}, sources: [], gains: [], closed: 0, decodes: 0,
-        createBuffer: buffer,
-        decodeAudioData(bytes, success, fail) {
-          this.decodes++;
-          if (options.decode) options.decode.promise.then(success, fail);
-          else if (options.codecError) fail(new Error("unsupported codec"));
-          else success(buffer());
-        },
-        createBufferSource() {
-          const source = { playbackRate: { value: 1 }, starts: [], stops: [], disconnected: 0,
-            connect(target) { this.target = target; }, start(...args) { this.starts.push(args); }, stop(...args) { this.stops.push(args); }, disconnect() { this.disconnected++; } };
-          this.sources.push(source); return source;
-        },
-        createGain() { const gain = { gain: { value: 1 }, disconnected: 0, connect() {}, disconnect() { this.disconnected++; } }; this.gains.push(gain); return gain; },
-        resume() { if (options.resume) return options.resume.promise.then(() => { this.state = "running"; }); this.state = "running"; return Promise.resolve(); },
-        close() { this.closed++; return Promise.resolve(); },
+    request({ header, success }) { const [, start, end] = /bytes=(\d+)-(\d+)/.exec(header.Range); state.ranges.push([+start, +end]); if (!delayedRange) queueMicrotask(() => {
+      const b = bytes.subarray(+start, +end + 1); success({ statusCode: legacy ? 200 : 206, data: b.buffer.slice(b.byteOffset, b.byteOffset + b.length) });
+    }); return { abort() { state.aborts++; } }; },
+    downloadFile({ success }) { state.downloads++; if (legacy) { queueMicrotask(() => success({ statusCode: 200, tempFilePath: '/tmp/legacy.webm' })); return { abort() {} }; } throw new Error('streaming must not download the whole file'); },
+    getVideoInfo({ success }) { success({ width: 8, height: 4, duration: 20, fps: 30 }); },
+    createMediaContainer() { return { extractDataSource({ success }) { success({ tracks: [] }); }, destroy() {} }; },
+    getFileSystemManager() { return { unlink() {} }; },
+    createInnerAudioContext(options) {
+      const events = new Map();
+      const audio = { options, currentTime: 0, duration: 20, paused: true, plays: 0, destroys: 0, seeks: [], volume: 0,
+        emit(name, value) { events.get(name)?.(value); },
+        set src(value) { this.url = value; this.currentTime = this.startTime; queueMicrotask(() => this.emit('Canplay')); },
+        play() { this.plays++; this.paused = false; }, pause() { this.paused = true; }, destroy() { this.destroys++; },
+        seek(time) { this.seeks.push(time); if (!delayedSeek) { this.currentTime = time; queueMicrotask(() => this.emit('Seeked')); } },
       };
-      state.contexts.push(context); return context;
+      for (const name of ['Canplay', 'Seeked', 'Ended', 'Error']) { audio[`on${name}`] = cb => events.set(name, cb); audio[`off${name}`] = () => events.delete(name); }
+      state.audio.push(audio); return audio;
     },
     createVideoDecoder() {
-      const decoder = { seeks: [], stopped: 0, removed: 0, frame: null,
-        start(args) { this.args = args; return options.start?.promise || Promise.resolve({ width: 1920, height: 1080 }); },
-        seek(ms) {
-          this.seeks.push(ms);
-          const done = () => { this.frame = { width: 2, height: 1, pkPts: ms * 1000, data: Uint8Array.from([Math.round(ms / 1000), 0, 0, 255, 0, 0, 0, 255]).buffer }; };
-          if (options.seek) return options.seek(this, ms).then(done);
-          done(); return Promise.resolve();
-        },
-        getFrameData() { const frame = this.frame; this.frame = null; return frame; },
-        stop() { this.stopped++; return Promise.resolve(); }, remove() { this.removed++; return Promise.resolve(); },
-      };
-      state.decoders.push(decoder); return decoder;
+      const decoder = { seeks: [], removed: 0, stopped: 0, pending: null,
+        start(args) { this.args = args; if (delayedStart) return new Promise(resolve => { this.completeStart = () => resolve({ width: 8, height: 4 }); }); return Promise.resolve({ width: 8, height: 4 }); },
+        seek(ms) { this.seeks.push(ms); this.pending = { width: 2, height: 1, data: new Uint8Array(8).fill(Math.round(ms / 1000)).buffer }; return Promise.resolve(); },
+        getFrameData() { const frame = this.pending; this.pending = null; return frame; }, stop() { this.stopped++; return Promise.resolve(); }, remove() { this.removed++; return Promise.resolve(); },
+      }; state.decoders.push(decoder); return decoder;
+    },
+    createMediaAudioPlayer() {
+      const player = { volume: 0, starts: 0, stops: 0, destroyed: 0, addAudioSource(decoder) { this.decoder = decoder; return Promise.resolve(); },
+        removeAudioSource() { return Promise.resolve(); }, start() { this.starts++; return Promise.resolve(); }, stop() { this.stops++; return Promise.resolve(); }, destroy() { this.destroyed++; return Promise.resolve(); } };
+      state.players.push(player); return player;
     },
     createOffscreenCanvas({ width, height }) {
-      const canvas = { width, height, calls: [] };
-      const context = { font: "", measureText(text) { return { width: Array.from(text).length * 50 }; }, scale(...args) { canvas.calls.push(["scale", ...args]); },
-        fillRect(...args) { canvas.calls.push(["rect", ...args]); }, fillText(...args) { canvas.calls.push(["text", ...args]); },
-        getImageData(x, y, w, h) { canvas.raster = { width: w, height: h }; return { data: new Uint8ClampedArray(w * h * 4) }; } };
-      canvas.getContext = () => context; state.canvases.push(canvas); return canvas;
+      const canvas = { width, height }; const context = { measureText: text => ({ width: text.length * 50 }), scale() {}, fillRect() {}, fillText() {}, getImageData: (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4) }) }; canvas.getContext = () => context; return canvas;
     },
-  };
-  state.canvas = { createImage() { return { width: 300, height: 200, set src(value) { this.path = value; if (this.onload) queueMicrotask(() => this.onload?.()); } }; } };
-  return state;
+  }; return state;
 }
-const media = { trimStartSeconds: 2, trimEndSeconds: 10, playbackRate: 1, volume: .8, muted: false, loop: false };
-const instance = (overrides = {}) => ({ id: "cue", asset: "asset", timing: { startSeconds: 2, endSeconds: 12, fadeInSeconds: 2, fadeOutSeconds: 2 }, media, ...overrides });
-const resource = kind => ({ kind, url: `https://assets.example/${kind}.bin` });
-
+const settings = { trimStartSeconds: 2, trimEndSeconds: 10, playbackRate: 1, volume: .8, muted: false, loop: false };
+const instance = overrides => ({ id: 'cue', asset: 'asset', timing: { startSeconds: 2, endSeconds: 12, fadeInSeconds: 2, fadeOutSeconds: 2 }, media: settings, ...overrides });
+const resource = kind => ({ kind, url: `https://assets.example/${kind}.${kind === 'video' ? 'mp4' : 'mp3'}` });
 async function main() {
+  for (const tail of [false, true]) {
+    const state = platform({ tail }); const info = await inspectRemoteMp4(resource('video').url);
+    assert.deepEqual(info, { duration: 20, hasAudio: true }); assert.equal(state.downloads, 0);
+    assert.ok(state.ranges.reduce((sum, [a, b]) => sum + b - a + 1, 0) < 200, 'only headers and moov are fetched');
+  }
+  assert.throws(() => inspectMoov(Uint8Array.from([0,0,0,2,109,111,111,118]).buffer), /无效/);
   {
     const state = platform(), owner = createSceneMediaContext();
-    const text = { content: "ABCD\nEF", fontSize: 1, width: 2, align: "right", color: "#ffffff", backgroundColor: "#112233" };
-    const surface = await createSceneSurface({ id: "text", text }, undefined, { mediaContext: owner });
-    assert.equal(state.contexts.length, 0, "text must not allocate audio hardware");
-    assert.equal(state.canvases[0].raster.width, 192);
-    assert.equal(state.canvases[0].raster.height, 437);
-    assert.deepEqual(state.canvases[0].calls.filter(c => c[0] === "text").map(c => c.slice(1, 3)), [["AB", 168], ["CD", 168], ["EF", 168]]);
-    near(surface.object.children[0].scale.y, (3 * 129.6 + 48) / 192 * 2);
-    near(surface.object.children[0].position.y, surface.object.children[0].scale.y / 2);
-    assert.equal(surface.materials[0].depthWrite, false);
-    let disposed = 0; surface.materials[0].map.addEventListener("dispose", () => disposed++);
-    surface.dispose(); surface.dispose(); assert.equal(disposed, 1); owner.dispose();
+    const a = await createSceneSurface(instance(), resource('audio'), { mediaContext: owner });
+    assert.equal(state.audio.length, 0, 'surface construction does not start network or allocate decoders');
+    a.sync(0, true, 20, false); await flush(); assert.equal(state.audio.length, 0);
+    a.sync(1, true, 20, true); await flush(); const native = state.audio[0];
+    assert.deepEqual(native.options, { useWebAudioImplement: false }); assert.equal(native.url, resource('audio').url);
+    assert.equal(native.plays, 0, 'preloading is silent');
+    a.sync(3, true, 20, true); await flush(); near(a.audio.sourceTime, 3); near(native.volume, .4); assert.equal(native.paused, false);
+    native.currentTime = 3.1; a.sync(3.1, true, 20, true); assert.equal(native.seeks.length, 1, 'continuous playback does not keep seeking');
+    a.sync(7, false, 20, true); await flush(); near(native.currentTime, 7); assert.equal(native.paused, true);
+    a.sync(11, true, 20, true); await flush(); near(native.volume, .4); assert.equal(native.paused, true, 'trimmed EOF stays silent');
+    a.sync(15, true, 20, false); assert.equal(native.destroys, 1); assert.equal(a.audio, null);
+    a.sync(3, true, 20, true); await flush(); assert.equal(state.audio.length, 2, 'scrubbing back creates a fresh source');
+    owner.dispose(); assert.equal(state.audio[1].destroys, 1); a.dispose(); assert.equal(state.downloads, 0);
   }
   {
-    const state = platform();
-    const surface = await createSceneSurface(instance(), resource("image"), { canvas: state.canvas });
-    near(surface.object.children[0].scale.x, 2); near(surface.object.children[0].scale.y, 4 / 3);
-    assert.deepEqual(state.removed, ["/tmp/image.bin"]);
-    assert.equal(state.contexts.length, 0); surface.dispose();
+    const state = platform({ delayedSeek: true }); const a = await createSceneSurface(instance(), resource('audio'));
+    a.sync(3, true, 20); await flush(); const native = state.audio[0];
+    a.sync(7, false, 20); native.currentTime = 3; native.emit('Seeked'); await flush();
+    assert.deepEqual(native.seeks, [3, 7]); native.currentTime = 7; native.emit('Seeked');
+    assert.equal(native.plays, 0, 'late seek cannot undo a pause'); a.dispose(); native.emit('Canplay'); assert.equal(native.destroys, 1);
   }
   {
-    const state = platform(), owner = createSceneMediaContext();
-    const a = await createSceneSurface(instance(), resource("audio"), { mediaContext: owner });
-    const b = await createSceneSurface(instance(), resource("audio"), { mediaContext: owner });
-    const native = state.contexts[0];
-    assert.equal(state.contexts.length, 1); assert.equal(native.decodes, 1);
-    assert.equal(native.sources.length, 0, "loading must never produce sound");
-    a.sync(1, true, 20); assert.equal(native.sources.length, 0, "before cue start");
-    a.sync(3, true, 20); near(a.audio.sourceTime, 3); near(native.gains[0].gain.value, .4);
-    assert.deepEqual(native.sources[0].starts, [[0, 3]]);
-    assert.deepEqual(native.sources[0].stops, [[7]], "trimmed end scheduled in audio-clock seconds");
-    native.currentTime = .1; a.sync(3.1, true, 20); assert.equal(native.sources.length, 1, "continuous playback must retain source");
-    a.sync(7, true, 20); assert.equal(native.sources.length, 2); near(native.sources[1].starts[0][1], 7);
-    a.sync(11, true, 20); near(native.gains[0].gain.value, .4); assert.equal(native.sources[1].stops.at(-1).length, 0, "clip end stops immediately");
-    a.sync(4, false, 20); near(a.audio.sourceTime, 4);
-    a.sync(4, true, 20); assert.equal(native.sources.length, 3);
-    a.sync(12, true, 20); near(native.gains[0].gain.value, 0);
-    owner.dispose(); assert.equal(native.closed, 1); assert.equal(a.object.children.length, 0); b.dispose();
+    const state = platform(); const a = await createSceneSurface(instance({ media: { ...settings, loop: true, playbackRate: 2 } }), resource('audio'));
+    a.sync(7, true, 20); await flush(); near(a.audio.sourceTime, 4); near(state.audio[0].playbackRate, 2); a.dispose();
   }
   {
-    const state = platform();
-    const a = await createSceneSurface(instance({ media: { ...media, playbackRate: 4, loop: true } }), resource("audio"));
-    a.sync(3, true, 20);
-    const node = state.contexts[0].sources[0];
-    near(a.audio.sourceTime, 6); near(node.playbackRate.value, 2); near(node.starts[0][1], 3);
-    near(node.loopStart, 1); near(node.loopEnd, 5); near(node.buffer.duration, 10);
-    state.contexts[0].currentTime = 1; a.sync(4, true, 20); near(a.audio.sourceTime, 2);
-    assert.equal(state.contexts[0].sources.length, 1, "native trimmed loop follows the same source clock");
-    a.dispose();
-    const odd = doubleSpeedBuffer({ createBuffer: buffer }, buffer(1, 5, 10));
-    assert.equal(odd.length, 3); assert.ok([...odd.getChannelData(0)].every(Number.isFinite));
+    const state = platform({ delayedSeek: true }); const a = await createSceneSurface(instance(), resource('audio'));
+    a.sync(3, true, 20); await flush(); const native = state.audio[0];
+    a.sync(4, true, 20); native.currentTime = 3; native.emit('Seeked'); await flush();
+    assert.equal(native.plays, 1, 'slow seek starts playback even when timeline advanced >200ms');
+    assert.equal(native.seeks.length, 1, 'initial seek does not chase a moving timeline forever'); a.dispose();
   }
   {
-    const resume = deferred(), state = platform({ suspended: true, resume });
-    const a = await createSceneSurface(instance(), resource("audio"));
-    a.sync(3, true, 20); a.sync(8, false, 20); resume.resolve(); await flush();
-    assert.equal(state.contexts[0].sources.length, 0, "late resume cannot undo pause");
-    a.sync(8, true, 20); assert.equal(state.contexts[0].sources.length, 1); a.dispose();
+    const state = platform({ delayedRange: true }); const a = await createSceneSurface(instance(), resource('video'));
+    a.sync(3, true, 20); await flush(); assert.equal(state.ranges.length, 1);
+    a.sync(15, true, 20, false); await flush(); assert.equal(state.aborts, 1, 'leaving window aborts pending metadata immediately');
+    assert.equal(state.decoders.length, 0); a.dispose();
   }
   {
-    const resume = deferred(), state = platform({ suspended: true, resume });
-    const a = await createSceneSurface(instance(), resource("audio"));
-    a.sync(3, true, 20); a.dispose(); resume.resolve(); await flush();
-    assert.equal(state.contexts[0].sources.length, 0, "late resume cannot resurrect disposed sound");
+    const state = platform({ delayedStart: true }); const a = await createSceneSurface(instance(), resource('video'));
+    a.sync(3, true, 20); await flush(); const native = state.decoders[0]; assert.ok(native.completeStart);
+    a.sync(15, true, 20, false); assert.equal(native.removed, 1, 'window release removes decoder even if native start is pending');
+    native.completeStart(); await flush(); assert.ok(native.removed >= 1); assert.equal(state.players.length, 0); a.dispose();
   }
   {
-    const decode = deferred(), state = platform({ decode }), owner = createSceneMediaContext();
-    const loading = createSceneSurface(instance(), resource("audio"), { mediaContext: owner });
-    await flush(); owner.dispose(); await assert.rejects(loading, /取消/);
-    decode.resolve(buffer()); await flush(); assert.equal(state.contexts[0].gains.length, 0);
+    const state = platform({ legacy: true }); const a = await createSceneSurface(instance(), resource('video'));
+    a.sync(3, true, 20); await flush(); assert.equal(state.downloads, 1, 'legacy non-Range container retains compatibility download');
+    assert.equal(state.decoders[0].args.source, '/tmp/legacy.webm'); a.dispose(); await flush();
   }
   {
-    const state = platform({ codecError: true });
-    await assert.rejects(createSceneSurface(instance(), resource("audio")), /音频解码失败.*unsupported codec/);
-    assert.equal(state.contexts[0].closed, 1);
+    const state = platform(); const a = await createSceneSurface(instance(), resource('video'));
+    a.sync(1, false, 20); await flush();
+    let resolveSeek; const decoder = state.decoders[1];
+    decoder.seek = ms => { decoder.seeks.push(ms); return new Promise(resolve => { resolveSeek = resolve; }); };
+    a.sync(3, true, 20); await flush(); a.sync(4, true, 20); resolveSeek(); await flush();
+    assert.equal(state.players[0].starts, 1, 'slow soundtrack seek must start rather than chase current timeline');
+    a.sync(4, false, 20); await flush(); resolveSeek(); await flush(); a.dispose(); await flush();
   }
-  {
-    const gates = [], state = platform({ silent: true, seek() { const gate = deferred(); gates.push(gate); return gate.promise; } });
-    const a = await createSceneSurface(instance(), resource("video"));
-    assert.equal(state.contexts.length, 0, "silent video must not require an audio codec");
-    const decoder = state.decoders[0];
-    assert.deepEqual(decoder.args, { source: "/tmp/video.bin", mode: 1, abortAudio: true });
-    a.sync(3, false, 20); a.sync(8, false, 20);
-    assert.deepEqual(decoder.seeks, [3000], "native seeks must never overlap");
-    gates[0].resolve(); await flush(); assert.deepEqual(decoder.seeks, [3000, 8000]);
-    gates[1].resolve(); await flush();
-    assert.equal(a.materials[0].map.image.data[0], 8, "late old seek must not replace the latest frame");
-    near(a.object.children[0].scale.y, 1); near(a.video.sourceTime, 8);
-    a.sync(4, false, 20); const texture = a.materials[0].map; let released = 0; texture.addEventListener("dispose", () => released++);
-    a.dispose(); assert.equal(released, 1); assert.equal(decoder.removed, 0, "pending seek owns decoder until settled");
-    gates[2].resolve(); await flush(); assert.equal(decoder.removed, 1); assert.equal(decoder.stopped, 1);
-    assert.deepEqual(state.removed, ["/tmp/video.bin"]);
-  }
-  {
-    const gates = [], state = platform({ silent: true, seek() { const gate = deferred(); gates.push(gate); return gate.promise; } });
-    const a = await createSceneSurface(instance({ timing: undefined, media: { ...media, trimStartSeconds: 0, trimEndSeconds: 20, playbackRate: 4, loop: true } }), resource("video"));
-    a.sync(0, true, 30);
-    // At 4x, 50ms of native seek latency means the requested source moves .2s.
-    // Completed frames must still be presented; rejecting each as stale starves video forever.
-    let version = 0;
-    for (let step = 1; step <= 10; step++) {
-      a.sync(step * .05, true, 30);
-      gates[step - 1].resolve();
-      await flush();
-      const texture = a.materials[0].map;
-      assert.ok(texture && texture.version > version, "slow continuous decoding must present every completed frame");
-      version = texture.version;
-      await new Promise(resolve => setTimeout(resolve, 2));
-      assert.equal(gates.length, step + 1, "completed frame schedules a single coalesced latest request");
-    }
-    a.dispose(); gates.at(-1).resolve(); await flush();
-    assert.equal(state.decoders[0].removed, 1);
-  }
-  {
-    const state = platform({ silent: true });
-    const a = await createSceneSurface(instance({ timing: undefined, media: { ...media, trimStartSeconds: 0, trimEndSeconds: null } }), resource("video"));
-    a.sync(20, false, 30); await flush();
-    near(a.video.sourceTime, 20);
-    near(state.decoders[0].seeks[0], (20 - 1 / 30) * 1000);
-    assert.ok(a.materials[0].map, "EOF must retain a decodable final frame"); a.dispose(); await flush();
-  }
-  {
-    const start = deferred(), state = platform({ start }), owner = createSceneMediaContext();
-    const loading = createSceneSurface(instance(), resource("video"), { mediaContext: owner });
-    await flush(); owner.dispose(); start.resolve({ width: 160, height: 90 });
-    await assert.rejects(loading, /取消/); await flush();
-    assert.equal(state.decoders[0].removed, 1); assert.equal(state.contexts.length, 0);
-  }
-  {
-    const state = platform(), errors = [];
-    const a = await createSceneSurface(instance(), resource("video"), { onError: error => errors.push(error) });
+  for (const sound of [true, false]) {
+    const state = platform({ sound }), owner = createSceneMediaContext();
+    const a = await createSceneSurface(instance(), resource('video'), { mediaContext: owner });
+    assert.equal(state.decoders.length, 0);
     a.sync(3, true, 20); await flush();
-    near(a.audio.sourceTime, a.video.sourceTime); near(state.contexts[0].gains[0].gain.value, .4);
-    state.decoders[0].seek = () => Promise.reject(new Error("decoder lost"));
-    a.sync(7, true, 20); await flush(); assert.match(errors[0].message, /decoder lost/);
-    assert.equal(state.contexts[0].sources.at(-1).stops.at(-1).length, 0, "decoder failure must silence its soundtrack");
-    assert.equal(state.contexts[0].closed, 1); a.dispose();
+    assert.equal(state.decoders[0].args.source, resource('video').url); assert.equal(state.downloads, 0);
+    near(a.video.sourceTime, 3); assert.ok(a.materials[0].map);
+    if (sound) {
+      assert.deepEqual(state.decoders[1].args, { source: resource('video').url, mode: 0, abortVideo: true });
+      near(state.players[0].volume, .4); assert.equal(state.players[0].starts, 1);
+      a.sync(7, false, 20); await flush(); near(state.players[0].volume, 0); near(a.audio.sourceTime, 7);
+      a.sync(8, true, 20); await flush(); assert.equal(state.players[0].starts, 2);
+    } else assert.equal(state.players.length, 0, 'silent MP4 allocates no soundtrack');
+    owner.dispose(); await flush(); assert.ok(state.decoders.every(d => d.removed === 1));
+    assert.ok(state.players.every(p => p.destroyed === 1)); a.dispose();
   }
-  console.log("scene media: text/image layout, cue volume, trim/rate/loop, async seek/resume and resource disposal passed");
+  {
+    const state = platform(), owner = createSceneMediaContext();
+    const a = await createSceneSurface(instance(), resource('video'), { mediaContext: owner }); a.sync(3, true, 20); owner.dispose(); await flush();
+    assert.ok(state.decoders.every(d => d.removed === 1)); assert.equal(state.players.length, 0, 'cancelled preload cannot start sound');
+  }
+  {
+    const state = platform(); const a = await createSceneSurface({ id: 'text', text: { content: 'AB\nCD', fontSize: 1, width: 2, align: 'left', color: '#ffffff' } });
+    assert.equal(state.audio.length, 0); assert.equal(a.materials[0].depthWrite, false); a.dispose();
+  }
+  console.log('scene media: incremental MP4 metadata, native streaming, silent lookahead, trim/rate/fades/seek, cancellation and teardown passed');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

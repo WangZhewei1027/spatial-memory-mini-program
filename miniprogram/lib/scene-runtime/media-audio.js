@@ -1,137 +1,58 @@
-const { readBytes } = require("../three-runtime/resources");
+const buffered = require('./media-audio-buffered');
 
-function failure(error, label) {
-  return new Error(`${label}: ${error?.message || error?.errMsg || String(error)}`);
-}
-function ignore(promise) { if (promise?.catch) promise.catch(() => {}); }
-
-// A performance shares one hardware context; text/image-only scenes create none.
-function createSceneMediaContext() {
-  let context = null, disposed = false;
-  const buffers = new Map(), cleanups = new Set(), pendingDecodes = new Set();
-  return {
-    get disposed() { return disposed; },
-    onDispose(cleanup) { cleanups.add(cleanup); return () => cleanups.delete(cleanup); },
-    getAudioContext() {
-      if (disposed) throw new Error("演出音频上下文已释放");
-      if (!context) {
-        if (typeof wx.createWebAudioContext !== "function") throw new Error("此微信版本不支持演出音频，请升级微信后重试");
-        context = wx.createWebAudioContext();
-      }
-      return context;
-    },
-    decode(url) {
-      if (!buffers.has(url)) buffers.set(url, (async () => {
-        const audio = this.getAudioContext(), bytes = await readBytes(url);
-        if (disposed) throw new Error("演出音频加载已取消");
-        const buffer = await new Promise((resolve, reject) => {
-          const cancel = error => finish(reject, error);
-          const timer = setTimeout(() => cancel(new Error("音频解码超时")), 15000);
-          function finish(callback, value) { clearTimeout(timer); pendingDecodes.delete(cancel); callback(value); }
-          pendingDecodes.add(cancel);
-          try {
-            const result = audio.decodeAudioData(bytes, value => finish(resolve, value), cancel);
-            if (result?.then) result.then(value => finish(resolve, value), cancel);
-          } catch (error) { cancel(error); }
-        });
-        if (disposed) throw new Error("演出音频加载已取消");
-        if (!(buffer?.duration > 0)) throw new Error("音频没有可播放的数据");
-        return buffer;
-      })().catch(error => { buffers.delete(url); throw failure(error, "音频解码失败"); }));
-      return buffers.get(url);
-    },
-    dispose() {
-      if (disposed) return;
-      disposed = true; buffers.clear();
-      for (const cleanup of cleanups) { try { cleanup(); } catch (_) {} }
-      cleanups.clear();
-      for (const cancel of pendingDecodes) cancel(new Error("演出音频加载已取消"));
-      pendingDecodes.clear();
-      if (context) { try { ignore(context.close()); } catch (_) {} context = null; }
-    },
-  };
-}
-
-// WeChat BufferSource.playbackRate is limited to 2. Resampling by two keeps the
-// schema's complete .1–4 range without asking native playback to clamp the rate.
-function doubleSpeedBuffer(context, buffer) {
-  const length = Math.max(1, Math.ceil(buffer.length / 2));
-  const result = context.createBuffer(buffer.numberOfChannels, length, buffer.sampleRate);
-  for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
-    const input = buffer.getChannelData(channel), output = result.getChannelData(channel);
-    for (let i = 0; i < length; i++) output[i] = (input[i * 2] + (input[Math.min(i * 2 + 1, input.length - 1)])) / 2;
+// Native media decoders consume the remote URL incrementally. WebAudio remains
+// a compatibility path for old scenes outside InnerAudioContext's .5–2 range.
+async function createAudioPlayback(url, settings, options) {
+  const extension = url.split(/[?#]/)[0].split("/").pop().match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
+  const legacyFormat = extension && !["mp3", "m4a", "aac", "wav"].includes(extension);
+  if (settings.playbackRate < .5 || settings.playbackRate > 2 || options.forceBuffered || legacyFormat) {
+    return buffered.createAudioPlayback(url, settings, options);
   }
-  return result;
-}
-
-async function createAudioPlayback(url, settings, { mediaContext, onError, isCancelled }) {
-  const context = mediaContext.getAudioContext();
-  const original = await mediaContext.decode(url);
-  if (isCancelled()) throw new Error("演出音频加载已取消");
-  const factor = settings.playbackRate > 2 ? 2 : 1;
-  let buffer = factor === 2 ? doubleSpeedBuffer(context, original) : original;
-  const gain = context.createGain(); gain.gain.value = 0; gain.connect(context.destination);
-  let disposed = false, source = null, generation = 0, pending = false;
-  const unregister = mediaContext.onDispose(dispose);
-  let offset = 0, startedAt = 0, desired = null;
-  const start = Math.min(original.duration, settings.trimStartSeconds);
-  const end = Math.max(start, Math.min(original.duration, settings.trimEndSeconds === null ? Infinity : settings.trimEndSeconds));
-  function stop() {
-    generation++; pending = false;
-    if (!source) return;
-    const previous = source; source = null; previous.onended = null;
-    try { previous.stop(); } catch (_) {}
-    try { previous.disconnect(); } catch (_) {}
-  }
-  function position() {
-    if (!source) return offset;
-    const local = Math.max(0, context.currentTime - startedAt) * settings.playbackRate;
-    return settings.loop && end > start ? start + ((offset - start + local) % (end - start)) : Math.min(end, offset + local);
-  }
-  function begin() {
-    if (disposed || !desired?.playing || pending || source || end <= start) return;
-    const request = ++generation;
-    function launch() {
-      if (disposed || isCancelled() || request !== generation || !desired?.playing) return;
-      pending = false;
-      try {
-        const node = context.createBufferSource();
-        node.buffer = buffer; node.playbackRate.value = settings.playbackRate / factor;
-        node.loop = settings.loop; node.loopStart = start / factor; node.loopEnd = end / factor;
-        node.connect(gain); source = node; offset = desired.time; startedAt = context.currentTime;
-        node.onended = () => { if (source === node) { source = null; try { node.disconnect(); } catch (_) {} } };
-        // Explicit stop uses the audio clock (start's duration semantics differ across SDKs).
-        node.start(0, offset / factor);
-        if (!settings.loop) node.stop(startedAt + Math.max(0, end - offset) / settings.playbackRate);
-      } catch (error) { stop(); onError(failure(error, "音频播放失败")); }
+  if (typeof wx.createInnerAudioContext !== 'function') throw new Error('此微信版本不支持演出音频，请升级微信后重试');
+  const native = wx.createInnerAudioContext({ useWebAudioImplement: false });
+  const { mediaContext, onError, isCancelled, onCancel = () => () => {} } = options;
+  let disposed = false, ready = false, seeking = false, requestedPlay = false, desired = null;
+  let seekTarget = 0, seekTimer = null, correctionAfter = 0;
+  const listeners = [];
+  function on(name, callback) { native[`on${name}`](callback); listeners.push([name, callback]); }
+  function pause() { requestedPlay = false; native.pause(); }
+  function apply(seekCompleted = false) {
+    if (disposed || isCancelled() || !desired) return;
+    native.volume = settings.muted ? 0 : desired.volume;
+    if (!desired.playing && (requestedPlay || !native.paused)) pause();
+    if (!ready || seeking) return;
+    if (!seekCompleted && !(desired.playing && requestedPlay && Date.now() < correctionAfter) && Math.abs(native.currentTime - desired.time) > (desired.playing && requestedPlay ? .2 : .02)) {
+      seeking = true; seekTarget = desired.time;
+      seekTimer = setTimeout(() => { seeking = false; seekTimer = null; fail(new Error('音频定位超时')); }, 10000);
+      native.seek(seekTarget); return;
     }
-    if (context.state === "suspended") {
-      pending = true;
-      Promise.resolve(context.resume()).then(launch, error => {
-        if (disposed || request !== generation) return;
-        pending = false; onError(failure(error, "音频恢复失败"));
-      });
-    } else launch();
+    if (desired.playing && !requestedPlay) { requestedPlay = true; native.play(); }
+  }
+  function fail(error) {
+    if (disposed || isCancelled()) return;
+    dispose(); onError(new Error(`音频播放失败: ${error?.message || error?.errMsg || String(error)}`));
   }
   function dispose() {
     if (disposed) return;
-    disposed = true; stop(); gain.gain.value = 0; unregister();
-    try { gain.disconnect(); } catch (_) {}
-    buffer = null; desired = null;
+    disposed = true; if (seekTimer) clearTimeout(seekTimer); seekTimer = null;
+    unregister(); unregisterCancel(); for (const [name, callback] of listeners) native[`off${name}`]?.(callback);
+    try { native.pause(); } catch (_) {}
+    try { native.destroy(); } catch (_) {}
+    desired = null;
   }
+  const unregister = mediaContext.onDispose(dispose), unregisterCancel = onCancel(dispose);
+  native.autoplay = false; native.loop = false; native.volume = 0;
+  native.startTime = settings.trimStartSeconds; native.playbackRate = settings.playbackRate;
+  on('Canplay', () => { ready = true; apply(); });
+  on('Seeked', () => { if (seekTimer) clearTimeout(seekTimer); seekTimer = null; seeking = false; correctionAfter = Date.now() + 500; apply(desired?.playing); });
+  on('Ended', () => { requestedPlay = false; });
+  on('Error', fail);
+  native.src = url;
   return {
-    duration: original.duration,
+    get duration() { return native.duration > 0 && Number.isFinite(native.duration) ? native.duration : undefined; },
     get sourceTime() { return desired?.time || 0; },
-    sync(time, playing, volume) {
-      if (disposed) return;
-      desired = { time, playing: playing && end > start && (settings.loop || time < end) };
-      gain.gain.value = settings.muted ? 0 : volume;
-      if (!desired.playing) { stop(); offset = time; return; }
-      if (source && Math.abs(position() - time) > .15) stop();
-      begin();
-    },
+    sync(time, playing, volume) { if (disposed) return; if (desired && (time < desired.time || Math.abs(time - desired.time) > .3)) correctionAfter = 0; desired = { time, playing, volume }; apply(); },
     dispose,
   };
 }
-
-module.exports = { createSceneMediaContext, createAudioPlayback, doubleSpeedBuffer };
+module.exports = { createSceneMediaContext: buffered.createSceneMediaContext, createAudioPlayback };

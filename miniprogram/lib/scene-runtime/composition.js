@@ -1,7 +1,7 @@
 // One scene clock drives model animation, spatial surfaces and native media.
 // The host owns placement/frame scheduling; this player owns every loaded instance.
 const { THREE } = require("../three-runtime/runtime");
-const { createSceneCore, clipTime: coreClipTime, samplePresentation } = require("./vendor/scene-core");
+const { createSceneCore, clipTime: coreClipTime, samplePresentation, mediaPreloadIds } = require("./vendor/scene-core");
 const { disposeTree } = require("../three-runtime/resources");
 const { groundOffset } = require("../three-runtime/pivot");
 const { validateManifest } = require("./manifest");
@@ -212,6 +212,7 @@ function createCompositionPlayer(manifest, { modelCache, canvas = modelCache?.ca
   function evaluate(time, playing = state === "playing") {
     let currentEntry;
     try {
+      const prepared = new Set(mediaPreloadIds(instances.filter(entry => entry.kind === "audio" || entry.kind === "video").map(entry => entry.inst), time, duration, core?.looping ?? sceneLoop));
       for (const entry of instances) {
         currentEntry = entry;
         const presentation = samplePresentation(entry.inst, time, duration);
@@ -222,7 +223,7 @@ function createCompositionPlayer(manifest, { modelCache, canvas = modelCache?.ca
           original.material.opacity = original.opacity * presentation.opacity;
           original.material.depthWrite = original.depthWrite && presentation.opacity === 1;
         }
-        entry.surface?.sync(time, playing, duration);
+        entry.surface?.sync(time, playing, duration, prepared.has(entry.id));
         if (disposed || state === "error") return false;
       }
       for (const animation of animated) {

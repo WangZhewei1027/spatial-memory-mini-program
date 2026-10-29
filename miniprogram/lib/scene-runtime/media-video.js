@@ -1,5 +1,7 @@
+const { mediaOperation, releaseNative } = require("./media-operation");
 const { THREE } = require("../three-runtime/runtime");
 const { download, removeFile } = require("../three-runtime/resources");
+const { inspectRemoteMp4 } = require("./media-mp4");
 
 function call(method, options) {
   return new Promise((resolve, reject) => {
@@ -14,36 +16,35 @@ function call(method, options) {
 }
 function errorMessage(error) { return error?.message || error?.errMsg || String(error); }
 
-async function inspectSoundtrack(path) {
-  if (typeof wx.createMediaContainer !== "function") return true;
+async function inspectLocalVideo(path) {
+  const info = await call(options => wx.getVideoInfo(options), { src: path });
+  if (!wx.createMediaContainer) return { ...info, hasAudio: true };
   const container = wx.createMediaContainer();
-  try {
-    const result = await call(options => container.extractDataSource(options), { source: path });
-    return result.tracks.some(track => track.kind === "audio");
-  } finally { container.destroy(); }
+  try { const data = await call(options => container.extractDataSource(options), { source: path }); return { ...info, hasAudio: data.tracks.some(track => track.kind === "audio") }; }
+  finally { container.destroy(); }
 }
 
-async function createVideoPlayback(url, material, resize, { onError, isCancelled, mediaContext }) {
+async function createVideoPlayback(url, material, resize, { onError, isCancelled, mediaContext, onCancel = () => () => {} }) {
   if (typeof wx.createVideoDecoder !== "function") throw new Error("此微信版本不支持演出视频，请升级微信后重试");
-  const path = await download(url);
+  let path = url;
+  const pendingReads = new Set();
+  function cancelReads() { for (const cancel of pendingReads) cancel(); pendingReads.clear(); }
+  const unregisterCancel = onCancel(dispose);
   let decoder = null, texture = null, disposed = false, timer = null, seekPending = false, operation = Promise.resolve();
   let target = 0, shown = -Infinity, inFlight = 0, loading = true, playing = false, sourceDuration;
   let info;
   const unregister = mediaContext.onDispose(dispose);
   function dispose() {
     if (disposed) return;
-    disposed = true; if (timer) clearTimeout(timer); timer = null;
+    disposed = true; cancelReads(); unregisterCancel(); if (timer) clearTimeout(timer); timer = null;
     unregister();
     const previous = decoder; decoder = null;
-    // The path must stay alive until pending native work has released the decoder.
-    Promise.resolve(operation).catch(() => {}).then(async () => {
-      if (previous) {
-        try { await previous.stop(); } catch (_) {}
-        try { await previous.remove(); } catch (_) {}
-      }
-      if (path !== url) removeFile(path);
-    });
-    texture?.dispose(); texture = null; material.map = null;
+    // Ask native code to cancel immediately, including a pending start/seek.
+    // Retry release if that original native operation settles after cancellation.
+    releaseNative(previous, ['stop', 'remove']);
+    Promise.resolve(operation).catch(() => {}).then(() => { if (path !== url) removeFile(path); });
+    if (material.map === texture) material.map = null;
+    texture?.dispose(); texture = null;
   }
   function fail(error) {
     if (disposed || isCancelled()) return;
@@ -74,7 +75,9 @@ async function createVideoPlayback(url, material, resize, { onError, isCancelled
     // Seeking exactly to EOF may never yield a frame. Match HTML video's final
     // displayed frame while retaining the requested logical source time.
     const lastFrame = Number.isFinite(sourceDuration) ? Math.max(0, sourceDuration - 1 / (info.fps || 30)) : Infinity;
-    try { operation = Promise.resolve(decoder.seek(Math.min(inFlight, lastFrame) * 1000)); }
+    try { const owner = decoder; const native = Promise.resolve(owner.seek(Math.min(inFlight, lastFrame) * 1000));
+      native.then(() => { if (disposed) releaseNative(owner, ["stop", "remove"]); }, () => {});
+      operation = mediaOperation(native, "视频定位", 15000, onCancel); }
     catch (error) { fail(error); return; }
     operation.then(() => {
       if (disposed || isCancelled()) return;
@@ -97,20 +100,33 @@ async function createVideoPlayback(url, material, resize, { onError, isCancelled
   }
   try {
     if (isCancelled()) throw new Error("演出视频加载已取消");
-    info = typeof wx.getVideoInfo === "function" ? await call(options => wx.getVideoInfo(options), { src: path }).catch(error => {
-      // DevTools does not implement metadata inspection on every supported SDK.
-      if (/暂时不支持|not support|not implement/i.test(errorMessage(error))) return {};
-      throw error;
-    }) : {};
+    if (/^https?:\/\//.test(url)) {
+      try {
+        info = await inspectRemoteMp4(url, () => disposed || isCancelled(), cleanup => {
+          pendingReads.add(cleanup); const unown = mediaContext.onDispose(cleanup);
+          return () => { pendingReads.delete(cleanup); unown(); };
+        });
+      } catch (error) {
+        if (disposed || isCancelled()) throw error;
+        // Legacy WebM and servers without Range retain the old download path.
+        // Network errors do not trigger a second full transfer.
+        if (!/不是可分段播放|未支持分段读取|未找到 MP4/.test(errorMessage(error))) throw error;
+        path = await download(url);
+        if (disposed || isCancelled()) { if (path !== url) removeFile(path); throw new Error("演出视频加载已取消"); }
+        info = await inspectLocalVideo(path);
+      }
+    } else info = await inspectLocalVideo(url);
     if (isCancelled()) throw new Error("演出视频加载已取消");
     decoder = wx.createVideoDecoder();
-    operation = Promise.resolve(decoder.start({ source: path, mode: 1, abortAudio: true }));
+    const owner = decoder; const native = Promise.resolve(owner.start({ source: path, mode: 1, abortAudio: true }));
+    native.then(() => { if (disposed) releaseNative(owner, ["stop", "remove"]); }, () => {});
+    operation = mediaOperation(native, "视频加载", 15000, onCancel);
     const started = await operation;
     if (isCancelled()) throw new Error("演出视频加载已取消");
     resize(info.width || started?.width || 16, info.height || started?.height || 9);
     loading = false; sourceDuration = info.duration;
     return {
-      path, duration: info.duration,
+      path, duration: info.duration, hasAudio: info.hasAudio, streaming: path === url && /^https?:\/\//.test(url),
       get sourceTime() { return target; },
       sync(time, isPlaying, duration) { if (!disposed) { target = time; playing = isPlaying; sourceDuration = duration ?? info.duration; pump(); } },
       dispose,
@@ -118,4 +134,4 @@ async function createVideoPlayback(url, material, resize, { onError, isCancelled
   } catch (error) { dispose(); throw new Error(`视频加载失败: ${errorMessage(error)}`); }
 }
 
-module.exports = { createVideoPlayback, inspectSoundtrack };
+module.exports = { createVideoPlayback };
