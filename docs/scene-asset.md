@@ -21,9 +21,9 @@ GPS、巨大模型、商户及识别点接口返回地图 Placement，返回值�
 
 ## 播放器
 
-运行时接收 `schemaVersion: 4/5/7/8` 的 composition manifest；后端将 schema 6 编辑文档编译为播放协议，不是资产内容版本。旧平铺模型为 4，带分组模型为 5，包含文字、媒体或出入场的演出为 7，透明度、音量关键帧或空间音频为 8。发布这些 Web 新功能时须配套发布本播放器，旧小程序会拒绝不支持的协议。最多 8 个资源、24 个实例、2400 关键帧、600 秒。实例独立克隆，使用米制 `position`、Euler XYZ 弧度 `rotation` 和 `scale`，不归一化尺寸。Web 旋转字段显示度，保存与两端采样使用弧度并保留多圈值。
+运行时接收 `schemaVersion: 4/5/7/8` 的 composition manifest；后端将 schema 6 编辑文档编译为播放协议，不是资产内容版本。旧平铺模型为 4，带分组模型为 5，包含文字、媒体或出入场的演出为 7，透明度、音量关键帧或空间音频为 8。发布这些 Web 新功能时须配套发布本播放器，旧小程序会拒绝不支持的协议。资源、实例、关键帧数量、演出时长及分组层数不设业务上限。校验保留有限数值、正尺寸/速率、非负时间、透明度/音量 0–1、引用完整性及显式 visited 循环检测。实例独立克隆，使用米制 `position`、Euler XYZ 弧度 `rotation` 和 `scale`，不归一化尺寸。Web 旋转字段显示度，保存与两端采样使用弧度并保留多圈值。
 
-`lib/scene-runtime/composition.js` 使用与 Web 同源的零依赖 `@spatial-memory/scene-core` 2.4.0。实例结构为 instanceRoot → `pivot` → GLB：`lib/three-runtime/pivot.js` 的 `groundOffset` 按包围盒把底部中心对齐到实例原点，与单素材 AR 放置及 Web 编辑器同一规则，偏移在 AnimationMixer 驱动的子树之外。schema 5 清单可带 `groups`：分组是带变换和轨道的空 `THREE.Group`，实例和子分组按 `parent` 挂到对应分组下，Core 用同一时钟采样分组与实例；schema 4 平铺清单从不构建分组。每实例可选 `tracks` 保存 9 个变换通道，以及 schema 8 的 `opacity`、`volume` 数值关键帧（音量仅用于音频/视频）：`{ time, value, handles: [inX, inY, outX, outY], connectedRight }`；time 为秒，`connectedRight: false` 表示保持到下一关键帧，其余使用左右相邻帧的 Bezier 出/入柄采样。没有轨道时使用静态姿态。GLB 动画继续由 Three.AnimationMixer 求值。每个播放器持有独立 Core，`dispose` 清空订阅、绑定与内容引用；宿主释放模型、媒体资源和帧时钟。暂停不推进时间；循环保留跨边界余量；结束冻结；轻触场景暂停/继续或重播。整场登记一个 `nodeList` 条目，容量桶最多 1 场，替换时整场回收。实例不参与普通素材斥力。任一资源、动画片段或播放中的解码失败会释放整场并报告错误；已挂载失败场景也会退出容量队列。
+`lib/scene-runtime/composition.js` 使用与 Web 同源的零依赖 `@spatial-memory/scene-core` 2.5.0。实例结构为 instanceRoot → `pivot` → GLB：`lib/three-runtime/pivot.js` 的 `groundOffset` 按包围盒把底部中心对齐到实例原点，与单素材 AR 放置及 Web 编辑器同一规则，偏移在 AnimationMixer 驱动的子树之外。schema 5 清单可带 `groups`：分组是带变换和轨道的空 `THREE.Group`，实例和子分组按 `parent` 挂到对应分组下，Core 用同一时钟采样分组与实例；schema 4 平铺清单从不构建分组。每实例可选 `tracks` 保存 9 个变换通道，以及 schema 8 的 `opacity`、`volume` 数值关键帧（音量仅用于音频/视频）：`{ time, value, handles: [inX, inY, outX, outY], connectedRight }`；time 为秒，`connectedRight: false` 表示保持到下一关键帧，其余使用左右相邻帧的 Bezier 出/入柄采样。没有轨道时使用静态姿态。GLB 动画继续由 Three.AnimationMixer 求值。每个播放器持有独立 Core，`dispose` 清空订阅、绑定与内容引用；宿主释放模型、媒体资源和帧时钟。暂停不推进时间；循环保留跨边界余量；结束冻结；轻触场景暂停/继续或重播。整场登记一个 `nodeList` 条目，容量桶最多 1 场，替换时整场回收。实例不参与普通素材斥力。任一资源、动画片段或播放中的解码失败会释放整场并报告错误；已挂载失败场景也会退出容量队列。
 
 ### 演出素材与同一时间轴
 
@@ -31,10 +31,11 @@ GPS、巨大模型、商户及识别点接口返回地图 Placement，返回值�
 - `timing` 的 `startSeconds/endSeconds` 控制出入场，结束点不包含；null 跟随场景时长。`fadeInSeconds/fadeOutSeconds` 使用共享线性包络，同时改变画面透明度和声音音量。旧模型未设 timing 时全程可见、结束定格。
 - `opacity` 及同名关键帧控制可视素材的不透明度（0–1），与出入场包络相乘；`volume` 关键帧在同一播放头采样，与出入场声音包络相乘。视觉透明度不会静音视频或音频，暂停/跳转也应用当前值。
 - `media.spatial` 开启位置音频，`refDistance` 为保持原音量的距离、`maxDistance` 为衰减计算的最远距离、`rolloffFactor` 为衰减强度；距离单位为米。播放器每帧使用手机相机世界位置和音源世界位置（包含场景投放、分组及位置关键帧），按共享 Core 的反距离公式衰减。最大距离以外保持该距离的增益，不会突然截断。默认关闭，旧场景音量保持不变。原生 `InnerAudioContext` / `MediaAudioPlayer` 没有可接入 WebAudio 的流式节点及声像接口，因此本播放器支持距离衰减；Web 另外提供左右声像。保留边下载边播放，不为声像切换成整文件 PCM 下载。
-- `media` 支持素材内裁切、0.1–4 倍速、音量、静音、片段循环。常用 0.5–2 倍速音频直接将远程 URL 交给原生 `InnerAudioContext({ useWebAudioImplement: false })`，边缓冲边播放；不经过完整下载和 PCM 解码。旧 WebM/Ogg/FLAC 等跨端原生格式不统一的音频、超出原生倍速范围的旧场景保留 WebAudio 下载/解码兼容路径，超过 2 倍速仍对 PCM 预重采样。原生流式音频的音高处理由设备决定，不承诺与 WebAudio 重采样音色完全一致。
+- `media` 支持素材内裁切、音量、静音、片段循环，音视频固定原速播放，`playbackRate` 固定为 `1`。普通音频直接将远程 URL 交给原生 `InnerAudioContext({ useWebAudioImplement: false })`，边缓冲边播放；不设置倍率，不经过完整下载和 PCM 解码。旧 WebM/Ogg/FLAC 等跨端原生格式不统一的音频保留 WebAudio 下载/解码路径，直接播放原始 PCM，不做重采样。
 - 新上传视频为 H.264/AAC MP4，服务端 faststart 把索引放到头部。播放器只用 HTTP Range 读取 MP4 atom 头和 moov（上限 2 MiB），取得时长/音轨信息，再将远程 URL 交给 VideoDecoder，避免等待完整下载。旧 MP4 也可按 atom 偏移读取尾部索引；旧 WebM 或不支持 Range 的服务器保留下载后本地检查的兼容路径。网络请求失败不触发第二次整文件下载。
-- 视频画面使用手动模式，以毫秒 seek 到共享 `mediaTime` 算出的源时间，合并等待中的定位请求并复制 RGBA 帧为独立纹理。默认 1 倍速视频音轨使用另一只 audio-only、PTS 模式的远程 VideoDecoder 和 MediaAudioPlayer，画面 seek 不打断声音；音量按同一包络更新，暂停立即静音，恢复与跳转重新定位音轨。MediaAudioPlayer 没有倍速 API，因此非 1 倍速视频音轨保留 WebAudio 缓冲兼容路径。无音轨或静音视频不创建音频播放器。
+- 视频画面使用手动模式，以毫秒 seek 到共享 `mediaTime` 算出的源时间，合并等待中的定位请求并复制 RGBA 帧为独立纹理。视频音轨使用另一只 audio-only、PTS 模式的远程 VideoDecoder 和 MediaAudioPlayer，画面 seek 不打断声音；音量按同一包络更新，暂停立即静音，恢复与跳转重新定位音轨。旧容器的本地音轨保留 WebAudio 缓冲路径。无音轨或静音视频不创建音频播放器。
 - 两端共用 `mediaPreloadIds`：准备全部当前有效音视频，再准备未来 5 个场景秒内最近的 2 条媒体（包含整场循环的下一轮）。未进入窗口不分配播放器；离开窗口释放媒体和待处理 Range 请求。暂停、跳转仍按当前时间重新计算窗口；未来素材只准备裁切起点，预加载不会发声。
+- 音频连续播放由原生音频时钟推进，不以每帧读取的 `currentTime` 偏差触发 seek。主动跳转、重启和整场循环通过明确的定位序号同步；原生流式音频与视频音轨在片段循环边界定位，WebAudio 使用原生片段循环。暂停立即停止声音，异步 seek 的旧结果不能覆盖新的暂停或定位操作。演出时钟保留掉帧经过的真实时间，后台恢复重置帧计时基线。
 - `pause/seek/restart/update` 同时更新变换、动画、可见性、透明度与媒体位置。暂停定位不会播放声音；退出或后台会停止声音，取消晚到结果并释放解码器、纹理、临时文件与音频上下文。
 - 格式支持取决于微信设备的原生解码器。开发者工具不支持 VideoDecoder.start，不能用模拟器证明真机视频通过。建议用自带 H.264/AAC 样例进行真机验证，并检查长视频/多音轨的内存及取帧吞吐。
 
@@ -46,8 +47,8 @@ Core 提供 `play/pause/seek/advance/sync/sample/subscribe/observe/bind/dispose`
 
 ### 流式播放的验证边界
 
-`test-scene-media.cjs` 覆盖头部/尾部 moov 分段读取、无整文件下载、静默预热、进出窗口释放、慢 seek 不追逐时钟导致永不播放、暂停取消晚到结果、完整 dispose；跨端实适配器测试覆盖 0.1–4 倍速、循环/裁切/淡变与播放时跳转。schema 8 回归另外覆盖可视透明度与声音独立、音量自动化乘距离衰减、场景/分组世界变换和相机转向；所有原生声音路径继续验证无整文件下载。模拟器可验证原生音频和 WebGL 文字，但不能代替真机验证 VideoDecoder/MediaAudioPlayer 的弱网重缓冲、音画漂移及多轨吞吐。音频-only 解码器未提供可读播放时钟，默认视频音轨以 seek 完成时钟同步；真机网络停顿后的精确同步仍须验收。
+`test-scene-audio-sync.cjs` 从实际 composition 驱动媒体，覆盖每 500ms 更新的原生时钟读数、掉帧、250ms 主动跳转、循环和异步定位。`test-scene-soundtrack-sync.cjs` 覆盖原生视频音轨与缓冲音频的连续播放、定位优先级和释放。`test-scene-media.cjs` 覆盖头部/尾部 moov 分段读取、无整文件下载、静默预热、进出窗口释放、慢 seek 不追逐时钟导致永不播放、暂停取消晚到结果、完整 dispose；跨端实适配器测试覆盖原速播放、循环/裁切/淡变与播放时跳转。schema 8 回归另外覆盖可视透明度与声音独立、音量自动化乘距离衰减、场景/分组世界变换和相机转向；所有原生声音路径继续验证无整文件下载。模拟器可验证原生音频和 WebGL 文字，但不能代替真机验证 VideoDecoder/MediaAudioPlayer 的弱网重缓冲、音画漂移及多轨吞吐。音频-only 解码器未提供可读播放时钟，视频音轨在明确的定位操作完成后开始播放；真机网络停顿后的精确同步仍须验收。
 
-官方接口依据（2026-10-29 核对）：[VideoDecoder.start 支持 HTTP(S)](https://developers.weixin.qq.com/miniprogram/dev/api/media/video-decoder/VideoDecoder.start.html)、[InnerAudioContext 倍速/格式范围](https://developers.weixin.qq.com/miniprogram/dev/api/media/audio/InnerAudioContext.html)、[原生音频驱动及释放](https://developers.weixin.qq.com/miniprogram/dev/api/media/audio/wx.createInnerAudioContext.html)、[MediaAudioPlayer API](https://developers.weixin.qq.com/miniprogram/dev/api/media/audio/MediaAudioPlayer.html)。
+官方接口依据（2026-10-29 核对）：[VideoDecoder.start 支持 HTTP(S)](https://developers.weixin.qq.com/miniprogram/dev/api/media/video-decoder/VideoDecoder.start.html)、[InnerAudioContext 格式支持](https://developers.weixin.qq.com/miniprogram/dev/api/media/audio/InnerAudioContext.html)、[原生音频驱动及释放](https://developers.weixin.qq.com/miniprogram/dev/api/media/audio/wx.createInnerAudioContext.html)、[MediaAudioPlayer API](https://developers.weixin.qq.com/miniprogram/dev/api/media/audio/MediaAudioPlayer.html)。
 
 生产配置：媒体 OSS/CDN 域名须同时加入微信后台的 `request 合法域名`（MP4 Range 索引请求）和 `downloadFile 合法域名`（旧素材兼容路径及图片/模型）。开发者工具关闭域名校验不能替代体验版/正式版配置。

@@ -102,8 +102,8 @@ async function main() {
   await firstLoad; await settle();
   let frameTime = 20000;
   for (const previousState of ["playing", "paused", "ended"]) {
-    tick(frameTime); tick(frameTime += 100);
-    assert.ok(Math.abs(page._player.time - 0.1) < 1e-9, "real frame loop advances playback");
+    tick(frameTime); tick(frameTime += 350); tick(frameTime += 400);
+    assert.ok(Math.abs(page._player.time - 0.75) < 1e-9, "real preview frame loop preserves elapsed time across slow frames");
     if (previousState === "paused") page.togglePlayback();
     if (previousState === "ended") page._player.update(saved.content.durationSeconds);
     assert.equal(page._player.state, previousState);

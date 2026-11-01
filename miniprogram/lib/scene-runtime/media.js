@@ -74,15 +74,18 @@ async function createSceneSurface(instance, resource, options = {}) {
   }
   function syncMedia() {
     if (!latest || disposed) return;
-    const { time, playing, sceneDuration, spatial } = latest;
+    const { time, playing, sceneDuration, spatial, revision } = latest;
     const presentation = sampleFade(instance, time, sceneDuration);
     const duration = video?.duration ?? audio?.duration;
     const sourceTime = mediaTime(presentation.visible ? time : 0, settings, instance.timing, duration);
     const end = Math.min(duration ?? Infinity, settings.trimEndSeconds === null ? Infinity : settings.trimEndSeconds);
     const shouldPlay = playing && presentation.visible && (settings.loop || sourceTime < end);
+    const start = Math.min(duration ?? Infinity, settings.trimStartSeconds), span = end - start;
+    const local = Math.max(0, time - (instance.timing?.startSeconds ?? 0));
+    const cycle = settings.loop && Number.isFinite(span) && span > 0 && presentation.visible ? Math.floor(local / span) : 0;
     // Visual opacity is independent from soundtrack volume. Native streaming
     // audio exposes gain only; keep streaming instead of downloading PCM to pan.
-    audio?.sync(sourceTime, shouldPlay, sampleVolume(instance, time) * presentation.opacity * (spatial?.gain ?? 1));
+    audio?.sync(sourceTime, shouldPlay, sampleVolume(instance, time) * presentation.opacity * (spatial?.gain ?? 1), { revision, cycle });
     video?.sync(sourceTime, shouldPlay, duration);
   }
   function prepare() {
@@ -96,7 +99,7 @@ async function createSceneSurface(instance, resource, options = {}) {
         if (kind === "audio") nextAudio = await createAudioPlayback(resource.url, settings, localContext);
         else {
           nextVideo = await createVideoPlayback(resource.url, videoMaterial, resizeVideo, localContext);
-          if (!settings.muted && nextVideo.hasAudio) nextAudio = settings.playbackRate === 1 && nextVideo.path === resource.url
+          if (!settings.muted && nextVideo.hasAudio) nextAudio = nextVideo.path === resource.url
             ? await createVideoSoundtrack(nextVideo.path, localContext)
             : await createAudioPlayback(nextVideo.path, settings, { ...localContext, forceBuffered: true });
         }
@@ -128,9 +131,9 @@ async function createSceneSurface(instance, resource, options = {}) {
     return {
       object, materials,
       get audio() { return audio; }, get video() { return video; },
-      sync(time, playing, sceneDuration, prepared = true, spatial) {
+      sync(time, playing, sceneDuration, prepared = true, spatial, revision = 0) {
         if (disposed) return;
-        latest = { time, playing, sceneDuration, spatial };
+        latest = { time, playing, sceneDuration, spatial, revision };
         if (!prepared) {
           mediaGeneration++; cancelPending(); audio?.dispose(); video?.dispose(); audio = video = null; preparing = null;
           return;

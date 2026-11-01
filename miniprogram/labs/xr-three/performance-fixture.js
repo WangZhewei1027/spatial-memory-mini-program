@@ -2,7 +2,7 @@
 const base = '/labs/xr-three/fixtures/performance';
 const pose = { rotation: [0, 0, 0], scale: [1, 1, 1], animation: null };
 const cue = (start, end, fadeIn = .6, fadeOut = .8) => ({ startSeconds: start, endSeconds: end, fadeInSeconds: fadeIn, fadeOutSeconds: fadeOut });
-const media = (rate, volume) => ({ trimStartSeconds: .5, trimEndSeconds: 6.5, playbackRate: rate, volume, muted: false, loop: true });
+const media = volume => ({ trimStartSeconds: .5, trimEndSeconds: 6.5, playbackRate: 1, volume, muted: false, loop: true });
 module.exports = {
   schemaVersion: 7, assetId: 'performance-fixture',
   resources: {
@@ -15,9 +15,9 @@ module.exports = {
     assets: { model: { assetId: 'fixture-model' }, image: { assetId: 'fixture-image' }, video: { assetId: 'fixture-video' }, audio: { assetId: 'fixture-audio' } },
     instances: [
       { ...pose, id: 'title', position: [0, 2.2, 0], text: { content: '空间演出 / SCENE\n音画跟随同一时间轴', color: '#e5f5e9', fontSize: .22, width: 4.5, align: 'center' }, timing: cue(0, 11) },
-      { ...pose, id: 'screen', asset: 'video', position: [-1.2, .6, 0], timing: cue(1, 10), media: media(1.25, .25) },
+      { ...pose, id: 'screen', asset: 'video', position: [-1.2, .6, 0], timing: cue(1, 10), media: media(.25) },
       { ...pose, id: 'still', asset: 'image', position: [1.2, .6, 0], timing: cue(2, 9) },
-      { ...pose, id: 'sound', asset: 'audio', position: [0, 0, 0], timing: cue(0, 12, 1, 1), media: media(.8, .25) },
+      { ...pose, id: 'sound', asset: 'audio', position: [0, 0, 0], timing: cue(0, 12, 1, 1), media: media(.25) },
       { ...pose, id: 'cube', asset: 'model', position: [0, -.6, 0], scale: [.4, .4, .4], timing: cue(3, 8), animation: { clipIndex: 0, startSeconds: 0, loop: true } },
     ],
   },

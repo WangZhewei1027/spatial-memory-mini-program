@@ -27,6 +27,7 @@ function syncVKCamera(target, source, near = 0.01, far = 100) {
     target.scale,
   );
   target.projectionMatrixInverse.copy(target.projectionMatrix).invert();
+  target.near = near; target.far = far;
   return true;
 }
 function applyHitMatrix(object, matrix) {

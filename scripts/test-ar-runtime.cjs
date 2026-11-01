@@ -169,6 +169,30 @@ async function main() {
 
   const { ARRuntime, RETICLE_MODEL_PATH } = lib("ar-runtime");
   assert.equal(RETICLE_MODEL_PATH, "assets/ar-plane-marker.glb");
+  {
+    const { createSceneCore } = load(path.join(root, "lib/scene-runtime/vendor/scene-core"));
+    const core = createSceneCore({ content: { instances: [], durationSeconds: 20, loop: false } });
+    const deltas = [];
+    const clockRuntime = Object.assign(Object.create(ARRuntime.prototype), {
+      canvas: { width: 320, height: 480 }, scene: new THREE.Scene(), content: new THREE.Group(),
+      camera: new THREE.PerspectiveCamera(), reticle: new THREE.Group(),
+      session: { start() {}, stop() {} }, background: { draw: () => true },
+      renderer: { render() {}, info: { render: { calls: 0 }, memory: { geometries: 0, textures: 0 } } },
+      onReady() {}, onTick(dt) { deltas.push(dt); core.advance(dt); },
+    });
+    const frame = { camera: { viewMatrix: new THREE.Matrix4().elements,
+      getProjectionMatrix: (near, far) => new THREE.PerspectiveCamera(60, 1, near, far).projectionMatrix.elements } };
+    clockRuntime.start(); core.play();
+    for (const now of [1000, 1350, 1750, 2050]) clockRuntime.frame(frame, { now, acquireMs: 0 });
+    assert.ok(Math.abs(core.time - 1.05) < 1e-9, 'slow render frames must preserve elapsed scene time, matching native audio');
+    clockRuntime.stop(); core.pause(); clockRuntime.start(); core.play();
+    clockRuntime.frame(frame, { now: 90000, acquireMs: 0 });
+    assert.equal(deltas.at(-1), 0, 'foreground restart discards time spent in the background');
+    clockRuntime.frame(frame, { now: 90250, acquireMs: 0 });
+    assert.ok(Math.abs(core.time - 1.3) < 1e-9);
+    core.dispose();
+    console.log('PASS real AR frame clock preserves slow frames and resets across foreground sessions');
+  }
   let reticleHits = 0;
   let reticleHit = new THREE.Matrix4().makeTranslation(0, 0, -1).elements;
   const cursorRuntime = Object.assign(Object.create(ARRuntime.prototype), {

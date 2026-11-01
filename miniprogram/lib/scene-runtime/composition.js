@@ -36,7 +36,7 @@ function createCompositionPlayer(manifest, { modelCache, canvas = modelCache?.ca
   let core = null, mediaContext = null, cancelLoading = null;
   const duration = Number.isFinite(content?.durationSeconds) && content.durationSeconds > 0 ? content.durationSeconds : null;
   const sceneLoop = !!content?.loop;
-  let state = "idle", t = 0, loadGeneration = 0, disposed = false, diagnostics = null;
+  let state = "idle", t = 0, loadGeneration = 0, disposed = false, diagnostics = null, transportRevision = 0;
   const player = {
     kind: "composition",
     get state() { return state; },
@@ -235,8 +235,8 @@ function createCompositionPlayer(manifest, { modelCache, canvas = modelCache?.ca
         if (camera && entry.inst.media?.spatial?.enabled) {
           entry.worldPosition.setFromMatrixPosition(entry.instanceRoot.matrixWorld);
           const spatial = sampleSpatialAudio(entry.inst.media.spatial, entry.worldPosition, listener);
-          entry.surface?.sync(time, playing, duration, prepared.has(entry.id), spatial);
-        } else entry.surface?.sync(time, playing, duration, prepared.has(entry.id));
+          entry.surface?.sync(time, playing, duration, prepared.has(entry.id), spatial, transportRevision);
+        } else entry.surface?.sync(time, playing, duration, prepared.has(entry.id), undefined, transportRevision);
         if (disposed || state === "error") return false;
       }
       for (const animation of animated) {
@@ -266,7 +266,7 @@ function createCompositionPlayer(manifest, { modelCache, canvas = modelCache?.ca
   function seek(seconds) {
     if (!core || !Number.isFinite(seconds) || !["ready", "playing", "paused", "ended"].includes(state)) return;
     const wasPlaying = state === "playing";
-    core.seek(seconds); t = core.time;
+    transportRevision++; core.seek(seconds); t = core.time;
     const ended = !sceneLoop && duration !== null && t >= duration;
     if (ended) core.pause();
     else if (wasPlaying) { core.play(sceneLoop); t = core.time; }
@@ -276,12 +276,16 @@ function createCompositionPlayer(manifest, { modelCache, canvas = modelCache?.ca
   }
   function restart() {
     if (!core || !["ready", "playing", "paused", "ended"].includes(state)) return;
-    core.seek(0); t = 0; startCore();
+    transportRevision++; core.seek(0); t = 0; startCore();
   }
   function update(dt) {
     if (!core || !["ready", "playing", "paused", "ended"].includes(state) || dt < 0 || !Number.isFinite(dt)) return;
     const playing = state === "playing";
-    if (playing && dt > 0) { core.advance(dt); t = core.time; }
+    if (playing && dt > 0) {
+      // A long frame can cross one or more complete loops without time decreasing.
+      if (core.looping && duration !== null && t + dt >= duration) transportRevision++;
+      core.advance(dt); t = core.time;
+    }
     const ended = !sceneLoop && duration !== null && t >= duration;
     // The listener can move while the scene clock is paused or on a zero-delta
     // camera frame. Refresh gain without advancing time or resuming sound.

@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const { createSceneSurface, createSceneMediaContext } = require('../miniprogram/lib/scene-runtime/media');
 const { inspectMoov, inspectRemoteMp4 } = require('../miniprogram/lib/scene-runtime/media-mp4');
+const { createAudioPlayback } = require('../miniprogram/lib/scene-runtime/media-audio');
 const flush = async () => { for (let i = 0; i < 60; i++) await Promise.resolve(); };
 const near = (a, b) => assert.ok(Math.abs(a - b) < 1e-6, `${a} != ${b}`);
 function box(kind, ...data) { const payload = Buffer.concat(data); const b = Buffer.alloc(8 + payload.length); b.writeUInt32BE(b.length); b.write(kind, 4); payload.copy(b, 8); return b; }
@@ -52,7 +53,58 @@ function platform({ sound = true, tail = false, delayedSeek = false, delayedRang
 const settings = { trimStartSeconds: 2, trimEndSeconds: 10, playbackRate: 1, volume: .8, muted: false, loop: false };
 const instance = overrides => ({ id: 'cue', asset: 'asset', timing: { startSeconds: 2, endSeconds: 12, fadeInSeconds: 2, fadeOutSeconds: 2 }, media: settings, ...overrides });
 const resource = kind => ({ kind, url: `https://assets.example/${kind}.${kind === 'video' ? 'mp4' : 'mp3'}` });
+function bufferedPlatform() {
+  const sources = [], cleanups = new Set(), errors = [];
+  const original = { length: 32, numberOfChannels: 1, sampleRate: 8, duration: 4,
+    getChannelData: () => Float32Array.from({ length: 32 }, (_, i) => i / 32) };
+  const gain = { gain: { value: 0 }, connect() {}, disconnect() { this.disconnected = true; } };
+  const context = { currentTime: 0, state: 'running', destination: {}, createGain: () => gain,
+    createBuffer() { throw new Error('1x playback must not allocate resampled PCM'); },
+    createBufferSource() {
+      const source = { starts: [], stops: [],
+        get playbackRate() { throw new Error('playback must not access native rate controls'); }, connect() {}, disconnect() { this.disconnected = true; }, start(...args) { this.starts.push(args); }, stop(...args) { this.stops.push(args); } };
+      sources.push(source); return source;
+    },
+  };
+  return { sources, original, gain, errors, cleanups, options: {
+    mediaContext: { getAudioContext: () => context, decode: async () => original, onDispose(cleanup) { cleanups.add(cleanup); return () => cleanups.delete(cleanup); } },
+    isCancelled: () => false, onError: error => errors.push(error), forceBuffered: true,
+  } };
+}
 async function main() {
+  for (const unavailableRate of ['unreadable', 'read-only']) {
+    const state = platform(), errors = [], owner = createSceneMediaContext();
+    const createNative = wx.createInnerAudioContext;
+    wx.createInnerAudioContext = options => {
+      const native = createNative(options);
+      Object.defineProperty(native, 'playbackRate', {
+        get: () => undefined,
+        set() { if (unavailableRate === 'read-only') throw new Error('playbackRate is unavailable'); },
+      });
+      return native;
+    };
+    const surface = await createSceneSurface(instance(), resource('audio'), {
+      mediaContext: owner, onError: error => errors.push(error),
+    });
+    surface.sync(3, true, 20, true); await flush();
+    assert.deepEqual(errors.map(error => error.message), [], 'default 1x playback does not require rate-control support');
+    assert.equal(state.audio[0].plays, 1); near(state.audio[0].currentTime, 3); near(state.audio[0].volume, .4);
+    assert.equal(state.downloads, 0, 'default playback still streams');
+    surface.sync(7, false, 20, true); await flush();
+    assert.equal(state.audio[0].paused, true); near(state.audio[0].currentTime, 7);
+    state.audio[0].emit('Error', { errMsg: 'decode failed' });
+    assert.equal(errors.length, 1); assert.match(errors[0].message, /音频播放失败: decode failed/);
+    owner.dispose(); surface.dispose(); assert.equal(state.audio[0].destroys, 1);
+  }
+  {
+    const state = bufferedPlatform();
+    const audio = await createAudioPlayback(resource('audio').url, { ...settings, trimStartSeconds: 0, trimEndSeconds: null }, state.options);
+    audio.sync(1, true, .8);
+    assert.deepEqual(state.errors, [], 'buffered 1x playback uses the native default without rate control');
+    assert.equal(state.sources[0].buffer, state.original, 'buffered playback keeps the original PCM');
+    assert.deepEqual(state.sources[0].starts, [[0, 1]]); assert.deepEqual(state.sources[0].stops, [[3]]);
+    audio.dispose(); assert.equal(state.cleanups.size, 0); assert.ok(state.gain.disconnected);
+  }
   for (const tail of [false, true]) {
     const state = platform({ tail }); const info = await inspectRemoteMp4(resource('video').url);
     assert.deepEqual(info, { duration: 20, hasAudio: true }); assert.equal(state.downloads, 0);
@@ -97,8 +149,8 @@ async function main() {
     a.dispose();
   }
   {
-    const state = platform(); const a = await createSceneSurface(instance({ media: { ...settings, loop: true, playbackRate: 2 } }), resource('audio'));
-    a.sync(7, true, 20); await flush(); near(a.audio.sourceTime, 4); near(state.audio[0].playbackRate, 2); a.dispose();
+    const state = platform(); const a = await createSceneSurface(instance({ media: { ...settings, loop: true } }), resource('audio'));
+    a.sync(7, true, 20); await flush(); near(a.audio.sourceTime, 7); a.dispose();
   }
   {
     const state = platform({ delayedSeek: true }); const a = await createSceneSurface(instance(), resource('audio'));
@@ -158,6 +210,6 @@ async function main() {
     const state = platform(); const a = await createSceneSurface({ id: 'text', text: { content: 'AB\nCD', fontSize: 1, width: 2, align: 'left', color: '#ffffff' } });
     assert.equal(state.audio.length, 0); assert.equal(a.materials[0].depthWrite, false); a.dispose();
   }
-  console.log('scene media: incremental MP4 metadata, streaming, silent lookahead, volume keyframes/spatial gain independent of opacity, trim/rate/fades/seek, cancellation and teardown passed');
+  console.log('scene media: incremental MP4 metadata, streaming, silent lookahead, volume keyframes/spatial gain independent of opacity, 1x trim/fades/seek, cancellation and teardown passed');
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

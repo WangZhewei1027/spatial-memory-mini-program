@@ -478,7 +478,7 @@ async function main() {
       { ...basic, id: "fading", asset: "dancer", timing },
       { ...basic, id: "steady", asset: "dancer" },
       { ...basic, id: "caption", text: { content: "空间文字", color: "#102030", fontSize: .25, width: 3, align: "center" }, timing },
-      { ...basic, id: "music", asset: "music", timing, media: { trimStartSeconds: 1, trimEndSeconds: 4, playbackRate: 2, volume: .8, muted: false, loop: true } },
+      { ...basic, id: "music", asset: "music", timing, media: { trimStartSeconds: 1, trimEndSeconds: 4, playbackRate: 1, volume: .8, muted: false, loop: true } },
     ];
     manifest.content.assets.music = { assetId: "music" };
     manifest.resources.music = { kind: "audio", url: "fixture.mp3" };
@@ -517,16 +517,16 @@ async function main() {
     near(steady.materials[0].material.opacity, .8, "another clone remains unchanged");
     near(sharedMaterial.opacity, .8, "cache material remains untouched");
     near(caption.materials[0].material.opacity, .3, "text uses the same envelope");
-    assert.deepEqual(surfaces[1].calls.at(-1), [3, true, 8, true]);
-    player.pause(); assert.deepEqual(surfaces[1].calls.at(-1), [3, false, 8, true], "pause stops sound synchronously");
+    assert.deepEqual(surfaces[1].calls.at(-1), [3, true, 8, true, undefined, 0]);
+    player.pause(); assert.deepEqual(surfaces[1].calls.at(-1), [3, false, 8, true, undefined, 0], "pause stops sound synchronously");
     player.seek(5.5); near(fading.materials[0].material.opacity, .4); near(caption.materials[0].material.opacity, .3);
-    assert.equal(player.state, "paused"); assert.deepEqual(surfaces[1].calls.at(-1), [5.5, false, 8, true]);
+    assert.equal(player.state, "paused"); assert.deepEqual(surfaces[1].calls.at(-1), [5.5, false, 8, true, undefined, 1]);
     player.seek(6); assert.equal(music.instanceRoot.visible, false, "out point is exclusive");
     player.seek(8); assert.equal(player.state, "ended");
     player.seek(0); assert.equal(player.state, "paused"); assert.equal(fading.instanceRoot.visible, false);
-    player.restart(); assert.equal(player.state, "playing"); assert.deepEqual(surfaces[1].calls.at(-1), [0, true, 8, true]);
+    player.restart(); assert.equal(player.state, "playing"); assert.deepEqual(surfaces[1].calls.at(-1), [0, true, 8, true, undefined, 5]);
     player.seek(2); player.update(.5); near(player.time, 2.5, "seeking during playback resumes the shared clock");
-    assert.deepEqual(surfaces[1].calls.at(-1), [2.5, true, 8, true]);
+    assert.deepEqual(surfaces[1].calls.at(-1), [2.5, true, 8, true, undefined, 6]);
     contexts[1].onError(new Error("native decoder failed"));
     assert.equal(player.state, "error"); assert.equal(player.diagnostics.kind, "media"); assert.equal(player.diagnostics.instanceId, "music");
     assert.equal(player.root.children.length, 0); assert.equal(cache.stats.live, 0);
@@ -603,11 +603,10 @@ async function main() {
     await textOnly.load(); assert.equal(textOnly.state, "ready", "text-only scenes need no ModelCache or team asset");
     textOnly.dispose(); assert.equal(disposed, 1);
     const cases = [
-      data => { data.content.instances = []; },
+      data => { data.content.instances = null; },
       data => { data.content.groups = null; },
       data => { data.content.instances[0].parent = "missing"; },
       data => { data.content.instances[0].id = "constructor"; },
-      data => { data.content.groups = Array.from({ length: 5 }, (_, index) => ({ ...basic, id: `group${index}`, ...(index ? { parent: `group${index - 1}` } : {}) })); },
       data => { data.content.instances[0].timing = { startSeconds: 3, endSeconds: 2, fadeInSeconds: 0, fadeOutSeconds: 0 }; },
       data => { data.content.instances[0].text.width = Infinity; },
       data => { data.content.instances[0].media = { trimStartSeconds: 0, trimEndSeconds: null, playbackRate: 1, volume: 1, loop: false, muted: false }; },

@@ -52,28 +52,15 @@ function createSceneMediaContext() {
   };
 }
 
-// WeChat BufferSource.playbackRate is limited to 2. Resampling by two keeps the
-// schema's complete .1–4 range without asking native playback to clamp the rate.
-function doubleSpeedBuffer(context, buffer) {
-  const length = Math.max(1, Math.ceil(buffer.length / 2));
-  const result = context.createBuffer(buffer.numberOfChannels, length, buffer.sampleRate);
-  for (let channel = 0; channel < buffer.numberOfChannels; channel++) {
-    const input = buffer.getChannelData(channel), output = result.getChannelData(channel);
-    for (let i = 0; i < length; i++) output[i] = (input[i * 2] + (input[Math.min(i * 2 + 1, input.length - 1)])) / 2;
-  }
-  return result;
-}
-
 async function createAudioPlayback(url, settings, { mediaContext, onError, isCancelled }) {
   const context = mediaContext.getAudioContext();
   const original = await mediaContext.decode(url);
   if (isCancelled()) throw new Error("演出音频加载已取消");
-  const factor = settings.playbackRate > 2 ? 2 : 1;
-  let buffer = factor === 2 ? doubleSpeedBuffer(context, original) : original;
+  let buffer = original;
   const gain = context.createGain(); gain.gain.value = 0; gain.connect(context.destination);
   let disposed = false, source = null, generation = 0, pending = false;
   const unregister = mediaContext.onDispose(dispose);
-  let offset = 0, startedAt = 0, desired = null;
+  let desired = null, intent = 0, endedIntent = -1;
   const start = Math.min(original.duration, settings.trimStartSeconds);
   const end = Math.max(start, Math.min(original.duration, settings.trimEndSeconds === null ? Infinity : settings.trimEndSeconds));
   function stop() {
@@ -83,27 +70,28 @@ async function createAudioPlayback(url, settings, { mediaContext, onError, isCan
     try { previous.stop(); } catch (_) {}
     try { previous.disconnect(); } catch (_) {}
   }
-  function position() {
-    if (!source) return offset;
-    const local = Math.max(0, context.currentTime - startedAt) * settings.playbackRate;
-    return settings.loop && end > start ? start + ((offset - start + local) % (end - start)) : Math.min(end, offset + local);
-  }
   function begin() {
-    if (disposed || !desired?.playing || pending || source || end <= start) return;
+    if (disposed || !desired?.playing || pending || source || endedIntent === intent || end <= start) return;
     const request = ++generation;
     function launch() {
       if (disposed || isCancelled() || request !== generation || !desired?.playing) return;
       pending = false;
       try {
         const node = context.createBufferSource();
-        node.buffer = buffer; node.playbackRate.value = settings.playbackRate / factor;
-        node.loop = settings.loop; node.loopStart = start / factor; node.loopEnd = end / factor;
-        node.connect(gain); source = node; offset = desired.time; startedAt = context.currentTime;
-        node.onended = () => { if (source === node) { source = null; try { node.disconnect(); } catch (_) {} } };
+        source = node;
+        node.buffer = buffer;
+        node.loop = settings.loop; node.loopStart = start; node.loopEnd = end;
+        const offset = desired.time, startedAt = context.currentTime, sourceIntent = intent;
+        node.connect(gain);
+        node.onended = () => {
+          if (source !== node) return;
+          source = null; endedIntent = sourceIntent;
+          try { node.disconnect(); } catch (_) {}
+        };
         // Explicit stop uses the audio clock (start's duration semantics differ across SDKs).
-        node.start(0, offset / factor);
-        if (!settings.loop) node.stop(startedAt + Math.max(0, end - offset) / settings.playbackRate);
-      } catch (error) { stop(); onError(failure(error, "音频播放失败")); }
+        node.start(0, offset);
+        if (!settings.loop) node.stop(startedAt + Math.max(0, end - offset));
+      } catch (error) { dispose(); onError(failure(error, "音频播放失败")); }
     }
     if (context.state === "suspended") {
       pending = true;
@@ -122,16 +110,21 @@ async function createAudioPlayback(url, settings, { mediaContext, onError, isCan
   return {
     duration: original.duration,
     get sourceTime() { return desired?.time || 0; },
-    sync(time, playing, volume) {
+    sync(time, playing, volume, transport = { revision: 0, cycle: 0 }) {
       if (disposed) return;
-      desired = { time, playing: playing && end > start && (settings.loop || time < end) };
-      gain.gain.value = settings.muted ? 0 : volume;
-      if (!desired.playing) { stop(); offset = time; return; }
-      if (source && Math.abs(position() - time) > .15) stop();
+      playing = playing && end > start && (settings.loop || time < end);
+      const revision = transport.revision ?? 0;
+      // Native loopStart/loopEnd already handle local cycles. Only transport
+      // commands and playback edges may replace a running buffer source.
+      if (!desired || revision !== desired.revision || playing !== desired.playing || (!playing && time !== desired.time)) {
+        intent++; endedIntent = -1; stop();
+      }
+      desired = { time, playing, revision };
+      gain.gain.value = settings.muted || !playing ? 0 : volume;
       begin();
     },
     dispose,
   };
 }
 
-module.exports = { createSceneMediaContext, createAudioPlayback, doubleSpeedBuffer };
+module.exports = { createSceneMediaContext, createAudioPlayback };

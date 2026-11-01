@@ -1,5 +1,6 @@
 const { THREE, probeWebGL2, createCanvasFacade } = require("./runtime");
 const { VKSessionController } = require("./vk-session");
+const { sceneFarPlane } = require("./camera-clipping");
 const {
   syncVKCamera,
   createCameraBackground,
@@ -38,6 +39,7 @@ class ARRuntime {
       };
       this.scene = new THREE.Scene();
       this.camera = new THREE.PerspectiveCamera();
+      this.camera.far = 300;
       this.content = new THREE.Group();
       this.scene.add(this.content);
       this.scene.add(new THREE.AmbientLight(0xffffff, 3));
@@ -131,7 +133,7 @@ class ARRuntime {
         throw new Error("未取得相机帧，请检查设备兼容性和权限");
       return;
     }
-    if (!syncVKCamera(this.camera, frame.camera, 0.01, 300)) {
+    if (!syncVKCamera(this.camera, frame.camera, 0.01, this.camera.far)) {
       if (start - (this.validFrameAt || this.startedAt) > 10000)
         throw new Error("相机位姿持续无效，请重新启动空间追踪");
       return;
@@ -169,13 +171,18 @@ class ARRuntime {
       this.ready = true;
       this.onReady();
     }
+    // Scene time must keep pace with native audio even when rendering drops frames.
+    // start() resets the baseline so time spent in the background is excluded.
     const dt =
       this.lastFrameAt == null
         ? 0
-        : Math.min(0.1, Math.max(0, (now - this.lastFrameAt) / 1000));
+        : Math.max(0, (now - this.lastFrameAt) / 1000);
     this.lastFrameAt = now;
     const businessAt = Date.now();
     this.onTick(dt);
+    const far = sceneFarPlane(this.camera, this.content);
+    if (far !== this.camera.far && !syncVKCamera(this.camera, frame.camera, 0.01, far))
+      throw new Error("场景相机投影无效");
     const businessMs = Date.now() - businessAt,
       renderAt = Date.now();
     this.renderer.render(this.scene, this.camera);

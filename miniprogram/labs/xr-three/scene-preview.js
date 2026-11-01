@@ -5,6 +5,7 @@ const { fetchScenePreview } = require("../../utils/backend");
 const { verifyScenePlayer } = require("./scene-checks");
 const { stressScene } = require("./scene-stress");
 const { visualProbe } = require("./scene-visual-probe");
+const { sceneFarPlane } = require("../../lib/three-runtime/camera-clipping");
 
 Page({
   data: { enabled: false, sceneId: "", organizationId: "", busy: false, loaded: false, status: "初始化…", report: "", playback: "" },
@@ -106,6 +107,8 @@ Page({
       this._camera.lookAt(center);
       const probe = visualProbe(manifest);
       if (typeof preview.seek === "function") preview.seek(probe.time);
+      this._camera.far = sceneFarPlane(this._camera, this._scene);
+      this._camera.updateProjectionMatrix();
       this._renderer.render(this._scene, this._camera);
       if (this._shaderError) throw new Error(this._shaderError);
       if (probe.visual && !this._renderer.info.render.triangles) throw new Error("画面没有提交可见内容三角形");
@@ -124,9 +127,12 @@ Page({
     const frame = (time) => {
       if (generation !== this._frameGeneration || !this._active || this._dead) return;
       this._raf = null;
-      const dt = this._lastFrame == null ? 0 : Math.max(0, Math.min((time - this._lastFrame) / 1000, 0.1));
+      // Dropped frames still count toward playback; stopFrames resets background time.
+      const dt = this._lastFrame == null ? 0 : Math.max(0, (time - this._lastFrame) / 1000);
       this._lastFrame = time;
       if (!this.data.busy) this._player?.update(dt);
+      this._camera.far = sceneFarPlane(this._camera, this._scene);
+      this._camera.updateProjectionMatrix();
       this._renderer.render(this._scene, this._camera);
       if (time - (this._lastStatus || 0) > 250) {
         this._lastStatus = time;
