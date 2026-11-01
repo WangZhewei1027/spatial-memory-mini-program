@@ -11,8 +11,12 @@ function invalid(message, instance) {
 }
 function validateManifest(manifest) {
   const version = manifest?.schemaVersion, content = manifest?.content;
-  if (![4, 5, 7, 8].includes(version) || !record(content) || content.kind !== "composition") invalid("不支持的场景播放协议");
+  if (![4, 5, 7, 8, 9].includes(version) || !record(content) || content.kind !== "composition") invalid("不支持的场景播放协议");
   if (content.units !== "meters" || typeof content.loop !== "boolean") invalid("场景单位或循环参数无效");
+  if (version === 9 || content.viewerPosition !== undefined) {
+    const position = content.viewerPosition;
+    if (version !== 9 || !Array.isArray(position) || position.length !== 3 || !position.every(value => finite(value)) || (position[0] === 0 && position[2] === 0)) invalid("场景观看位置无效或播放协议不匹配");
+  }
   if (content.durationSeconds !== null && !finite(content.durationSeconds, Number.MIN_VALUE)) invalid("场景时长必须是有限正数");
   const list = content.instances, groupList = version === 4 || content.groups === undefined ? [] : content.groups;
   const resources = manifest.resources;
@@ -53,11 +57,11 @@ function validateManifest(manifest) {
   }
   const kindOf = inst => inst.text !== undefined ? "text" : resources[inst.asset]?.kind ?? "model";
   for (const inst of list) {
-    transform(inst, version === 8);
+    transform(inst, version >= 8);
     if (version !== 4 && inst.parent !== undefined && !groups.has(inst.parent)) invalid("场景对象的父分组不存在", inst);
     const kind = kindOf(inst);
     if (version < 7 && (kind !== "model" || inst.timing !== undefined || inst.media !== undefined)) invalid("此场景需要演出播放协议 7", inst);
-    if (version !== 8 && (inst.opacity !== undefined || inst.tracks?.opacity !== undefined || inst.tracks?.volume !== undefined || inst.media?.spatial !== undefined)) invalid("此场景需要参数动画与空间音频播放协议 8", inst);
+    if (version < 8 && (inst.opacity !== undefined || inst.tracks?.opacity !== undefined || inst.tracks?.volume !== undefined || inst.media?.spatial !== undefined)) invalid("此场景需要参数动画与空间音频播放协议 8", inst);
     if (inst.opacity !== undefined && !finite(inst.opacity, 0, 1)) invalid("场景透明度无效", inst);
     if (inst.tracks?.volume !== undefined && !["audio", "video"].includes(kind)) invalid("音量关键帧仅适用于音频与视频", inst);
     if (inst.text !== undefined) {

@@ -1,11 +1,12 @@
 const { CONFIG, backendRpc } = require("../../../utils/backend");
 const { THREE } = require("../../../lib/three-runtime/runtime");
 const { createCompositionPlayer } = require("../../../lib/scene-runtime/composition");
+const { scenePlacementFromCamera } = require("../../../lib/scene-runtime/vendor/scene-core");
 
 // One scene placement occupies one queue slot; all children share its lifetime.
 module.exports = {
   async _loadScenePlayer(asset, manifest) {
-    if (![4, 5, 7, 8].includes(manifest?.schemaVersion) || manifest.assetId !== asset.id || manifest.content?.kind !== "composition")
+    if (![4, 5, 7, 8, 9].includes(manifest?.schemaVersion) || manifest.assetId !== asset.id || manifest.content?.kind !== "composition")
       throw new Error("不支持的场景内容");
     if (manifest.content.instances?.length === 0) return null;
     const player = createCompositionPlayer(manifest, {
@@ -46,11 +47,12 @@ module.exports = {
     forward.y = 0;
     if (forward.lengthSq() < 1e-8) forward.set(0, 0, -1);
     forward.normalize();
+    const phonePosition = camera.getWorldPosition(new THREE.Vector3());
+    const placement = scenePlacementFromCamera(phonePosition.toArray(), forward.toArray(), player.viewerPosition);
     const root = player.root;
-    root.position.copy(camera.position).addScaledVector(forward, 2);
-    // QR preview is directly in front; map scenes retain their ground-level origin.
-    if (!this._scenePreviewMode) root.position.y -= 1.4;
-    root.rotation.y = Math.atan2(-forward.x, -forward.z);
+    // Match the saved Web viewer position while keeping the authored ground level.
+    root.position.fromArray(placement.position);
+    root.rotation.set(0, placement.yaw, 0);
     if (!this._wouldSurvive(root.position, "scene")) { player.dispose(); return false; }
     this.shadowRoot.add(root);
     const entry = this._registerNode(asset.id, root, null, {

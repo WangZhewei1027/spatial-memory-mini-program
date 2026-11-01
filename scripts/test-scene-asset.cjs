@@ -713,7 +713,7 @@ async function main() {
     assert.equal(host.placeScenePreview(now), true);
     assert.equal(host.nodeList.length, 1);
     near(host.nodeList[0].node.position.x, 9, "placement uses the camera at display time");
-    near(host.nodeList[0].node.position.y, 1.6); near(host.nodeList[0].node.position.z, -2);
+    near(host.nodeList[0].node.position.y, .1, "default ground is 1.5m below the phone"); near(host.nodeList[0].node.position.z, -2);
     tick(20); assert.equal(host.placeScenePreview(now), false);
     assert.equal(host.nodeList.length, 1, "rapid/repeated clicks mount only once");
     host._destroyNode(host.nodeList[0]); host.nodeList = [];
@@ -728,6 +728,28 @@ async function main() {
     assert.equal(host.placeScenePreview(now), true, "one new valid frame suffices; no two-second delay");
     assert.equal(host.nodeList.length, 1);
     host._destroyNode(host.nodeList[0]); host.nodeList = [];
+
+    // Saved viewer coordinates are relative to the scene's ground, even when
+    // the phone is tilted and its tracking camera has a transformed parent.
+    const cameraRig = new T.Group(); cameraRig.position.set(4, 1, -6); cameraRig.rotation.y = .35; cameraRig.add(camera);
+    camera.position.set(2, .8, 3); camera.rotation.set(.4, -.7, .2, "YXZ");
+    const viewerPosition = [2, 1.8, 0];
+    response = { statusCode: 200, data: compositionManifest() };
+    response.data.schemaVersion = 9; response.data.content.viewerPosition = viewerPosition;
+    await host._beginScenePreview(); tick(1); assert.equal(host.placeScenePreview(now), true);
+    const customRoot = host.nodeList[0].node;
+    const phoneWorld = camera.getWorldPosition(new T.Vector3());
+    const inScene = customRoot.worldToLocal(phoneWorld.clone());
+    viewerPosition.forEach((value, axis) => near(inScene.getComponent(axis), value, "saved viewer position matches phone in scene coordinates"));
+    near(customRoot.position.y, phoneWorld.y - 1.8);
+    near(customRoot.rotation.x, 0); near(customRoot.rotation.z, 0, "phone pitch and roll do not tilt the scene ground");
+    const sceneForward = camera.getWorldDirection(new T.Vector3()); sceneForward.y = 0; sceneForward.normalize();
+    sceneForward.applyQuaternion(customRoot.getWorldQuaternion(new T.Quaternion()).invert());
+    near(sceneForward.x, -1); near(sceneForward.z, 0, "scene heading preserves the saved side viewpoint");
+    near(customRoot.children[0].position.x, -1, "placement leaves authored local positions unchanged");
+    host._destroyNode(host.nodeList[0]); host.nodeList = [];
+    camera.removeFromParent(); camera.position.set(9, 1.6, 0); camera.rotation.set(0, 0, 0);
+    response = { statusCode: 200, data: compositionManifest() };
 
     await host._beginScenePreview(); tick(1);
     assert.equal(cache.stats.live, 2, "loaded Scene waits off-stage for a click");
@@ -935,7 +957,7 @@ async function main() {
     const entry = host.nodeList[0];
     assert.equal(entry.bucket, "scene");
     assert.equal(entry.repulsionEnabled, false);
-    near(entry.node.position.y, 0);
+    near(entry.node.position.y, -.1, "map scenes use the same 1.5m viewer height as QR scenes");
     near(entry.node.position.z, -2);
     // scene root → instanceRoot → pivot → model
     const model = entry.node.children[0].children[0].children[0];
@@ -949,6 +971,21 @@ async function main() {
     host._destroyNode(entry); host.nodeList = [];
     assert.equal(cache.stats.live, 0);
     assert.equal(host.shadowRoot.children.length, 0);
+
+    // Anchor-discovered scenes consume the same saved viewer position as QR scenes.
+    response = { statusCode: 200, data: compositionManifest() };
+    response.data.schemaVersion = 9; response.data.content.viewerPosition = [-3, 1.2, 4];
+    host.retrievalMode = "anchor"; host._matchedAnchorId = "store-anchor";
+    camera.position.set(4, 2.2, -3); camera.rotation.set(.35, 1, -.2, "YXZ");
+    await host._placeAsset(asset);
+    const anchorRoot = host.nodeList[0].node;
+    const anchorViewer = anchorRoot.worldToLocal(camera.getWorldPosition(new T.Vector3()));
+    [-3, 1.2, 4].forEach((value, axis) => near(anchorViewer.getComponent(axis), value, "anchor scene honors saved viewer position"));
+    near(anchorRoot.rotation.x, 0); near(anchorRoot.rotation.z, 0);
+    host._destroyNode(host.nodeList[0]); host.nodeList = [];
+    host.retrievalMode = "gps"; host._matchedAnchorId = null;
+    camera.position.set(0, 1.4, 0); camera.rotation.set(0, 0, 0);
+    response = { statusCode: 200, data: compositionManifest() };
 
     // Stale manifest never starts a model load.
     let resolveResponse;

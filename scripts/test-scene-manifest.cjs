@@ -20,6 +20,17 @@ Object.assign(manifest.content.instances[0], { parent: 'group_19',
     spatial: { enabled: true, refDistance: 200, maxDistance: 20_000, rolloffFactor: 20 } } });
 manifest.content.instances[24] = { ...base('text'), text: { content: 'x'.repeat(5000), fontSize: .001, width: 200, color: '#ffffff', align: 'left' } };
 assert.equal(validateManifest(manifest).list.length, 25);
+const withViewer = structuredClone(manifest);
+withViewer.schemaVersion = 9; withViewer.content.viewerPosition = [2, 1.8, 0];
+withViewer.content.instances[0].opacity = .7;
+withViewer.content.instances[0].tracks.volume = [{ time: 0, value: .5, handles: [0, 0, 1, 1], connectedRight: true }];
+assert.equal(validateManifest(withViewer).list.length, 25);
+for (const viewerPosition of [undefined, null, [0, 1.5, 0], [0, Infinity, 2], [0, '1.5', 2], [0, 1.5], [0, 1.5, 2, 3]]) {
+  const invalid = structuredClone(withViewer); invalid.content.viewerPosition = viewerPosition;
+  assert.throws(() => validateManifest(invalid), error => error.kind === 'protocol');
+}
+const oldViewerProtocol = structuredClone(withViewer); oldViewerProtocol.schemaVersion = 8;
+assert.throws(() => validateManifest(oldViewerProtocol), error => error.kind === 'protocol');
 for (const edit of [
   data => { data.content.groups[0].parent = 'group_2'; },
   data => { data.content.groups[0].parent = 'missing'; },

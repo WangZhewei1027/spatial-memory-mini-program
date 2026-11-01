@@ -41,6 +41,7 @@ function createCompositionPlayer(manifest, { modelCache, canvas = modelCache?.ca
     kind: "composition",
     get state() { return state; },
     get root() { return root; },
+    get viewerPosition() { return content?.viewerPosition; },
     get time() { return t; },
     get duration() { return duration; },
     get diagnostics() { return diagnostics; },
