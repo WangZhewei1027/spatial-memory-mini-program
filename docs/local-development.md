@@ -13,7 +13,7 @@
 
 ## 启动与连接
 
-1. 启动 Web 使用的本地数据库。在相邻 `sanlinlaojie` 仓库确认 `.env.local` 的 `DATABASE_URL`；当前指向本机 `localhost:55432` 的 `sanlin` 数据库。
+1. 启动 Web 使用的本地数据库。在相邻 `spatial-memory` 仓库确认 `.env.local` 的 `DATABASE_URL`。已有开发环境可能仍使用 `localhost:55432` 的 `sanlin` 数据库；这是保留数据的历史部署标识，本次项目改名不会重命名数据库，以实际配置为准。
 2. 在 Web 仓库运行 `npm run dev -- --hostname 0.0.0.0 --port 3000`。若 3000 已有开发服务，不要另起一个自动换端口的实例。
 3. 首次拉取代码后在小程序仓库执行 `npm install`，自动生成本机地址文件。在微信开发者工具“设置 → 项目设置 → 本地设置”勾选“启用自定义处理命令”（本机已启用），确认三个预处理命令均为 `sh scripts/sync-dev-backend.sh`，然后重新编译。保留“不校验合法域名”；当前 `project.private.config.json` 已设置 `urlCheck: false`。
 4. 真机预览使用开发版，手机与电脑连接同一可互访的 Wi-Fi，打开小程序调试，并允许电脑防火墙的 3000 端口访问。VisionKit AR 仍需真机验证。

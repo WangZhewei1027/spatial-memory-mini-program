@@ -31,11 +31,11 @@ flowchart LR
 
 ```text
 spatial-memory/
-  sanlinlaojie/          # Web、后端、数据库配置
-  xr-frame-plant-trees/  # 小程序、场景播放器、联调脚本
+  spatial-memory/               # Web、后端、数据库配置
+  spatial-memory-mini-program/  # 小程序、场景播放器、联调脚本
 ```
 
-1. 在 Web 仓库确认 `.env.local` 的 `DATABASE_URL` 指向本地开发库。当前开发环境使用 `localhost:55432/sanlin`。启动已有数据库；若已有 `sanlin-dev-db` 容器，可运行 `docker start sanlin-dev-db`。不要为了联调覆盖现有数据。
+1. 在 Web 仓库确认 `.env.local` 的 `DATABASE_URL` 指向本地开发库。已有环境可能保留 `localhost:55432/sanlin` 和 `sanlin-dev-db` 容器等历史部署标识；本次项目改名不迁移数据库或容器。以实际配置为准启动已有数据库，例如仅在该容器已存在时运行 `docker start sanlin-dev-db`，不要为了联调覆盖现有数据。
 2. 在 Web 仓库启动服务：
 
    ```sh
@@ -44,7 +44,7 @@ spatial-memory/
 
    若 3000 已有本项目的服务，直接复用。小程序与准备脚本均使用 3000，不要另起自动换端口的实例。
 3. 首次在小程序仓库运行 `npm install`。安装后的脚本会生成本机开发地址文件。
-4. 在微信开发者工具打开 `xr-frame-plant-trees` 项目根目录。在“设置 → 项目设置 → 本地设置”启用“自定义处理命令”，三个预处理命令均为：
+4. 在微信开发者工具打开 `spatial-memory-mini-program` 项目根目录。在“设置 → 项目设置 → 本地设置”启用“自定义处理命令”，三个预处理命令均为：
 
    ```sh
    sh scripts/sync-dev-backend.sh
@@ -200,7 +200,7 @@ Node 回归另覆盖循环、延迟片段、故意破坏时间推进时能否检
 
 ### 5.1 用官方 CLI 执行与取证
 
-完成第 2.1 节门禁后，先 `project_list` 确认绝对路径。同名项目可能同时存在于 `WeChatProjects` 和当前工作区，不能只按显示名称选项目。本次使用的是 `/Users/wangzhewei/Working/spatial-memory/xr-frame-plant-trees`。
+完成第 2.1 节门禁后，先 `project_list` 确认绝对路径。同名项目可能同时存在于 `WeChatProjects` 和当前工作区，不能只按显示名称选项目。本次使用的是 `/Users/wangzhewei/Working/spatial-memory/spatial-memory-mini-program`。
 
 以下在小程序仓库根目录执行。项目列表、当前页、截图和错误日志查询已在本次接入中实测；打开联调页及读取联调状态的参数已核对本机 `--help`，仍需在每轮联调中实际运行验收。
 

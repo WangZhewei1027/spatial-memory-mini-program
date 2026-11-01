@@ -1,5 +1,5 @@
 // 后端访问层：小程序只和 Web 平台的公开接口 /api/miniapp/* 通信
-// （服务端文档：sanlinlaojie/docs/miniapp-api.md），不再直连数据库。
+// （服务端文档：spatial-memory/docs/miniapp-api.md），不再直连数据库。
 // 素材发现与活动参与使用独立接口；只有最终的 AR 渲染复用现有展示器。
 import { resolveBackendBaseUrl } from "./backend-environment";
 import type { ActivityLocation, ActivitySubmission } from "./activity-state";

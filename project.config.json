@@ -1,5 +1,6 @@
 {
   "description": "项目配置文件",
+  "projectname": "spatial-memory-mini-program",
   "miniprogramRoot": "miniprogram/",
   "compileType": "miniprogram",
   "scripts": {
