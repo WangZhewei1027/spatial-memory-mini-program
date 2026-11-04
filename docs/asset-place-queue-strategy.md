@@ -37,7 +37,7 @@ asset1 ─> 加载 ─> scene操作 ─> 等40ms ─>
                                                                                               asset3 ─> ...
 ```
 
-每次只有 **一个 asset** 的网络 IO + scene 操作在进行，渲染帧始终有喘息机会。
+本队列每次只等待一个素材的放置完成；素材内部、场景播放器和巨大模型仍可能有各自的资源请求。错峰可减少集中回调，但不能保证慢设备每帧都不卡顿。
 
 ### 关键方法
 
@@ -76,12 +76,13 @@ async _drainPlaceQueue() {
 
 #### `_placeAsset(asset)`（现为 async）
 
-根据 `file_type` 分发，并 `await` 异步放置方法：
+根据 `file_type` 分发，并 `await` 放置方法；以下是简化示意，实际错误记录与取消逻辑以源码为准：
 
 ```js
 async _placeAsset(asset) {
   if (!this._isAssetPlacementCurrent(asset)) return; // 内容代次 / 白名单复检
-  if (asset.file_type === "model")      await this._placeModelAsset(asset);
+  if (asset.file_type === "scene")     await this._placeSceneAsset(asset);
+  else if (asset.file_type === "model") await this._placeModelAsset(asset);
   else if (asset.file_type === "text")  await this._placeTextAsset(asset);
   else if (asset.file_type === "image") await this._placeImageAsset(asset);
   else if (asset.file_type === "audio") await this._placeAudioAsset(asset);
@@ -103,11 +104,11 @@ placeStaggerMs: 40,   // 相邻两次放置之间的空闲窗口（毫秒）；�
 
 | 值 | 效果 |
 |---|---|
-| `0` | 无空闲窗口，但仍然串行——不会扎堆，适合素材很少的场景 |
-| `40`（默认）| 每个素材之间留 ~40ms 给渲染帧（≈2.5 帧），一批 10 个素材约 0.4s 显完；模型固定至少 120ms |
-| `150+` | 素材出现更稀疏，帧率更稳定，适合低端机型 |
+| `0` | 当前实现使用 `placeStaggerMs || 40`，设为 0 仍回退到 40ms，不能关闭间隔 |
+| `40`（默认）| 每个素材之间留 ~40ms 给渲染帧（≈2.5 帧），10 条非模型素材仅间隔就约 0.4s，还需加上加载与构建时间；模型固定至少 120ms |
+| `150+` | 增大两次放置之间的窗口，也延后后续素材的加载与展示；效果需实测 |
 
-> 调大 `placeStaggerMs` 不影响加载速度（网络 IO 仍在后台进行），只影响 scene 操作写入渲染管线的频率。
+> 放置是串行的，调大间隔会推迟下一条素材开始加载；不能把间隔总和当作整批就绪时间。
 
 ---
 

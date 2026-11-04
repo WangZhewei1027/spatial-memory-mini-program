@@ -1,6 +1,6 @@
 # 模型归一化大小渲染逻辑调查（xr-start）
 
-> **⚠️ 2026-10-09 更新**：正式 AR 页 `pages/ar/ar` 已从 xr-frame 切换为 VisionKit v2 + Three.js（见 [`visionkit-three-migration.md`](visionkit-three-migration.md)）。"最长边归一到目标尺寸再乘 `scale_multiplier`" 的思路不变，但本文原先引用的 xr-frame 机制（`calcTotalBoundBox`、`transform.scale.setValue`、`gltfComp`、`_placeHugeModel`、`HUGE_MODEL_SCALE`）已不存在，当前统一由 `assets/model.js` 的 `instantiateModel(handle, targetSize, config)` 用 `THREE.Box3().setFromObject()` 实现；下文已按当前实现更新。xr-frame 写法仅适用于 `labs/xr-three/xr-view/` 与 `xr-frame-demo-master/`（注意 xr-frame 相机 forward 为 +Z，Three 为 −Z）。
+> **当前实现**：正式 AR 页 `pages/ar/ar` 已从 xr-frame 切换为 VisionKit v2 + Three.js（见 [`visionkit-three-migration.md`](visionkit-three-migration.md)）。"最长边归一到目标尺寸再乘 `scale_multiplier`" 的思路不变，但本文原先引用的 xr-frame 机制（`calcTotalBoundBox`、`transform.scale.setValue`、`gltfComp`、`_placeHugeModel`、`HUGE_MODEL_SCALE`）已不存在，当前统一由 `assets/model.js` 的 `instantiateModel(handle, targetSize, config)` 用 `THREE.Box3().setFromObject()` 实现；下文已按当前实现更新。xr-frame 写法仅适用于 `labs/xr-three/xr-view/` 与 `xr-frame-demo-master/`（注意 xr-frame 相机 forward 为 +Z，Three 为 −Z）。
 
 ## 调查范围
 
@@ -11,7 +11,7 @@
 - 音频素材附带的耳机 GLB 模型
 - 每个素材可选配置：`asset.config.scale_multiplier`
 
-不包含 2D 图片、文本气泡、弹幕、粒子的尺寸策略（这些不是基于 GLTF 包围盒归一化）。
+不包含 2D 图片、文本气泡、弹幕、粒子的尺寸策略。独立 Scene 的实例使用保存的米制变换，不走普通素材归一化；仅通过 `lib/three-runtime/pivot.js` 的 `groundOffset` 将底部中心对齐实例原点，见[场景播放](scene-asset.md)。
 
 ## 结论摘要
 
@@ -125,9 +125,9 @@ const configured = Number(config.scale_multiplier),
 - 和普通模型相同算法，但目标最长边改为 `0.3m`，随后再乘 `scale_multiplier`。
 - 若耳机模型加载失败，回退为 `BoxGeometry(0.15, 0.15, 0.15)` 立方体占位（非归一化分支）。
 
-## 非归一化分支与例外
+## 种树与其他尺寸路径
 
-以下逻辑不是“按模型包围盒归一化”：
+种树复用归一化；其他路径有各自的尺寸规则：
 
 1. `placeNode()` 点击种树：已改为 `instantiateModel(handle, 0.3)`（归一到 0.3m，不读 `scale_multiplier`），并把包围盒底部中心对齐到光标落点
    - 文件：`miniprogram/components/xr-start/index.js`
@@ -150,5 +150,4 @@ const configured = Number(config.scale_multiplier),
 ## 可优化点（可选）
 
 1. 将 `1`、`0.3`、`15` 提升到统一配置，避免多处硬编码（目前仍在各调用点硬编码）。
-2. ~~抽一个通用函数~~ 已实现：`instantiateModel(handle, targetSize, config)` 统一处理普通 / 巨型 / 耳机 / 种树。
-3. 为 `maxExtent <= 0.0001` 增加告警日志，便于定位损坏模型或异常包围盒。
+2. 为 `maxExtent <= 0.0001` 增加告警日志，便于定位损坏模型或异常包围盒。

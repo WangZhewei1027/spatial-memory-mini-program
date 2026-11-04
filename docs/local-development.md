@@ -6,8 +6,8 @@
 |---|---|
 | develop：微信开发者工具模拟器 | `http://127.0.0.1:3000`（不依赖 Wi-Fi IP） |
 | develop：真机预览／开发版 | `http://<电脑当前局域网 IP>:3000` |
-| trial：体验版 | `https://139.196.189.102` |
-| release：正式版 | `https://139.196.189.102`（保留原配置） |
+| trial：体验版 | `https://www.spatialmemory.online` |
+| release：正式版 | `https://www.spatialmemory.online` |
 
 普通数据接口与匹配识别上传共用所选地址，路径仍为 `/api/miniapp/*`。本地连接失败不会回退线上；环境无法确定时停止初始化。
 
@@ -42,7 +42,20 @@
 
 ## 线上配置
 
-`ONLINE_API_BASE_URL` 保留原服务器 IP。体验版／正式版不会使用开发地址。现有部署说明指出 IP 无法配置成微信合法服务器域名；体验版仍需原调试方式，正式发布前需按原计划完成备案、改回域名并配置白名单。本次环境切换不改变这项既有限制。
+`ONLINE_API_BASE_URL` 使用 `https://www.spatialmemory.online`。体验版／正式版不会使用开发地址。不要改回公网 IP：即使浏览器或 curl 能访问，也不能将公网 IP 配置成微信合法服务器域名。裸域名 `https://spatialmemory.online` 会 301 跳转到 `www`，因此接口直接使用最终域名，避免 POST 重定向。
+
+在微信公众平台「开发管理 → 开发设置 → 服务器域名」核对以下配置：
+
+| 类型 | 当前部署所需域名 | 用途 |
+|---|---|---|
+| request 合法域名 | `https://www.spatialmemory.online` | 场景、地图、活动等接口 |
+| request 合法域名 | `https://spatial-memory-media.oss-cn-shanghai.aliyuncs.com` | 视频播放器的 Range 请求 |
+| uploadFile 合法域名 | `https://www.spatialmemory.online` | 识别图片上传 |
+| downloadFile 合法域名 | `https://spatial-memory-media.oss-cn-shanghai.aliyuncs.com` | 模型、图片等素材下载 |
+
+若场景引用其他存储域名，还需按实际资源 URL 配置。修改本地代码不会自动更新微信后台白名单；修改地址后需要重新上传并发布小程序。验收时使用体验版／正式版并关闭手机调试，开发工具的 `urlCheck: false` 只用于本地开发，不能证明线上请求可用。
+
+2026-11-03 排查记录：旧 IP 与 `www` 域名的 HTTPS 场景接口均能返回业务 JSON，裸域名返回 301；真实场景加载代码在传输替身拒绝公网 IP 时复现“场景加载失败”，切换到 `www` 后回归通过。该回归覆盖地址选择与场景请求链路，不替代微信后台域名名单及真机验收。
 
 回归：`npm run test:backend` 验证网络变化、网卡筛选、覆盖、离线清理，以及各环境的全部数据 API、识别地址和失败不回退线上；`npm test` 运行项目全部本地回归。测试使用微信 API 替身，真机网络与 AR 需另行验证。
 
@@ -50,10 +63,10 @@
 
 完整操作步骤、AI 执行约定、自动检查覆盖范围、常见故障和历史验收记录统一维护在 [Web → 小程序场景自动联调](scene-auto-debug.md)。本文负责后端地址与本机环境配置。
 
-在 Web 保存至少包含一个模型的 scene 后，在小程序仓库执行：
+在 Web 保存至少包含一个实例的 scene 后，在小程序仓库执行：
 
 ```sh
-npm run scene:preview -- <sceneAssetId> <workspaceId>
+npm run scene:preview -- <sceneId> <organizationId>
 ```
 
 然后在微信开发者工具选择「Scene 本地全流程验证」并完整编译。页面使用实际小程序播放器自动检查、渲染并播放；后续 Web 保存后点击“加载并自动验证”即可重新加载。

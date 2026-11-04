@@ -1,128 +1,35 @@
-# 素材更新以及去重管理策略
+# 素材容量、去重与释放
 
-> **现状说明**：本文的 `gen`（`new` / `old` / `danmaku`）三队列与 `maxNewNodeCount` / `maxOldNodeCount` / `maxDanmakuCount` 参数描述的是最初实现，现已被**容量桶**取代：`assets/registry.js` 按素材类型声明所属桶（`heavy`=model/video、`light`=text/image、`audio`、`transient`=直发弹幕），`config.js` 的 `buckets` 为每桶独立配置 `{ cap, evict }`（`farthest` 按 XZ 距离最远先踢，`fifo` 仅弹幕），另有 `minLifetimeMs` 新节点保护、`revealFirstFetch` / `revealPerFetch` 限量揭示和 `repeatCooldownMs` 重复冷却。单一 `nodeList`、全局 `assetId` 去重、本地弹幕 `assetId = null`、按距离渐进淘汰等原则不变；驱逐实现见 `assets/queue.js`。下文保留原设计的取舍说明，参数与代码位置已按当前实现更新。
+当前实现使用单一 `nodeList` 加独立容量桶。`assets/registry.js` 声明类型所属桶，`config.js` 配置容量与驱逐方式，`assets/queue.js` 负责注册和释放。原 `gen=new/old/danmaku` 三队列及 `maxNewNodeCount`、`maxOldNodeCount` 已退出运行时。
 
-## 背景与取舍
+## 容量桶
 
-`xr-start` 组件中的 `nodeList` 同时承载远程素材（model / text / image / audio）和本地即时弹幕。单队列 + 单一驱逐策略在两类场景里都存在明显问题：
+| 桶 | 类型 | 当前容量 | 驱逐 |
+| --- | --- | --- | --- |
+| scene | 整个 Scene | 1 | XZ 距离最远优先，整场释放 |
+| heavy | model、video | 6 | XZ 距离最远优先 |
+| light | text、image | 20 | XZ 距离最远优先 |
+| audio | audio | 6 | XZ 距离最远优先 |
+| transient | 本地即时弹幕动画 | 8 | FIFO，最早注册优先 |
 
-1. 城市场景（高密度）中，素材规模可能持续增长，如果没有上限管理，会带来渲染与内存压力累积。
-2. 课程场景（强叙事）中，重复素材会打断叙事路径，因此必须严格去重。
-3. 移动触发拉取时若整批替换，会出现“每 5m 刷新一次”的割裂感。
+各桶独立限容。Scene 的容量指地图中同时保留的整场数量，场景内部实例数量不设业务上限；巨型模型使用单独的 `_hugeNodeList`。类型扩展时同步放置器、registry 和桶配置。
 
-因此采用三队列方案，这是一种工程上的平衡：
+注册时保护刚加入的节点；旧节点优先在停留超过 `minLifetimeMs`（当前 1500ms）的候选中驱逐。没有已过保护期的候选时放宽到其他节点，以保持容量硬上限。距离取相机与节点的 XZ 位置，不随原地转头改变。异步模型/视频在昂贵实例化前通过 `_wouldSurvive` 判断是否有保留空间。
 
-- 用上限控制保证运行稳定性。
-- 用分队列驱逐保证空间连续感。
-- 用全局 diff 去重保证内容叙事一致性。
+## 身份与去重
 
-## 三队列模型
+普通内容的 `entry.assetId` 虽保留旧字段名，值是发现 API 的 **Placement ID**。活动留言使用 `activity:<recordId>`，本地飞入弹幕使用 null。一个素材在两个地图中的投放不能按基础 Asset ID 合并。
 
-`nodeList` 是单数组容器，队列身份通过 `entry.gen` 标记：
+`displayAssets()` 同时检查在场节点、待放置队列与正在加载的 ID，再应用重复冷却。文字和图片离场后冷却 60 秒；未配置冷却的类型不受此窗口限制。待渲染内容和加载结果还要通过内容代次及允许 ID 集合检查，模式切换后的旧回调不能恢复内容。
 
-| `gen` | 来源 | 上限 | 驱逐策略 |
-|---|---|---|---|
-| `'new'` | 当前拉取周期新增素材 | `maxNewNodeCount` (10) | FIFO |
-| `'old'` | 上一轮及更早沉淀素材 | `maxOldNodeCount` (25) | 最远优先 |
-| `'danmaku'` | 本地刚发送、尚未回流数据库的弹幕 | `maxDanmakuCount` (8) | FIFO |
+## 分批出现
 
-说明：数据库回流的历史弹幕是 `text` 素材，走正常 `'new' -> 'old'` 流程，不进入 `danmaku` 队列。
+首轮最多揭示 20 条，后续每次最多 10 条；首轮空结果不消耗加量机会。候选先区分 heavy 与其他类型，再各自洗牌并截取，避免固定排序导致一直展示同一批内容。未入选内容不进入冷却，下轮可再次参与。
 
-## 更新时序（displayAssets）
+实际放置通过[串行队列](asset-place-queue-strategy.md)完成。新一轮拉取不会按 new/old 分代整体替换在场节点；容量与距离决定逐步淘汰。活动则单独刷新，并主动清理已隐藏、停用或离开范围的记录，见[活动](activities.md)。
 
-每次 `fetchNearbyAssets` 返回后，处理顺序如下：
+## 清理与验证
 
-```text
-displayAssets(assets)
-	1) 轮次提升: nodeList 中 gen='new' -> gen='old'
-	2) 全局去重: cachedIds = 所有 entry.assetId(非 null)
-							 newAssets = assets.filter(a => !cachedIds.has(a.id))
-	3) 放置新增: newAssets.forEach(_placeAsset)
-							 _placeAsset 完成创建后调用 _registerNode(..., gen='new')
-```
+`_destroyNode()` 幂等隐藏并移除节点，调用实例 dispose、清理 Three 对象及音频索引，再按类型记录冷却或清理即时动画。Scene 的 dispose 同时释放整场模型、媒体与订阅。暂停检索、切换模式、进入后台和卸载时取消队列，晚到资源也必须释放。
 
-关键点：
-
-- 去重是全局的，不区分 old/new/danmaku，只要 `assetId` 已存在就跳过。
-- 去重发生在渲染前，避免“删旧再建新”的无意义抖动。
-- 异步素材（如 model/image/audio）在实际创建完成后入队，入队即触发容量收敛。
-
-## 容量收敛（_enforceCapacity）
-
-`_registerNode` 追加节点后立刻执行 `_enforceCapacity(protectEntry)`，分别对三类队列独立收敛。
-
-### new / danmaku: FIFO
-
-```text
-while queue(genTag).length > maxCount:
-	victim = nodeList 中最早出现且 != protectEntry 的同 gen 节点
-	destroy(victim)
-```
-
-用途：保证最新一批内容优先展示，避免刚插入的节点被本轮淘汰。
-
-### old: 最远优先
-
-```text
-while oldQueue.length > maxOldNodeCount:
-	victim = 与相机 xz 平面距离最大的 old 节点
-	destroy(victim)
-```
-
-用途：优先保留用户附近内容，弱化“场景瞬时跳变”。
-
-## 去重保证
-
-场景无重复素材由以下约束共同保证：
-
-1. `displayAssets` 使用 `assetId` 做 diff，重复项直接 skip。
-2. `nodeList` 是全局单容器，`cachedIds` 覆盖所有队列。
-3. 本地弹幕使用 `assetId = null`，不与远程素材 `assetId` 命名空间冲突。
-
-## 场景效果
-
-| 场景 | 旧策略表现 | 当前策略表现 |
-|---|---|---|
-| 用户按位移持续触发拉取 | 容易整批替换 | 新素材增量进入，旧素材渐进淘汰 |
-| 高密度城市素材流 | 总量易失控或频繁抖动 | 通过三上限稳定收敛 |
-| 课程叙事链路 | 重复出现同素材 | 全局 diff 去重，叙事更连贯 |
-| 高频本地弹幕 | 与远程素材抢同一池 | 弹幕独立队列，不挤占远程容量 |
-
-## 参数说明
-
-| 参数 | 默认值 | 作用 |
-|---|---|---|
-| `buckets.heavy.cap` | 6 | model / video 桶上限（最远先踢） |
-| `buckets.light.cap` | 20 | text / image 桶上限（最远先踢） |
-| `buckets.audio.cap` | 6 | 空间音频桶上限（最远先踢） |
-| `buckets.transient.cap` | 8 | 本地即时弹幕桶上限（FIFO） |
-| `minLifetimeMs` | 1500 | 新节点在此窗口内不参与驱逐 |
-| `revealFirstFetch` / `revealPerFetch` | 20 / 10 | 首轮 / 后续每轮最多放置的新素材数 |
-| `maxDistanceMeters` | 20 | 服务端附近素材查询半径 |
-| `distanceThreshold` | 5 | 触发重拉取的净位移阈值 |
-| `fetchCooldownMs` | 3000 | 两次拉取的最小时间间隔 |
-
-## 已知限制与影响
-
-该策略有一个需要提前告知内容团队的限制：
-
-1. 创作者在单次拉取窗口内投放的“新增叙述点”可见数量，会受到 `maxNewNodeCount` 直接约束。
-2. 当同一轮新增素材数量超过 `maxNewNodeCount` 时，new 队列按 FIFO 收敛，最早进入的那部分新增点会被优先淘汰。
-3. 这不等于场景总量只能显示 `maxNewNodeCount`，因为 old 与 danmaku 仍有各自上限；但“单轮新增叙述点”的稳定可见规模，确实由 `maxNewNodeCount` 决定。
-
-对课程类叙事场景的影响是：如果希望一口气展示更多新叙述点，需要配套提高 `maxNewNodeCount`，或降低触发频率，让同一轮的新增素材有更长展示窗口。
-
-## 调参建议
-
-- 追求稳定帧率：优先降低 `maxOldNodeCount` 与 `maxDanmakuCount`。
-- 追求沿路丰富度：提高 `maxOldNodeCount`，并保持 old 队列最远优先策略。
-- 追求叙事一致性：保持严格 diff 去重，不建议放宽 `assetId` 判重规则。
-
-## 代码位置
-
-- 配置与容量参数：../miniprogram/components/xr-start/config.js（`buckets`、`minLifetimeMs`、`reveal*`）
-- 桶归属与重复冷却声明：../miniprogram/components/xr-start/assets/registry.js
-- 更新、去重、限量揭示主逻辑：../miniprogram/components/xr-start/assets/index.js（`displayAssets`）
-- 注册、驱逐、销毁：../miniprogram/components/xr-start/assets/queue.js（`_registerNode` / `_enforceCapacity` / `_evictBucket`）
-- 本地弹幕入队：../miniprogram/components/xr-start/effects/danmaku.js
-- 拉取触发策略：./fetch-trigger-strategy.md
+`npm test` 覆盖实际队列、异步取消、场景整场释放与活动刷新。`npm run test:scene-memory` 验证反复装载的对象和堆回收；结果不能推导手机 GPU 或原生解码器的内存上限。参数以 `config.js`、`registry.js` 为准。

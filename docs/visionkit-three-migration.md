@@ -1,6 +1,6 @@
 # 正式 AR 渲染迁移：VisionKit v2 + Three.js
 
-2026-10-08。`aliyun-backend` 已快进合并到本地 `master`（`e397a90`），从该提交建立 `feat/visionkit-three-renderer`。保留 master 命名。本文描述该分支中的正式业务实现，不仅是实验页。
+正式 AR 已使用 VisionKit v2 + Three.js。本文维护当前运行时职责及兼容边界；2026-10-08 起的迁移测试记录只代表当时版本。Scene 播放与活动分别见[场景播放](scene-asset.md)和[活动说明](activities.md)。
 
 ## 架构
 
@@ -65,7 +65,7 @@ VisionKit 负责跟踪与相机，Three r186 负责全部业务虚拟内容。�
 3. **当前不支持必须依赖 Draco / meshopt 的压缩模型，也不支持仅有 KTX2 的纹理。** 会提示导出未压缩 GLB 与 PNG/JPEG/WebP；有普通纹理兜底的 KTX2 模型可用兜底。不能承诺任意 Web Three 插件或压缩加载器直接可用。
 4. 背景沿用微信官方示例的 UV `.ra` 取样；实验页可切 `.rg` 对照。各设备格式、方向、颜色和透明视频 RGBA 格式需要真机确认。
 5. 视频需要原生解码结果为紧密 RGBA，并逐帧复制上传纹理；这部分不属于零拷贝。默认 TBB，普通视频用 `metadata.transparent=false` 或 `metadata.format='normal'`。原生解码支持的容器/编码由设备决定。
-6. 空间跟踪不等于场景深度、遮挡或持久化视觉定位。此次不增加外部演出编辑器，也不把 SAGE 相似度变成精确落点位姿。
+6. 空间跟踪不等于场景深度、遮挡或持久化视觉定位。Web 场景编排通过独立 Scene 播放器接入；SAGE 相似度不提供精确落点位姿。
 
 ## 构建与回归
 
@@ -77,7 +77,7 @@ npm test
 
 构建命令保留原名，同时生成生产共享 bundle 与实验页代理。提交生成物后，微信开发者工具不需要再做 npm 构建。共享 Three bundle 约 666 KB；包体最终大小以开发者工具实际打包报告为准。
 
-`npm test` 包含：
+当前 `npm test` 的完整清单以 `package.json` 为准，包含环境、扫码、活动、场景和以下 AR 回归：
 
 - `test-xr-three-lab.cjs`：实际 bundle/GLTF、位姿矩阵与投影、平面落点、会话启动/取消/晚回调、渲染错误清理。
 - `test-ar-runtime.cjs`：动态文字与清场、实际业务 GLB 解析、缓存引用、晚加载拦截、原生 JPEG/RGBA 导出、命中到展示再位移重启、视频清理。
@@ -85,9 +85,9 @@ npm test
 - `test-capture-motion.cjs`：准备期、1.5 米固定基准、旋转不触发、缺失位姿。
 - `test-asset-timing.cjs`：排队/放置/首个素材就绪的计时与取消语义。
 
-本地构建、5 组测试及 46 个小程序 JS/TS 模块的语法转译检查通过。本地回归不提供 native WebGL / 相机 / 视频播放的证明。
+迁移初期（2026-10-08/09）记录：本地构建、当时的 5 组测试及 46 个小程序 JS/TS 模块的语法转译检查通过。本地回归不提供 native WebGL / 相机 / 视频播放的证明。
 
-开发者工具检查受限：此前 Mac 锁屏；最终可读取首页及控制台，但截图不可用、控制台粘贴超时，未能验证正式 AR 路由画面。工具当前灰度基础库 3.17.3 还显示系统 ENGINE_WASM / draco_mini 资源 HTTP 500；问题面板的 3 条错误均指向已有参考工程 xr-frame-demo-master 的 TS 输出配置，不能算作新渲染器运行结果。**当前尚未完成 iOS/Android 真机验收**。
+开发者工具检查受限：此前 Mac 锁屏；最终可读取首页及控制台，但截图不可用、控制台粘贴超时，未能验证正式 AR 路由画面。工具当前灰度基础库 3.17.3 还显示系统 ENGINE_WASM / draco_mini 资源 HTTP 500；问题面板的 3 条错误均指向已有参考工程 xr-frame-demo-master 的 TS 输出配置，不能算作新渲染器运行结果。**该次迁移未完成 iOS/Android 真机验收**。
 
 ## 真机检查
 

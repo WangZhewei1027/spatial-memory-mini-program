@@ -208,7 +208,16 @@ function request<T>(
       header: { "Content-Type": "application/json" },
       data,
       success: (res) => resolve(res as ApiResponse<T>),
-      fail: reject,
+      fail: (error: { errMsg?: string; message?: string }) => {
+        // wx.request rejects with errMsg, while scene UI consumes Error.message.
+        const message = error.errMsg || error.message || "网络请求失败，请稍后重试";
+        console.error("[backend] request failed", {
+          method,
+          endpoint: `${API_BASE_URL}${API_PREFIX}${path.split("?")[0]}`,
+          message,
+        });
+        reject(Object.assign(new Error(message), error));
+      },
     });
   });
 }

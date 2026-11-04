@@ -1,104 +1,29 @@
-# `get_huge_assets` 参数关系说明
+# 巨大模型查询的范围与身份
 
-> 传输层：小程序通过 `utils/backend.ts` 的 `backendRpc("get_huge_assets", …)` 调用，实际请求为 `POST /api/miniapp/assets/huge`（Web 平台公开接口），参数名与返回值和原 Supabase RPC 完全一致；下文的 "RPC" 指服务端的查询函数。客户端调用见 `assets/huge.js` 的 `fetchHugeAssets()`。
+小程序的 `backendRpc("get_huge_assets", …)` 是 HTTP 路由映射，调用 `POST /api/miniapp/assets/huge`。当前后端使用 Kysely 查询地图投放；不再执行旧 Supabase RPC。
 
-## 参数定义
+## 参数与响应
 
-| 参数 | 类型 | 默认值 | 含义 |
-|------|------|--------|------|
-| `p_organization_id` | `uuid` | `NULL` | 调用方所属的组织 ID，**必须有值才会执行查询** |
-| `p_workspace_id` | `uuid` | `NULL` | 具体的工作空间 ID，可选 |
-
----
-
-## 两个参数的关系
-
-`p_organization_id` 是**前置必要条件**，`p_workspace_id` 是可选的**进一步收窄**。
-
-```
-p_organization_id
-    └── 确定查询范围上界（必须）
-            │
-            ├── p_workspace_id = NULL  →  org-wide：返回该 org 下所有 workspace 的结果
-            │
-            └── p_workspace_id 有值   →  精确匹配：workspace 必须同时满足
-                                          w.id = p_workspace_id
-                                          AND w.organization_id = p_organization_id
-```
-
-关键约束：**`p_workspace_id` 永远不能脱离 `p_organization_id` 单独使用**。
-当传入 `p_workspace_id` 时，RPC 会同时验证该 workspace 确实隶属于指定的 org，
-防止跨 org 越界查询。
-
----
-
-## 三种调用场景
-
-### 1. 扫码进入具体 workspace
+| 参数 | 规则 |
+| --- | --- |
+| `p_organization_id` | 必填团队 UUID；缺失或非法返回 HTTP 400 |
+| `p_workspace_id` | 可选地图合集 UUID；省略、null 或空字符串表示团队全部地图；其他非法值返回 HTTP 400 |
 
 ```js
-// 客户端同时持有 organizationId 和 workspaceId
 backendRpc("get_huge_assets", {
-  p_organization_id: organizationId,
-  p_workspace_id: workspaceId,
-})
+  p_organization_id: CONFIG.organizationId,
+  p_workspace_id: CONFIG.workspaceId ?? null,
+});
 ```
 
-**RPC 行为**：`w.id = workspaceId AND w.organization_id = organizationId`，
-只返回该 workspace 的 `is_huge` 模型。
+服务端同时按提供的团队与地图 ID 过滤，只返回未归档团队、未归档地图中的 active 模型投放；投放须有位置且有效展示配置 `is_huge` 为 true。地图不属于指定团队时返回空数组。文件解析当前素材资源，返回记录的 `id` 是 **Placement ID**，用于同一模型多处投放的独立管理。
 
----
+成功响应为 JSON 数组，含 `id`、`file_type`、`file_url`、`text_content`、`metadata`、`config`、`latitude`、`longitude`。客户端另过滤缺失文件或无效经纬度；这些检查不代替服务端范围校验。
 
-### 2. 只扫 org 码 / 切换 org 后未选择具体 workspace
+## 调用时机
 
-```js
-// 客户端只有 organizationId，workspaceId 传 null
-backendRpc("get_huge_assets", {
-  p_organization_id: organizationId,
-  p_workspace_id: null, // 代码中为 CONFIG.workspaceId ?? null
-})
-```
+`components/xr-start/assets/huge.js` 的 `fetchHugeAssets()` 要求 GPS、团队 ID 已就绪且处于未暂停的 GPS 模式；已有请求进行中时跳过。团队 ID 未知时客户端不发请求，绕过客户端直接漏传该字段会得到 400，不能当作正常空结果。
 
-**RPC 行为**：`w.organization_id = organizationId`，
-返回该 org 下所有 workspace 的 `is_huge` 模型。
+返回后校验模式代次；异步放置再校验内容代次。巨大模型使用单独的 `_hugeNodeList` 与模型缓存，按 GPS/罗盘确定方向，靠近 30 米时隐藏，显示距离上限 100 米。尺寸处理见[模型尺寸](model-normalization-rendering.md)。
 
----
-
-### 3. 未初始化（兜底保护）
-
-```js
-// organizationId 未知，客户端不发请求
-if (!organizationId) return;
-```
-
-**客户端提前拦截，不调用 RPC**。
-即便意外调用（两个参数均为 NULL），RPC 的 WHERE 子句两个分支均不满足，
-返回空结果集，fail-close，不会泄露任何数据。
-
----
-
-## WHERE 子句逻辑（完整）
-
-```sql
-WHERE
-  (
-    -- 场景 1：双重约束
-    (p_workspace_id IS NOT NULL AND p_organization_id IS NOT NULL
-      AND w.id = p_workspace_id AND w.organization_id = p_organization_id)
-    OR
-    -- 场景 2：org-wide
-    (p_workspace_id IS NULL AND p_organization_id IS NOT NULL
-      AND w.organization_id = p_organization_id)
-  )
-  AND a.is_huge = true
-  AND a.file_type = 'model'
-  AND a.location IS NOT NULL;
-```
-
----
-
-## 与 `fetchNearbyAssets` 的一致性
-
-`get_huge_assets` 的参数传递模式与 `fetchNearbyAssets` 完全一致：
-作用域约束**完全由 RPC 参数决定**，客户端不做额外的 `isHugeAssetInScope` 过滤，
-避免客户端与数据库双重过滤逻辑不一致的问题。
+普通附近发现 `/assets/nearby` 可提供团队或地图范围；巨大模型接口明确要求团队参数，不能把两个接口的参数要求互换。服务端实现见相邻 Web 仓库 `app/api/miniapp/assets/huge/route.ts` 与 `lib/placements/runtime.server.ts`。

@@ -2,99 +2,20 @@
 applyTo: "miniprogram/**/*.{js,ts}"
 ---
 
-# 微信小程序本地持久化（Storage）实践约束
+# 小程序本地持久化
 
-适用于需要跨页面、跨会话保留状态的数据（如：打卡状态、最近使用记录、轻量配置）。
+Storage 用于小体积、可序列化的入口配置、显示偏好和匿名参与标识。服务端是活动参与与打卡进度的权威来源，成功提交后再刷新进度；本地旧 `checkedInShopIds` 不作为完成依据，也不迁移为服务端记录。
 
-## 1) 何时用 Storage
+## 当前约定
 
-- 用于小体积、可序列化、非敏感数据。
-- 不要放大文件、二进制、长列表历史（避免读写阻塞和配额压力）。
-- 服务端真实状态优先，Storage 用于本地体验增强与离线兜底。
+- 扫码入口与历史使用 `config:scan:v1`、`config:scan:history:v1`，优先级、去重和最多 20 条的规则见[扫码参数](../../docs/scan-config-priority-strategy.md)。
+- 活动匿名设备标识使用 `activity:participant:v1`；它不是登录身份。清除存储或换设备会产生新标识，活动进度通过 API 获取，见[活动说明](../../docs/activities.md)。
+- 新业务缓存使用稳定且带版本的 key；属于团队/地图的内容显式带对应作用域，切换上下文后不复用其他范围的数据。
 
-## 2) Key 设计
+## 读写与清理
 
-- 使用稳定且可读的 key，避免临时命名。
-- 多租户/多空间数据必须带作用域：`tenantId`、`contextId`（或等价业务维度）。
-- 推荐格式：`<module>:<tenantId>:<contextId>:<name>:v<version>`。
+初始化时读取，先校验结构与字段再使用。读写包在 try/catch 中，失败按业务提供默认值或明确提示；写失败不能宣称已跨会话保存。避免在定位、罗盘或逐帧回调中写 Storage。
 
-示例：
+用户切换入口时先更新内存，再同步持久化当前入口与历史，随后导航或请求名称；异步名称刷新以最新历史合并，避免覆盖期间的新选择。原始状态与派生展示值分离。
 
-```js
-const key = `checkState:${tenantId}:${contextId}:map:v1`;
-```
-
-## 3) 读写时机
-
-- 页面/组件初始化时读取一次（`onLoad`/`attached`）。
-- 用户动作成功后立即写入（例如“首次打卡成功”后写入）。
-- 不要在高频回调中频繁写（如 `onLocationChange`、`onCompassChange`、每帧 tick）。
-
-## 4) 数据结构
-
-- 优先使用对象字典而非数组做状态集合，降低查找和更新成本。
-- 示例：`{ [shopId]: true }` 用于“是否已打卡”。
-- 读取后必须做类型校验，不合法时回退到默认值。
-
-示例：
-
-```js
-const saved = wx.getStorageSync(key);
-const checkedMap = saved && typeof saved === "object" ? saved : {};
-```
-
-## 5) 容错与降级
-
-- `getStorageSync/setStorageSync` 外层加 `try/catch`。
-- 读失败：使用默认值继续业务流程。
-- 写失败：记录 `console.error`，不要阻塞主流程。
-
-## 6) 同步约定（关键）
-
-- 先更新内存态（`setData`），再写 Storage，保证 UI 立即响应。
-- 持久化字段和 UI 计算字段分离：
-  - 持久化：原始状态（如 `checkedInShopIds`）
-  - 计算态：派生值（如 `checkedInCount`）
-
-## 7) 清理策略
-
-- 业务列表变化后，定期清理无效 ID（已下线店铺）。
-- 版本升级时做迁移：
-  - 新 key 启用后，旧 key 读取一次迁移并删除。
-- 用户切换组织/空间时，按作用域 key 隔离，不共享状态。
-
-## 8) 通用状态持久化模式
-
-- 布尔状态集合推荐结构：`{ [entityId]: true }`。
-- 按业务作用域隔离 key（如租户、场景、环境），避免跨上下文串数据。
-- UI 可基于持久化态提供“已完成/已处理”反馈；首次完成时写入 Storage。
-
-推荐实现片段：
-
-```js
-const stateKey = `checkState:${tenantId}:${contextId}:map:v1`;
-
-function loadStateMap() {
-  try {
-    const saved = wx.getStorageSync(stateKey);
-    return saved && typeof saved === "object" ? saved : {};
-  } catch (e) {
-    console.error("[storage] read failed", e);
-    return {};
-  }
-}
-
-function persistStateMap(nextMap) {
-  try {
-    wx.setStorageSync(stateKey, nextMap);
-  } catch (e) {
-    console.error("[storage] write failed", e);
-  }
-}
-```
-
-## 9) 禁止项
-
-- 禁止把敏感信息（token、手机号明文、隐私数据）写入 Storage。
-- 禁止无上限累积日志或历史数组。
-- 禁止在无类型校验情况下直接信任 Storage 内容。
+历史和日志有明确容量；媒体、二进制和敏感凭据使用适当的资源管理机制，不写入普通 Storage。版本迁移须验证旧数据含义与新结构；仅对可等价转换的数据迁移，成功后再处理旧 key。

@@ -3,9 +3,9 @@ import { apiBaseUrl } from "./backend-development-local";
 // 电脑在编译／预览前自动生成；本机地址不提交到 Git。
 export const DEVELOPMENT_API_BASE_URL = apiBaseUrl;
 
-// 保留现有线上配置：域名备案完成后再切换为 https://spatialmemory.online。
-// 当前服务器 IP 的微信调试限制见 docs/local-development.md。
-export const ONLINE_API_BASE_URL = "https://139.196.189.102";
+// 正式版必须使用微信后台配置的 HTTPS 域名，不能使用公网 IP。
+// 直接使用 www 主域名，避免裸域名的 301 跳转影响 POST 请求。
+export const ONLINE_API_BASE_URL = "https://www.spatialmemory.online";
 
 export function resolveBackendBaseUrl(envVersion: string | undefined, platform?: string): string {
   switch (envVersion) {

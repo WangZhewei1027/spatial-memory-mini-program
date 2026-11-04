@@ -2,7 +2,7 @@
 
 当前识别链路为：小程序上传 JPEG 和 GPS → 所选 Web 后端 `POST /api/miniapp/anchors/recognize?workspace_id=…` → GPS 候选与参考特征查询 → 按服务端配置调用 SAGE 推理 → 返回匹配点及其关联素材。管理端继续负责匹配点、参考图及关联素材管理。请求/响应协议与原 Supabase Edge Function 一致（`X-Recognition-Request-Id` 回显、`data.request_id`、`diagnostics`），不再需要 `x-region` 头。所有数据接口见 `miniprogram/utils/backend.ts` 与 Web 仓库的 `docs/miniapp-api.md`。
 
-> develop 使用本地 Web：模拟器连接 `http://127.0.0.1:3000`，真机地址由电脑在编译／预览前自动检测；trial／release 保留 `https://139.196.189.102`。环境规则集中在 `utils/backend-environment.ts`，连接步骤见[本地开发](local-development.md)。线上 IP 是等待 ICP 备案期间的原有临时配置；备案通过后修改 `ONLINE_API_BASE_URL` 并配置合法域名。开发者工具需“不校验合法域名”，真机开发需“打开调试”。
+> develop 使用本地 Web：模拟器连接 `http://127.0.0.1:3000`，真机地址由电脑在编译／预览前自动检测；trial／release 使用 `https://www.spatialmemory.online`。环境规则集中在 `utils/backend-environment.ts`，连接步骤见[本地开发](local-development.md)。线上域名由 `ONLINE_API_BASE_URL` 定义，微信后台域名配置与发布验证见本地开发说明。开发者工具需“不校验合法域名”，真机开发需“打开调试”。
 
 ## 当前渲染与取图
 
@@ -40,7 +40,7 @@ restartDistanceMeters: 1.5,
 
 识别接口公开访问，客户端不带模型 Token、数据库密钥、Authorization 或 apikey。`X-Recognition-Request-Id` 用于日志关联，`X-Client-Id` 为本地随机设备标识，用于后端限流。必须选择明确的 workspace。服务端负责模型连接、GPS 候选、参考特征、相似度阈值及素材关联；此渲染迁移没有改变服务端配置或匹配阈值。
 
-正式域名需要配置 uploadFile / request 白名单，素材域名需要 downloadFile 等对应白名单；当前 IP 调试限制见文首已有部署说明。旧 Supabase Edge 区域对照属于历史方案，当前不经 Edge Function；更换渲染器不改变后端网络路径。
+正式域名需要配置 uploadFile / request 白名单，素材域名需要 downloadFile 等对应白名单；配置要求见[本地开发说明](local-development.md#线上配置)。旧 Supabase Edge 区域对照属于历史方案，当前不经 Edge Function；更换渲染器不改变后端网络路径。
 
 ## 重试与错误
 

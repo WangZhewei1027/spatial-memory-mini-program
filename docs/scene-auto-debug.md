@@ -19,8 +19,8 @@ flowchart LR
   Render --> Controls[播放画面与暂停、重播、清场]
 ```
 
-- Scene 是团队场景，schema 6 编排 JSON 保存在 `scene.document`，接口编译为播放 schema 4（无分组模型）、schema 5（分组模型）或 schema 7（媒体、文字和出入场演出）；媒体作为团队基础 Asset 被场景按 ID 引用，文字直接属于 Scene。保存直接生效，不需要发布。
-- Web 直接在同一 DOM 中呈现 Three.js Editor 原生视口、应用属性/时间轴和统一撤销历史。实例 position/rotation/scale 的 9 个数值通道由两端同源 Scene Core 2.2.0 采样（分组节点同样采样）；旋转界面显示度，协议为 Euler XYZ 弧度，GLB 内置动画继续交给 Three.AnimationMixer。
+- Scene 是团队场景，schema 6 编排 JSON 保存在 `scene.document`，接口编译为播放 schema 4（无分组模型）、schema 5（分组模型）、schema 7（媒体、文字和出入场演出）、schema 8（参数自动化/空间音频）或 schema 9（显式观看位置）；媒体作为团队基础 Asset 被场景按 ID 引用，文字直接属于 Scene。保存直接生效，不需要发布。
+- Web 直接在同一 DOM 中呈现 Three.js Editor 原生视口、应用属性/时间轴和统一撤销历史。实例 position/rotation/scale 的 9 个数值通道由两端同源 Scene Core（版本和源码哈希见 `miniprogram/lib/scene-runtime/vendor/build-info.json`） 采样（分组节点同样采样）；旋转界面显示度，协议为 Euler XYZ 弧度，GLB 内置动画继续交给 Three.AnimationMixer。
 - 场景接口按当前数据解析模型 URL；使用与场景同一团队的模型。协议与正式 AR 接入见 [Scene 素材播放](scene-asset.md)。
 - 小程序通过 HTTP 接口访问后端，不直接连接数据库。素材可能仍从 OSS 下载；使用本地数据库不代表所有媒体都已离线。
 - 联调页路径为 `labs/xr-three/scene-preview`。它使用模拟相机，跳过 VisionKit；复用正式代码中的 `fetchScenePreview`、`ModelCache` 和 `createCompositionPlayer`。
@@ -55,42 +55,13 @@ spatial-memory/
 
 地址切换、Node.js 查找与多网卡配置详见 [本地开发环境](local-development.md)。当前 shell 启动脚本适用于 macOS/Linux；Windows 的命令配置也见该文档。
 
-### 2.1 微信开发者工具内置 Skill 与 CLI
+### 2.1 微信开发者工具 Skill 与 CLI
 
-小程序侧优先使用官方 `wechatide-skill` 和 `wechatide` 执行项目查询、编译、运行时读取、页面交互与截图；Web 编辑器仍使用浏览器。2026-10-14 本机已通过这条调用链完成授权和只读取证，未另行配置独立 MCP server。
+操作开发者工具时使用当前安装的 `wechatide-skill`。先读取其根 `SKILL.md`，按其中的版本、登录和授权门禁处理，再选择编译、自动化或调试子技能。安装诊断与更新只在该技能指定的条件下执行；不从历史记录复制版本号、轮询上限或本机授权状态。
 
-先检查实际安装内容，不要仅凭“稳定版／Nightly”判断是否支持。此次本机稳定版 `2.02.2608060` 已带有 `wechatide-skill 0.3.9`。macOS 本机路径为：
+命令形态为 `wechatide -c Codex <toolName>`，参数以当前 `wechatide <toolName> --help` 为准。CLI 需要能访问本机桌面的执行环境，项目参数使用绝对路径。已完成的会话检查按技能约定复用。
 
-| 内容 | 路径 |
-|---|---|
-| CLI 原始入口 | `/Applications/wechatwebdevtools.app/Contents/MacOS/wechatide` |
-| 官方只读 skill 包 | `/Applications/wechatwebdevtools.app/Contents/Resources/app.asar.unpacked/wechatide-skill` |
-| 已导入的 agent skill | `~/.agents/skills/wechatide-skill` |
-| 本次补齐的 CLI 软链 | `~/.local/bin/wechatide`，指向上述原始入口 |
-
-首次导入 skill 或 CLI 不可用时，在官方 skill 包根目录执行：
-
-```sh
-node skills/installer/scripts/check-installation.mjs
-# 仅在 compatible: true、App 内 CLI 存在但 PATH 找不到命令时执行：
-node skills/installer/scripts/ensure-cli-path.mjs
-```
-
-本次诊断返回 `compatible: true`；补软链后即可调用，无需重新下载开发者工具。若返回 `mustEnterInstaller: true`，再按内置 `skills/installer/SKILL.md` 处理安装或更新。首次导入／版本落后时，将官方 skill 包整目录单向复制到 agent 的 skills 目录，重新加载后核对版本；不得把 agent 侧文件写回 `.app` 安装目录。
-
-每个会话首次使用前，读取当前 agent 已加载的 `SKILL.md` frontmatter 版本再检查状态。以下 `0.3.9` 是本次版本，升级后应替换：
-
-```sh
-wechatide -c Codex check_wechatide_status --skill-version 0.3.9
-```
-
-- `versionRelation: equal` 且 `loginExpired: false` 表示版本一致、微信登录有效；还需处理 `tokenRequired`。`agent_behind` 时先同步 skill；`agent_ahead` 按内置 skill 处理兼容性，不回写安装目录。
-- 首次连接可能先提示 `Failed to connect to WechatIDE`，随后自动发起 `auth` 并返回 `pending + taskId`。这时应提醒用户在开发者工具内确认 Codex 授权，不能直接判定安装失败或重复发起授权。
-- 对 `auth`／`login`，按内置规则每 10 秒查询 `wechatide -c Codex polling_task_result --task-id <返回的任务ID>`，最多 10 次；只有最终 `success` 才继续。授权／登录完成后重新检查状态。其他待确认写操作保留 taskId，按对应 skill 恢复，不套用此轮询循环。
-- 本次授权后 `tokenRequired: false`。若以后为 `true`，按 skill 复用已保存的令牌或请用户提供“设置 → 安全”中的 CLI 访问令牌，不从开发者工具本地文件翻找，不写入仓库或日志。
-- CLI 需要能够访问本机桌面的执行环境。会话就绪后复用检查结果，不必每条命令都重新授权。
-
-以已安装版本的 `SKILL.md`、工具索引和 `wechatide <toolName> --help` 为准。本次版本使用 `wechatide -c Codex <toolName>`，例如 `check_wechatide_status`、`open_project_window`、`get_simulator_console`；旧资料里的 `-t` 调用方式和其他版本工具名不可直接照搬。
+2026-10-14 的安装路径、授权与版本验证留在第 7 节，只是历史取证。第 5.1 节保留本项目联调命令示例；运行前仍需核对当前工具支持。
 
 ## 3. 一次完整联调
 
@@ -142,7 +113,7 @@ query：sceneId=<sceneId>&organizationId=<organizationId>
 
 - `PASS · N 项检查通过` 和逐项报告。
 - 模型实际画面，以及 `playing / paused / ended`、播放时间、实例数量。
-- 控制台中的 `[ScenePreview] PASS`，包含场景 ID、工作空间 ID、检查清单及协议版本。
+- 控制台中的 `[ScenePreview] PASS`，包含场景 ID、团队 ID、检查清单及协议版本。
 
 检查项数量由当前场景决定，不要求所有场景都显示 21 项。失败时页面显示 `FAIL · 原因`，控制台输出 `[ScenePreview] FAIL`；修复对应问题后重跑。
 
@@ -161,7 +132,7 @@ GPU 检查确认有模型三角形提交且没有捕获到着色器编译错误�
 | 本轮修改 | 后续操作 |
 |---|---|
 | 同一 scene 的模型编排或关键帧 | Web 保存后，在小程序点击“加载并自动验证” |
-| 切换 scene 或 workspace | 重新运行 `scene:preview` 并选择该编译条件；也可在页内填写两个 ID 后加载 |
+| 切换 scene 或团队 | 重新运行 `scene:preview` 并选择该编译条件；也可在页内填写两个 ID 后加载 |
 | 修改小程序 JS、运行时或环境配置 | 完整编译，再运行检查；不要只依赖热重载 |
 | 页面隐藏后返回 | 隐藏时已停止动画并清场，返回后点击加载 |
 | 电脑切换 Wi-Fi，继续模拟器联调 | 保持本地后端运行；模拟器使用 `127.0.0.1` |
@@ -257,9 +228,9 @@ wechatide -c Codex simulator_screenshot --project "$MINIAPP_PROJECT"
 | CLI 返回成功，但未见本轮 `PASS` | 动作被接受不代表运行验收通过；读取当前页面 status/report、当前场景参数和最新日志，并检查实际画面 |
 | WASM streaming compile／async fetch 失败 | 保留具体错误、当前页面与请求证据，定位 WASM URL、HTTP 状态及调用方后判断影响。首页可见不能证明 AR／WASM 链路正常，也不能据此断言 scene-preview 已失败 |
 | `scene:preview` 请求失败／超时 | 检查本地数据库、Web 3000 服务及其日志，确认没有自动换到 3001；不要切线上来绕过问题 |
-| 场景不存在、工作空间不匹配 | 核对本地库中的两个 UUID，以及当前 Web 所选工作空间 |
-| “请先在 Web 编辑器添加模型并保存场景” | 场景仍为空草稿或编辑器尚未保存；至少添加一个模型并保存 |
-| GLB 加载失败或依赖错误 | 检查模型是否仍在同一工作空间、URL 是否可下载、GLB 是否能解析，以及所选 clip 是否存在 |
+| 场景不存在、团队不匹配 | 核对本地库中的 Scene ID 与 organizationId，以及场景实际所属团队 |
+| “请先在 Web 编辑器添加模型并保存场景” | 场景仍为空草稿或编辑器尚未保存；至少添加一个实例并保存；错误文案沿用“模型”，文字与其他支持的媒体实例也可用 |
+| GLB 加载失败或依赖错误 | 检查模型是否仍属于场景所在团队、URL 是否可下载、GLB 是否能解析，以及所选 clip 是否存在 |
 | 停在“等待 WebGL2”／热重载后无反应 | 完整编译该模式；旧页面可能保留已销毁状态。上下文丢失也需重新编译 |
 | IP 没有自动更新 | 检查界面的“启用自定义处理命令”，确认三个钩子为 `sh scripts/sync-dev-backend.sh`；文件配置本身不等于工具已启用 |
 | 预处理报 `node: command not found` | 确认使用 shell 启动脚本；它会查找 PATH、Homebrew、nvm。再检查电脑的 Node.js 安装 |
@@ -326,7 +297,7 @@ npm run scene:preview -- d6fe703f-5b43-41a7-b25e-53ea690b2d8d 02212116-256b-4b60
 
 ## 2026-10-20 历史电脑模拟验收（协议 3）
 
-以下为切换到共享变换 Core 前的历史记录，不是当前 schema 4 的模拟器重跑结果。该轮 Web 使用 Three 0.183.2，小程序 Three r186，开发者工具基础库 3.17.4；真机 AR 未验收。旧项目注册表和 iframe 生命周期已退出当前实现。
+以下为切换到共享变换 Core 前的历史记录，不是当前播放器的模拟器重跑结果。该轮 Web 使用 Three 0.183.2，小程序 Three r186，开发者工具基础库 3.17.4；真机 AR 未验收。旧项目注册表和 iframe 生命周期已退出当前实现。
 
 | 检查 | 结果 |
 |---|---|
@@ -352,7 +323,7 @@ wechatide -c Codex get_simulator_console --project "$PWD" --command 'grep -n Sce
 证据目录：`/Users/wangzhewei/.codex/visualizations/2026/10/19/01a154ad-3006-74b0-a293-fb8306341ebd/`，文件 `scene-memory-web.json`、`scene-memory-web.png`、`scene-memory-gpu.jpg`。
 
 
-## 2026-10-20 当前自动验收
+## 2026-10-20 自动验收记录（历史）
 
 本轮用户选择浏览器与自动化播放器验收。微信开发者工具登录已过期，未重新登录或运行本轮模拟器检查；上方历史 GPU 结果不能视为本轮验证。真机 AR、手机 RSS 和相机追踪仍未覆盖。
 
@@ -367,7 +338,7 @@ wechatide -c Codex get_simulator_console --project "$PWD" --command 'grep -n Sce
 | 数据库迁移 | 原文归档、锁递增、回滚、重复执行和协议约束测试通过 |
 | 回归与界面 | 小程序 `npm test`、内存检查与 Web `npm run check` 通过（Web 15 个既有 lint warning）；Web 桌面/移动截图 finish review 为 `ship` |
 
-当前复测：小程序 `npm test`、`npm run test:scene-memory`；相邻 Web 仓库 `npx tsx scripts/test-scene-core.ts`、`test-transform-migration.ts`（需测试数据库）、`test-three-editor.ts`、`test-scene-playback-parity.ts`。Web 截图在该仓库 `.impeccable/review/desktop.png` 与 `mobile.png`。Node 对象与堆内存结果只代表当前 fixture 和运行环境，不能推导真机内存上限。
+当次复测：小程序 `npm test`、`npm run test:scene-memory`；相邻 Web 仓库 `npx tsx scripts/test-scene-core.ts`、`test-transform-migration.ts`（需测试数据库）、`test-three-editor.ts`、`test-scene-playback-parity.ts`。Web 截图在该仓库 `.impeccable/review/desktop.png` 与 `mobile.png`。Node 对象与堆内存结果只代表当前 fixture 和运行环境，不能推导真机内存上限。
 
 ### 重新进入页面的回归
 
@@ -384,11 +355,11 @@ wechatide -c Codex get_simulator_console --project "$PWD" --command 'grep -n Sce
 labs/xr-three/scene-preview?fixture=performance
 ```
 
-完整样例包含视频、视频声音、独立音频、空间文字、图片和模型，覆盖裁切、倍速、循环与错开的出入场/淡变。页面自动验证结束后重新加载，保留真实渲染与播放控制。纯音频或开场全黑不会被误判为没有三角形。
+完整样例包含视频、视频声音、独立音频、空间文字、图片和模型，覆盖裁切、原速播放、循环与错开的出入场/淡变。页面自动验证结束后重新加载，保留真实渲染与播放控制。纯音频或开场全黑不会被误判为没有三角形。
 
 微信开发者工具的 VideoDecoder.start 明确返回「开发者工具暂时不支持此 API 调试，请使用真机进行开发」，完整样例应在手机开发版运行。模拟器可打开 `fixture=audio-text`，保留真实音频、文字、图片、模型与 WebGL 渲染，仅排除不支持的原生视频解码器。两条入口都仅在 develop 有效。
 
-`npm run test:scene-media` 测试原生边界替身上的媒体时钟、音量包络、倍速、循环、暂停和迟到结果释放；相邻 Web 仓库 `npm run test:cross-runtime` 驱动两端实际适配代码，分别报告空间/淡变误差与播放中的媒体纠偏容差。Node 替身不能证明原生解码、设备字体或真机音画同步精度。
+`npm run test:scene-media` 测试原生边界替身上的媒体时钟、音量包络、原速播放、循环、暂停和迟到结果释放；相邻 Web 仓库 `npm run test:cross-runtime` 驱动两端实际适配代码，分别报告空间/淡变误差与播放中的媒体纠偏容差。Node 替身不能证明原生解码、设备字体或真机音画同步精度。
 
 
 ### 2026-10-29 演出播放器验收
