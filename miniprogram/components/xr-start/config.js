@@ -16,7 +16,7 @@ const XR_CONFIG = {
   //                 内容随移动平滑新旧交替，不会因视线晃动闪进闪出。
   //   - 'fifo'    ：注册顺序最旧的先踢（仅短命弹幕用）。
   buckets: {
-    scene: { cap: 1, evict: "farthest" }, // One composition, up to 24 instances.
+    scene: { cap: 1, evict: "farthest" },
     heavy: { cap: 6, evict: "farthest" },
     light: { cap: 20, evict: "farthest" },
     audio: { cap: 6, evict: "farthest" },
@@ -30,13 +30,9 @@ const XR_CONFIG = {
   // 普通模型较小、复用率高，上限可放宽；巨型模型动辄几十 MB，从紧。
   maxCachedModelUrls: 8,
   maxCachedHugeUrls: 3,
-  // 参考点到当前位置的 x/z 净位移超过此值才重新拉取素材（单位：XR 世界米）
-  distanceThreshold: 5,
-  // 两次拉取之间的最小间隔（毫秒），防止短时间内连续触发
-  fetchCooldownMs: 3000,
-  // 首次拉取延迟（毫秒）：ar-ready 后 AR 相机位姿（VIO）仍需若干帧收敛，
-  // 立刻放置会用到尚未稳定的相机 worldMatrix（forward 退化为世界 +Z），导致素材落到身后。
-  // 等 AR 就绪 + 该延迟后再触发首批拉取放置，确保 _calcForwardPos 拿到真实设备朝向。
+  // OSD 不提供世界位移，GPS 模式定期读取最新附近内容。
+  gpsRefreshMs: 30000,
+  // 相机画面与定位就绪后，错开首批资源构建。
   firstFetchDelayMs: 1000,
   // 一批素材放置时，每个 asset 之间的错开间隔（毫秒）。
   // 避免一次性 createElement/addChild/loadAsset 全部堆在同一帧导致卡顿。
@@ -45,7 +41,7 @@ const XR_CONFIG = {
   // 限量揭示：每轮拉取最多放置的新素材数，制造"边走边逐步出现"的探索感。
   // 超额素材直接丢弃（不放置、不进冷却），服务端下轮拉取会重新返回、自然轮到。
   //   - revealFirstFetch：首轮（进场）适当加量，避免开场冷清。
-  //   - revealPerFetch  ：之后每走 distanceThreshold 触发一轮，逐步冒新内容。
+  //   - revealPerFetch  ：之后每轮 GPS 刷新逐步加入新内容。
   revealFirstFetch: 20,
   revealPerFetch: 10,
   // 斥力参数：nodeList 中所有已落位素材节点（文本/模型/图片/音频/视频/弹幕）之间的互斥推力。
@@ -64,7 +60,6 @@ const XR_CONFIG = {
     audio: { min: 1.5, max: 5.0 },
     video: { min: 1.5, max: 5.0 },
   },
-  treeModelUrl: "https://8thwall.8thwall.app/assets/tree-d51u9146bh.glb",
 };
 
 module.exports = XR_CONFIG;

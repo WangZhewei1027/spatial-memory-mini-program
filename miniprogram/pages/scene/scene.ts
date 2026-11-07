@@ -18,9 +18,21 @@ Page({
       wx.showToast({ title: event.detail.message, icon: "none", duration: 3000 });
   },
   onRenderStatus(event: WechatMiniprogram.CustomEvent<{ state: string; message: string }>) {
+    const { state, message } = event.detail;
+    if (state === "trackingready") return;
+    if (state === "tracking") {
+      this._stateBeforeTracking = this.data.state;
+      this.setData({ state: "tracking", message });
+      return;
+    }
+    if (state === "trackingrestored") {
+      const previous = this._stateBeforeTracking || "loading";
+      this.setData({ state: previous, message: previous === "ready" ? "" : previous === "placeable" ? "点击放置场景" : "正在加载场景…" });
+      return;
+    }
     this.setData(event.detail.state === "error"
       ? { state: "error", message: event.detail.message || "AR 启动失败，请重试" }
-      : { state: "loading", message: "正在启动 AR 相机…" });
+      : { state: "loading", message: message || "正在启动空间追踪，请缓慢左右移动手机…" });
     if (event.detail.state === "error") wx.showToast({ title: this.data.message, icon: "none", duration: 3000 });
   },
   onScenePlayback(event: WechatMiniprogram.CustomEvent<{ state: string }>) {

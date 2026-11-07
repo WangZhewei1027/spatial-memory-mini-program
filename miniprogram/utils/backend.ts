@@ -4,7 +4,7 @@
 import { resolveBackendBaseUrl } from "./backend-environment";
 import type { ActivityLocation, ActivitySubmission } from "./activity-state";
 
-// 开发版连接本地 Web；体验版／正式版保留线上后端。识别上传也使用此地址。
+// 开发版连接本地 Web；体验版／正式版保留线上后端。OSD 参考图和内容查询也使用此地址。
 // 地址配置与真机开发说明见 backend-environment.ts 和 docs/local-development.md。
 const API_BASE_URL = resolveBackendBaseUrl(
   wx.getAccountInfoSync().miniProgram.envVersion,
@@ -187,25 +187,35 @@ export function setConfig(params: ScanConfig) {
   recordScanHistory({ ...CONFIG });
 }
 
-/** 识别接口地址（matching/index.js 用 wx.uploadFile 直接上传） */
-export const RECOGNIZE_API = {
-  baseUrl: API_BASE_URL,
-  path: `${API_PREFIX}/anchors/recognize`,
-};
-
 type ApiResponse<T> = { statusCode: number; data: T };
+
+// Keep the existing anonymous recognition ID so visitors on venue Wi-Fi do not
+// share one per-client limit. This is a rate-limit hint, never an identity proof.
+let recognitionClientId = "";
+function recognitionHeaders() {
+  if (!recognitionClientId) {
+    try { recognitionClientId = wx.getStorageSync("anchorMatchClientId") || ""; } catch (_) {}
+    if (!/^[A-Za-z0-9_-]{16,64}$/.test(recognitionClientId)) {
+      recognitionClientId = Date.now().toString(36) + Array.from({ length: 4 }, () => Math.random().toString(36).slice(2, 8)).join("");
+      try { wx.setStorageSync("anchorMatchClientId", recognitionClientId); } catch (_) {}
+    }
+  }
+  return { "X-Client-Id": recognitionClientId };
+}
 
 /** wx.request 的 Promise 封装（公开接口，无需鉴权头） */
 function request<T>(
   path: string,
   method: "GET" | "POST",
   data?: Record<string, any>,
+  headers: Record<string, string> = {},
 ): Promise<ApiResponse<T>> {
   return new Promise((resolve, reject) => {
     wx.request({
       url: `${API_BASE_URL}${API_PREFIX}${path}`,
       method,
-      header: { "Content-Type": "application/json" },
+      timeout: 20000,
+      header: { "Content-Type": "application/json", ...headers },
       data,
       success: (res) => resolve(res as ApiResponse<T>),
       fail: (error: { errMsg?: string; message?: string }) => {
@@ -296,4 +306,12 @@ export function fetchActivityRecords(placementId: string, location: ActivityLoca
 
 export function submitActivityRecord(input: ActivitySubmission): Promise<ApiResponse<{ id?: string; error?: string }>> {
   return request("/activity-records", "POST", input);
+}
+
+/** OSD only exchanges reference metadata and content. Camera images stay on device. */
+export function fetchAnchorCandidates(data: Record<string, any>): Promise<ApiResponse<any>> {
+  return request("/anchors/candidates", "POST", data, recognitionHeaders());
+}
+export function fetchAnchorContent(data: Record<string, any>): Promise<ApiResponse<any>> {
+  return request("/anchors/content", "POST", data, recognitionHeaders());
 }

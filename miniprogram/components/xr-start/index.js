@@ -6,12 +6,10 @@ const matching = require("./matching/index");
 const { CONFIG, fetchOrganizations } = require("../../utils/backend");
 const { THREE } = require("../../lib/three-runtime/runtime");
 const { ARRuntime } = require("../../lib/three-runtime/ar-runtime");
-const { groundOffset } = require("../../lib/three-runtime/pivot");
 const {
   ModelCache,
   disposeTree,
 } = require("../../lib/three-runtime/resources");
-const { instantiateModel } = require("./assets/model");
 const assetsMethods = require("./assets/index")(XR_CONFIG);
 const activityMethods = require("./activities")(XR_CONFIG);
 const danmakuMethods = require("./effects/danmaku")(XR_CONFIG);
@@ -25,6 +23,12 @@ function buildInitialState() {
     _contentEpoch: 0,
     _allowedAssetIds: new Set(),
     _nextRecognitionAt: 0,
+    _osdMarkers: new Map(),
+    _osdPhase: "idle",
+    _osdBatchEpoch: 0,
+    _osdCandidates: [],
+    _pendingOSDPlacement: null,
+    _osdCursor: 0,
     _disposed: false,
     _retrievalPaused: false,
     nodeIdCounter: 0,
@@ -42,8 +46,6 @@ function buildInitialState() {
     // Three 渲染器初始化完成后即可放置；文字无需背景图预加载。
     _preloadDone: false,
     _pendingDisplayAssets: [],
-    // 上次拉取时相机的 x/z 参考点；null 表示尚未设置（首帧 tick 时初始化）
-    _fetchAnchorXZ: null,
     // 上次触发 fetchNearbyAssets 的时间戳（用于冷却判断）
     _lastFetchTime: 0,
     gpsReady: false,
@@ -143,8 +145,8 @@ Component({
               onReady: () => this.handleARReady(),
               onTick: (dt) => this.handleTick(dt),
               onState: (state, message) => this.onARState(state, message),
-              onReticleError: (error) =>
-                this.reportAssetError({ file_type: "cursor" }, error),
+              onAnchors: (event, anchors) => this.handleOSDAnchors(event, anchors),
+              debugTimings: XR_CONFIG.debugLog,
             });
             this.scene = this._runtime.scene;
             this.shadowRoot = this._runtime.content;
@@ -167,8 +169,6 @@ Component({
       this.pauseRetrieval();
       this._disposed = true;
       this._arReady = false;
-      this.disposeRecognitionCapture();
-      this.clearRecognitionFrame();
       clearTimeout(this._firstFetchTimer);
       if (this._gpsListener) wx.offLocationChange(this._gpsListener);
       this._runtime?.dispose();
@@ -186,10 +186,8 @@ Component({
       this._arReady = false;
       this._sessionActive = false;
       this._runtime?.stop();
-      this.disposeRecognitionCapture();
       clearTimeout(this._firstFetchTimer);
       this._firstFetchStarted = false;
-      this._fetchAnchorXZ = null;
       this.setData({ arReady: false });
     },
     show() {
@@ -214,11 +212,37 @@ Component({
     },
     startAR() {
       if (this._disposed || !this._runtime || this._sessionActive) return;
+      this._ensureARMode(this._desiredARMode());
+    },
+    _desiredARMode() {
+      return this._scenePreviewMode || this.retrievalMode !== "anchor" ||
+        ["tracking", "locked"].includes(this._osdPhase) ? "slam" : "osd";
+    },
+    _ensureARMode(mode, { restart = false } = {}) {
+      if (this._disposed || this._pageVisible === false || !this._runtime || this._contextLost) return false;
+      if (!restart && this._sessionActive && this._runtime.session.mode === mode) return this._arReady;
+      clearTimeout(this._firstFetchTimer);
+      this._firstFetchStarted = false;
+      this._arReady = false;
       this._sessionActive = true;
-      this.setData({ renderError: "", renderStatus: "正在启动 AR 相机…" });
-      this._runtime.start();
+      this.setData({ arReady: false, renderError: "", renderStatus: mode === "slam" ? "正在启动空间追踪…" : "正在启动识别相机…" });
+      this._runtime.start(mode);
+      return this._arReady;
     },
     onARState(state, message) {
+      if (this._runtime?.session?.mode === "osd") {
+        let info = {};
+        try {
+          const device = wx.getDeviceInfo?.() || {}, app = wx.getAppBaseInfo?.() || {};
+          info = { platform: device.platform, model: device.model, system: device.system,
+            wechatVersion: app.version, SDKVersion: app.SDKVersion };
+        } catch (_) {}
+        this._osdLog("相机会话", { state, message, ...info, native: this._runtime.session.getOSDDiagnostics() }, state === "error" ? "error" : "info");
+      } else if (this._runtime?.session?.mode === "slam") {
+        console[state === "error" ? "error" : "log"]("[SLAM] 相机会话", JSON.stringify({
+          state, message, native: this._runtime.session.getOSDDiagnostics(),
+        }));
+      }
       if (this._disposed) return;
       if (state === "error") {
         clearTimeout(this._firstFetchTimer);
@@ -234,11 +258,18 @@ Component({
           renderStatus: "",
           canRetry: !!this._runtime && !this._contextLost,
         });
-      } else
+      } else if (state === "tracking") {
+        this._arReady = false;
+        this.setData({ arReady: false, renderStatus: message });
+      } else if (state === "trackingrestored") {
+        this._arReady = true;
+        this.setData({ arReady: true, renderStatus: "" });
+        if (!this._placingBusy && this._placeQueue?.length) this._drainPlaceQueue();
+      } else if (state !== "trackingready")
         this.setData({
           renderStatus:
             state === "running"
-              ? "请缓慢移动手机，初始化空间追踪…"
+              ? (this._runtime?.session.mode === "slam" ? "请缓慢左右移动手机，建立空间定位…" : "正在获取相机画面…")
               : "正在启动 AR 相机…",
         });
       this.triggerEvent("renderstatus", {
@@ -250,10 +281,14 @@ Component({
     handleARReady() {
       this._arReady = true;
       this._firstFetchStarted = false;
-      this._fetchAnchorXZ = null;
-      this.resetCaptureTiming();
       this.setData({ arReady: true, renderStatus: "", renderError: "" });
+      if (!this._placingBusy && this._placeQueue?.length) this._drainPlaceQueue();
       if (this._scenePreviewMode) { this._beginScenePreview(); return; }
+      if (this.retrievalMode === "anchor") {
+        if (this._osdPhase === "tracking") this._finishOSDPlacement();
+        else void this.recognizeAnchor();
+        return;
+      }
       this._maybeStartFirstFetch();
       this.flushPendingDisplayAssets();
       this._maybeStartConfetti();
@@ -262,21 +297,13 @@ Component({
       if (this._disposed || !this._arReady) return;
       this._frameDelta = dt;
       if (this._scenePreviewMode) {
-        this._runtime.updateReticle(false);
         this._tickScenePreview();
         this.tickModelAnimation();
         return;
       }
-      const camera = this._runtime.camera,
-        camPos = camera.position;
-      this.sampleCaptureMotion(camera);
-      if (!this._fetchAnchorXZ)
-        this._fetchAnchorXZ = { x: camPos.x, z: camPos.z };
-      this._runtime.updateReticle(
-        this.retrievalMode === "gps" && !this._retrievalPaused,
-      );
+      const camPos = this._runtime.camera.position;
       this.tickFlyingDanmakus();
-      this.tickRepulsion();
+      if (this.retrievalMode !== "anchor") this.tickRepulsion();
       this.tickAudioVolume();
       this.tickModelAnimation();
       this.tickHugeModels();
@@ -285,21 +312,15 @@ Component({
         if (entry.billboardEl) entry.billboardEl.lookAt(camPos);
       if (this._retrievalPaused) return;
       if (this.retrievalMode === "anchor") {
+        this.reportOSDScan();
         if (Date.now() >= this._nextRecognitionAt) this.recognizeAnchor();
         return;
       }
       // Activities can be paused or moderated while the visitor stands still.
       if (this._activityNextFetch) void this.refreshActivityContent?.();
-      const displacement = Math.hypot(
-          camPos.x - this._fetchAnchorXZ.x,
-          camPos.z - this._fetchAnchorXZ.z,
-        ),
-        now = Date.now();
-      if (
-        displacement >= XR_CONFIG.distanceThreshold &&
-        now - this._lastFetchTime >= XR_CONFIG.fetchCooldownMs
-      ) {
-        this._fetchAnchorXZ = { x: camPos.x, z: camPos.z };
+      // Refresh nearby data periodically while spatial placement uses SLAM poses.
+      const now = Date.now();
+      if (now - this._lastFetchTime >= XR_CONFIG.gpsRefreshMs) {
         this._lastFetchTime = now;
         this.fetchNearbyAssets();
         this.fetchHugeAssets();
@@ -358,61 +379,8 @@ Component({
               node = node.parent;
             }
           }
-          if (!this._scenePreviewMode && this.retrievalMode === "gps") this.placeNode();
         })
         .exec();
-    },
-    async placeNode() {
-      if (
-        this.retrievalMode !== "gps" ||
-        this._retrievalPaused ||
-        !this._arReady ||
-        this._treePlacing
-      )
-        return;
-      const reticle = this._runtime.reticle;
-      if (!reticle?.visible) return;
-      // Use the displayed cursor, not the finger position or a later hit test.
-      // Snapshot before loading: moving the phone must not move this planting site.
-      reticle.updateWorldMatrix(true, false);
-      const epoch = this._contentEpoch,
-        matrix = reticle.matrixWorld.clone();
-      this._treePlacing = true;
-      let handle;
-      try {
-        handle = await this._modelCache.acquire(XR_CONFIG.treeModelUrl);
-        if (this._disposed || epoch !== this._contentEpoch || !this._arReady) {
-          disposeTree(handle.object);
-          handle.release();
-          return;
-        }
-        const instance = instantiateModel(handle, 0.3);
-        // Imported models may have an offset pivot. Keep the ground alignment
-        // outside the animated model so AnimationMixer cannot overwrite it.
-        groundOffset(instance.root, instance.root.position);
-        const placement = new THREE.Group();
-        placement.add(instance.root);
-        matrix.decompose(
-          placement.position,
-          placement.quaternion,
-          placement.scale,
-        );
-        this.shadowRoot.add(placement);
-        const entry = this._registerNode(null, placement, null, {
-          type: "model",
-          dispose: instance.dispose,
-          repulsionEnabled: false,
-        });
-        entry.mixer = instance.mixer;
-      } catch (error) {
-        if (handle) {
-          disposeTree(handle.object);
-          handle.release();
-        }
-        this.reportAssetError({ file_type: "model" }, error);
-      } finally {
-        this._treePlacing = false;
-      }
     },
     onContextLost(event) {
       this._runtime?.facade.dispatch("webglcontextlost", event.detail);
@@ -465,14 +433,6 @@ Component({
           // 彩带开关：来自 config.confetti_enabled
           const confettiEnabled = cfg.confetti_enabled === true;
           this._confettiEnabled = confettiEnabled;
-          console.log(
-            "[orgConfig] fetched",
-            JSON.stringify(cfg),
-            "confettiEnabled=",
-            confettiEnabled,
-            "assetsLoaded=",
-            this._assetsLoaded,
-          );
           try {
             wx.setStorageSync(confettiKey, confettiEnabled);
           } catch (e) {

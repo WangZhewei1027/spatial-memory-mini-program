@@ -1,97 +1,66 @@
-# AR 素材来源切换
+# 本机 OSD 识别
 
-当前识别链路为：小程序上传 JPEG 和 GPS → 所选 Web 后端 `POST /api/miniapp/anchors/recognize?workspace_id=…` → GPS 候选与参考特征查询 → 按服务端配置调用 SAGE 推理 → 返回匹配点及其关联素材。管理端继续负责匹配点、参考图及关联素材管理。请求/响应协议与原 Supabase Edge Function 一致（`X-Recognition-Request-Id` 回显、`data.request_id`、`diagnostics`），不再需要 `x-region` 头。所有数据接口见 `miniprogram/utils/backend.ts` 与 Web 仓库的 `docs/miniapp-api.md`。
+正式链路为：GPS 获取附近参考图 → 下载并转换本地 JPEG → VisionKit OSD 识别 → 根据命中 ID 请求关联素材 → 切换 SLAM → 空间定位就绪后展示。相机图像留在设备上，不上传到 Web 或 SAGE。管理端继续维护匹配点、参考图和关联投放，保存图片不再生成云端特征。
 
-> develop 使用本地 Web：模拟器连接 `http://127.0.0.1:3000`，真机地址由电脑在编译／预览前自动检测；trial／release 使用 `https://www.spatialmemory.online`。环境规则集中在 `utils/backend-environment.ts`，连接步骤见[本地开发](local-development.md)。线上域名由 `ONLINE_API_BASE_URL` 定义，微信后台域名配置与发布验证见本地开发说明。开发者工具需“不校验合法域名”，真机开发需“打开调试”。
+## 模式与锁定
 
-## 当前渲染与取图
+- 默认 GPS 模式继续显示附近素材；切换「匹配点识别」后，清理原有内容并开始 OSD。
+- 扫描使用 `version: "v1", track: { OSD: true }`，展示使用 v2 SLAM，始终只有一个原生会话。生产不使用平面结果、光标或点击种树；底层 SLAM 入口仍需平面配置，限制见[正式运行时](visionkit-three-migration.md)。
+- 候选按距离排序，每批最多注册 5 张，扫描 12 秒后检查下一批，直到覆盖服务端返回的全部候选；一轮结束重新读取 GPS 与候选。下一批的目标 ID 与参考图版本均未变化时，保留原生标记、本地图片及确认进度，持续扫描；只有换目标、版本更新或取消才移除标记，避免单批目标每 12 秒重复下载和注册。刷新候选期间仍可确认命中，迟到的刷新结果不能覆盖命中状态。5 张是应用负载策略，不是微信 API 的上限。
+- 同一目标连续至少 3 次有效观察、跨度至少 700ms，且相邻观察间隔不超过 1500ms，才请求内容。多个目标同时出现时重新累计确认。OSD 的屏幕矩形不转换为世界位姿。
+- 回调按当前会话、当前批次注册的 `markerId` 关联参考图。原生回调的 `path` 仅用于诊断：iOS 真机可能返回空字符串，SDK 内部路径也可能与微信临时路径不同，不能要求字符串相等。回调中的 `id` 也可能随更新变化，不用它累计目标确认。已移除的 markerId、旧会话回调仍会被忽略。
+- 命中并成功读取内容后移除所有识别标记，销毁 OSD 并启动 SLAM。提示左右平移手机，等有效空间位姿后放置并锁定内容；目标离开镜头、手机移动或转动均不会清场或自动重新识别。内容留在世界位置，会随视角变化移出屏幕。OSD 无法提供目标的三维位置，因此内容按 SLAM 就绪后的观看位置放置，不自动贴合识别物体。
+- 「重新扫描」清理现有内容、参考图和标记，销毁当前会话并重新启动 OSD，即使已经处于 OSD 模式也重建会话；等新相机帧就绪后重新获取附近目标。该操作提供检测无响应时的手动恢复入口，不自动按超时反复重启。SLAM 初始化期间也可取消并重扫。内容读取失败保留错误，等待手动重新扫描；附近无目标和准备失败按配置退避。
+- 切换模式、隐藏页面、重试相机及退出会取消本轮。隐藏时清场并销毁会话，回到页面重新建会话和扫描；锁定不跨后台会话保存。
+- 下载、参考图转换、接口响应与素材放置均检查当前代次；旧回调和临时文件不能覆盖新扫描。
 
-正式 `pages/ar/ar` 已切为 VisionKit v2 + Three.js 单画布，组件路径仍为 `components/xr-start`，便于复用页面接口。迁移结构、素材支持与真机清单见 [VisionKit + Three 迁移](visionkit-three-migration.md)。旧 xr-frame YUV 转换与固定文字背景图已退出业务链路。
+## 参考图
 
-显示相机背景直接使用同一 VKFrame 的 GPU 纹理；识别取图另从该帧调用 `getCameraJpgBuffer(width, height, 80)`，最长边 640，宽度为 16 的倍数，使用当前视口比例。JPEG 不可用时回退 `getCameraBuffer` 的 RGBA 数据，通过离屏 2D Canvas 导出 JPEG。原生帧在第一个 await 前消费/复制完成，不跨帧保存。两条路径均不截取含 AR 素材的画布。
+沿用匹配点已保存的参考图片。客户端下载后检查最短边至少 240 像素、长短边比不超过 16:9，最长边缩至 1080，透明背景铺白并输出 JPEG。图片临时文件在换批、命中、取消或失败时删除，不写入 Storage。
 
-不再手写 YUV 转换或固定顺时针 90°，`rotation: 0` / `uvOrder: native` 表示没有额外修改原生导出方向，不能当作方向已真机验证。原生导出及画布写入仍可能同步阻塞，不能称为完全异步。每次只允许一张图片导出；导出完成即释放取图锁，HTTP 请求可继续并发。等待下一帧超时 3 秒，RGBA 路径 JPEG 导出超时 5 秒，迟到的导出文件会清理；每次回退使用自己的画布，避免超时回调与新一轮互相覆盖。
+参考图应让目标占主要画面、背景简单、特征清晰。格式转换不能保证识别效果；过小或狭长图片会显示错误，需要在管理端更换。真实地点的远景照片与 OSD 单目标图片识别的效果差异应在目标手机实测，不能直接沿用 SAGE 相似度阈值。
 
-## 模式行为
+## 接口与访问范围
 
-- 默认 GPS 模式：`get_nearby_assets` / `get_huge_assets` 获取附近素材，沿相机前方扇形放置，保留分批展示、容量桶、互斥推开、动画和距离音量。
-- 匹配模式：只展示成功响应中该 anchor 的关联素材。进入后等待 3 秒，每 1 秒尝试取图并上传，最多 6 个在途任务；不要求手机平稳，不做二次确认。达到并发上限或导出未完成时跳过本次调度，不积压旧帧。
-- 单次命中即停止取图并取消其余客户端任务。较旧结果、迟到错误和被取消的资源加载不能覆盖已显示场景。客户端取消上传不撤回服务端已经开始的推理。
-- 相对成功时 VisionKit 米制位置的三维净位移达到 1.5 米，清空场景并重新等待 3 秒。只旋转手机不重启，位移不累加里程；缺失位姿不解锁。
-- 切换模式清空全部素材，包括文字、气泡、媒体、点击生成的树、巨型模型、弹幕和彩带。匹配模式禁止本地种树、直发弹幕和随机彩带。
-- 页面隐藏取消识别、清场并销毁 VK 会话；返回后新建会话，旧空间坐标作废。查看识别画面只暂停检索；关闭预览重新等待 3 秒。
-- 匹配点下的 `is_huge` 模型也按近景关联素材展示。SAGE 提供地点触发，不提供固定地点的 6DoF 重定位或真实遮挡。
+统一经过 `utils/backend.ts`，地址规则见[本地开发](local-development.md)，完整契约见 Web 仓库 `docs/miniapp-api.md`。
 
-## 接口配置
-
-`miniprogram/utils/backend.ts` 按 `backend-environment.ts` 的环境配置选择 `API_BASE_URL`，普通数据与识别上传共用该地址。匹配配置保持地址为空以沿用环境选择：
-
-```js
-apiBaseUrl: "", // 使用 backend.ts 的 RECOGNIZE_API.baseUrl
-apiPath: "/api/miniapp/anchors/recognize",
-functionRegion: "", // 当前链路无需 x-region
-intervalMs: 1000,
-maxInFlightRequests: 6,
-initialCaptureDelayMs: 3000,
-restartDistanceMeters: 1.5,
-```
-
-请求使用 `wx.uploadFile`，`workspace_id` 在 URL query；表单包括 image、latitude、longitude、accuracy、gps_timestamp（毫秒）、coordinate_system=wgs84。优先使用不超过 10 秒且精度不超过 100 米的持续定位，否则复用 5 秒内单次定位或共用定位请求。定位不合格时不上传，请求超时 20 秒。
-
-识别接口公开访问，客户端不带模型 Token、数据库密钥、Authorization 或 apikey。`X-Recognition-Request-Id` 用于日志关联，`X-Client-Id` 为本地随机设备标识，用于后端限流。必须选择明确的 workspace。服务端负责模型连接、GPS 候选、参考特征、相似度阈值及素材关联；此渲染迁移没有改变服务端配置或匹配阈值。
-
-正式域名需要配置 uploadFile / request 白名单，素材域名需要 downloadFile 等对应白名单；配置要求见[本地开发说明](local-development.md#线上配置)。旧 Supabase Edge 区域对照属于历史方案，当前不经 Edge Function；更换渲染器不改变后端网络路径。
-
-## 重试与错误
-
-服务端非 200 响应优先显示其 JSON `error`，过滤控制字符并截断到 200 字；非 JSON 使用通用提示。有有效 `retry_after_ms` 时采用该值并限制在 1–60 秒，否则普通错误默认 5 秒。429 的模型繁忙类默认 1 秒，空间额度类默认 60 秒；兼容没有错误码的旧服务按 60 秒退避。已锁定、切换或暂停后，旧错误不能重启任务。
-
-503 不等于模型冷启动。结合 `code` 检查：`database_unavailable` 的数据库查询/迁移、`model_unconfigured` 的服务端模型连接、`threshold_unconfigured` 的服务端阈值。`reference_not_ready` 则在管理端检查参考特征是否完成。具体服务端设置以 Web 仓库当前部署文档为准。
-
-## 调试日志与耗时
-
-控制台筛选 `AnchorMatch`，`matching/config.js` 的 `debugLogs` 控制识别日志。每轮 `[AnchorMatch][请求编号]` 关联取图、上传、匹配及素材放置；不输出照片内容、完整向量或鉴权头。
-
-- `开始取图`：目标间隔、实际间隔和超出目标的时间。
-- `匹配诊断`：候选数、可用参考数、最佳/次佳相似度、阈值、分差与各服务端阶段；未命中的分数在这里，不能把 `cosineSimilarity: null` 当作零分。
-- `识别耗时汇总`：成功、未命中、失败和取消都会记录已执行阶段；未执行阶段为 null，实际零毫秒为 0。
-- `素材开始放置` / `素材放置结束` / `首个素材就绪`：确认匹配到放置的排队、资源加载与构建耗时。就绪指节点已登记，**不是屏幕首帧计时**；视频第一帧还需等待原生解码。
-
-| 字段 | 当前含义 |
+| 接口 | 用途 |
 | --- | --- |
-| `gpsSource` | watch 持续定位、fresh 单次定位、cache 单次定位缓存、shared 共用定位请求 |
-| `clientTimingsMs.captureMs` | 等待下一 VK 帧、原生图像导出、保存 JPEG 的总时间 |
-| `pixelConverter` | `visionkit-jpeg` 或 `visionkit-rgba` |
-| `gpuFallbackReason` | 为兼容旧日志保留字段名；现表示原生 JPEG 不可用而改用 RGBA 的原因 |
-| `captureStagesMs.rawReadMs` | 原生 JPEG 调用及必要时 RGBA 读取；JPEG 路径包含原生编码和快照复制 |
-| `canvasPrepareMs` / `snapshotMs` / `canvasWriteMs` | RGBA 回退的画布准备、像素复制和写入；JPEG 路径为 0 |
-| `jpegExportMs` | JPEG 路径为保存原生 JPEG 文件，RGBA 路径为 Canvas 编码与文件导出；不与 rawReadMs 重复计算 |
-| 旧 `gpu*` / `convert*` 阶段 | 当前已无自建 YUV 转换；保留协议字段，未用为 null 或 0 |
-| `uploadRoundtripMs` | 上传、后端全部处理、响应下载及回调等待；取消时为取消前等待时间 |
-| `responseParseMs` | 客户端 JSON 解析 |
-| `resultHandlingMs` | 应用匹配结果，包含 sceneClearMs 与 displayDispatchMs，勿重复求和 |
-| `captureToMatchMs` | 开始取图到客户端确认命中；未命中为 null |
-| `totalMs` | 定位前到识别逻辑结束，不含最初 3 秒和后续资源加载 |
-| `serverTimingsMs` | 服务器返回的阶段，字段依当前后端实现，未返回为 null |
-| `model_request_ms` | 后端到模型服务的完整往返，不是 GPU 推理时间 |
-| `model_inference_ms` / `model_service_total_ms` | 模型内部推理/服务总耗时，均包含在模型请求往返内 |
-| `transportAndPlatformEstimateMs` | HTTP 往返减 api_total_ms 的非负差值估算，不能称为纯网络时间 |
+| POST `/api/miniapp/anchors/candidates` | JSON：workspace_id、latitude、longitude、accuracy、gps_timestamp、coordinate_system=wgs84。返回 candidates：id、name、image_url、reference_version、distance_meters |
+| POST `/api/miniapp/anchors/content` | 同样 GPS 字段，再加 anchor_id、reference_version；返回 anchor 与关联 assets |
+| POST `/api/miniapp/anchors/recognize` | 旧图片上传入口返回 410，不再调用 SAGE |
 
-渲染另有 `[ThreeAR][timings]`：约每 2 秒输出帧率及该帧 acquireMs、matrixMs、backgroundSubmitMs、businessMs、reticleHitTestMs、threeSubmitMs、frameWorkMs、drawCalls、geometries、textures。阶段为 JS/API 调用耗时，没有测 GPU 真正完成时间；帧率为该窗口平均，其余阶段为采样帧，不是中位数。
+GPS 优先使用 10 秒内持续定位，否则使用 5 秒内单次定位缓存或新定位。服务端校验精度、时间与坐标，候选仅来自当前地图及未归档团队/地图的有效匹配点，范围最多 200 米、最多 200 个候选（超出报错）。内容请求重新检查范围和参考图版本；移除/暂停目标返回 404，参考图变更返回 409。
 
-## 上传预览与验收
+匿名设备限流沿用 `anchorMatchClientId` 和 `X-Client-Id`，仅用于限流。候选与内容查询合计每设备每分钟 60 次、每地图 3000 次；设备 ID 不是登录身份。客户端命中也不是服务端打卡凭证。
 
-`debugFramePreview: true` 默认保留最近已完成识别上传的同一张 JPEG，点击“查看识别画面”核对；替换、切换及退出时清理旧文件。失败/取消文件立即清理；关闭预览配置后每轮文件都在结束时清理。
+正式域名配置需要后端 request 与参考图 downloadFile 白名单。前后端需配套发布：新小程序依赖两个 OSD 接口，旧小程序调用上传入口会收到升级提示。此次代码变更本身不会停止已部署的 SAGE 实例或取消其计费。
 
-真机依次验证：GPS 素材显示；切换清场；3 秒准备与每秒上传；命中只显示关联素材；原地旋转不重启而移动 1.5 米会清场；资源下载中快速切换；后台恢复新会话；JPEG 与手机实际画面的方向、裁切、颜色一致。详见迁移文档的 iOS/Android 检查表。
+## 验证
 
-本地统一回归：
+`matching/config.js` 是批次、确认与重试参数的唯一来源。日志统一筛选 `[OSD]`，`debugLogs` 控制识别信息；错误/警告保留。Three 帧率与 WebGL 能力日志默认关闭，只有 `XR_CONFIG.debugLog` 开启时输出。素材就绪计时仍保留；已删除上传预览、相似度与位移重启代码。
 
-```sh
-npm run build:xr-three-lab
-npm test
-```
+日志按 `run`（本轮扫描）与 `batch`（参考图批次）关联。`相机会话` 记录设备、微信/基础库、请求版本和 SDK 实际版本；`附近目标` 记录数量、GPS 精度、搜索半径和首批目标。`参考图处理` 记录下载、原图尺寸/格式/方向、转换后的 JPEG 尺寸；`标记已注册` 记录目标 ID 与 markerId。只输出路径类别和文件名，不输出签名 URL 参数、相机图片、登录凭证或精确坐标。
 
-包含 Three/VK 会话与矩阵、实际 GLB 解析、动态文字、资源生命周期、识别并发与乱序、位移闸门、素材耗时。旧 `test-capture-pixels` / `test-capture-pipeline` / `test-capture-gpu` / `test-text-cleanup` 随旧渲染实现退役，替换为 `test-ar-runtime.cjs`。旧 CPU/GPU YUV 性能对照可在迁移前提交 `e397a90` 的本文和脚本查看，不能用于描述原生 VK 导出性能。
+扫描期间每 3 秒输出一次 `扫描摘要`，换批、命中和取消时额外输出一次。包括相机帧年龄、SDK 内部标记数量/ID、原生回调数量、通过校验数量、过滤与确认重置次数。候选未变化时输出 `继续扫描`，保留批次及累计时间/计数。`native.sessionGeneration` 区分会话，`native.anchorListeners` 列出已注册事件，`native.anchorEvents` 统计本会话监听器入口收到的事件，便于与业务批次的 `callbacks` 区分；重新扫描会改变会话编号并重新计数。`原生回调` 每种事件每批只打印首个样例，`回调被过滤` 每种原因只打印一次；连续确认进度最多每秒一次，最终命中单独记录。
 
-本地测试使用原生 API 替身，不能代替微信真机联调。本轮尚无新渲染链路的真机耗时结论。
+| 摘要 result / 过滤 reason | 含义 |
+| --- | --- |
+| `no_native_events` | 尚未收到任何原生 anchor 回调；结合 cameraFrameAgeMs 与 nativeMarkerCount 判断相机/标记状态，不能据此断言参考图不相似 |
+| `no_observations` | 有回调但没有检测对象（空列表或移除事件） |
+| `observations_ignored` | 有对象，但回调发生在准备阶段等未进入确认的状态；查看 ignored |
+| `all_observations_rejected` | 收到对象，但全部被过滤；查看 rejected 与首个样例 |
+| `not_osd_type` / `unknown_marker` | 类型不是 OSD，或 markerId 不属于当前注册列表 |
+| `invalid_rect` | 屏幕矩形无效 |
+| `awaiting_confirmation` | 有有效目标，仍在等待连续确认；查看 bestObservations、bestDurationMs、resets |
+| `confirmed` | 确认通过，随后查看内容接口与内容锁定日志 |
+
+真机排查时从 `准备扫描` 开始保留一个完整批次的 `[OSD]` 日志即可。`getAllOSDMarker` 不可用或失败会标记为未知/读取失败，不当作零目标；这些诊断不会修改识别配置或放宽确认条件。
+
+命中后继续查看 `切换空间追踪` → `[SLAM] 相机会话` 的 `trackingready` → `内容已锁定`（`space: world`）→ 素材就绪。`tracking` 表示尚在初始化或追踪丢失，`trackingrestored` 表示恢复；不会每帧刷日志。
+
+本地执行 `npm run build:xr-three-lab` 和 `npm test`，覆盖锁定、重扫重建会话、连续一分钟无回调时保留同批标记、候选/版本变更、刷新期间命中、批次轮换、迟到响应、参考图释放、单会话切换与世界空间相机。原生 API 替身不证明手机识别成功，也不能复现 SDK 内部未产生回调的原因。
+
+真机验收：iOS/Android 相机启动与方向；多张真实参考图命中与误命中；命中后 SLAM 初始化；左右走动/转头时内容留在空间并产生视差，转回后仍可见；追踪丢失与恢复；重新扫描与快速连续点击；下载和定位初始化中切换/退出；后台恢复；低网速、无目标、不合格参考图；音视频播放和退出释放。记录实际识别/定位耗时、帧率和机型。
+
+API 依据：[微信 OSD](https://developers.weixin.qq.com/miniprogram/dev/framework/open-ability/visionkit/osd.html)、[addOSDMarker](https://developers.weixin.qq.com/miniprogram/dev/api/ai/visionkit/VKSession.addOSDMarker.html)、[VKOSDAnchor](https://developers.weixin.qq.com/miniprogram/dev/api/ai/visionkit/VKOSDAnchor.html)。

@@ -157,12 +157,12 @@ async function main() {
   for (const timestamp of [100, 108, 116, 133, 150, 166]) {
     time = timestamp; nativeSession.tick();
   }
-  assert.equal(nativeFrames.length, 6, 'production must process every native RAF, including intervals shorter than 30 FPS');
+  assert.equal(nativeFrames.length, 6, 'an uncapped controller processes every native RAF');
   const lateTick = nativeSession.callbacks.values().next().value;
   nativeRate.stop(); lateTick();
   assert.equal(nativeFrames.length, 6);
   assert.equal(nativeSession.destroyed, 1);
-  console.log('PASS: production native RAF cadence has no added 30 FPS cap and still cancels late frames');
+  console.log('PASS: uncapped native RAF cadence processes all frames and cancels late callbacks');
 
 }
 main().catch(e => { console.error(e); process.exitCode = 1; });

@@ -1,6 +1,6 @@
 # 小程序性能与资源管理
 
-本文对应当前 VisionKit v2 + Three.js 运行时。旧 xr-frame 的 `loadAsset` ID、`setData` 实例化、包围盒缓存、轮转 tick 和 Storage 媒体缓存方案已移除；历史实现可从 Git 历史查阅。运行结构见[正式 AR 运行时](visionkit-three-migration.md)。
+本文对应当前 VisionKit OSD / SLAM + Three.js 运行时。旧 xr-frame 的 `loadAsset` ID、`setData` 实例化、包围盒缓存、轮转 tick 和 Storage 媒体缓存方案已移除；历史实现可从 Git 历史查阅。运行结构见[正式 AR 运行时](visionkit-three-migration.md)。
 
 ## 模型缓存
 
@@ -12,10 +12,10 @@
 
 ## 获取与放置调度
 
-- 首批普通素材等待 GPS 与 AR 就绪，再等待 `firstFetchDelayMs`；后续按固定参考点净位移与冷却触发，见[拉取策略](fetch-trigger-strategy.md)。
+- 首批普通素材等待 GPS 与 AR 就绪，再等待 `firstFetchDelayMs`；后续按 GPS 刷新周期触发，见[拉取策略](fetch-trigger-strategy.md)。
 - 先按在场、队列、加载中 ID 和冷却去重，再限量揭示；[容量桶](node-list-queue-strategy.md)限制在场节点，Scene 整场计一项。
 - [串行放置](asset-place-queue-strategy.md)等待每个异步加载完成，条目之间留出 `placeStaggerMs`，分散主线程实例化开销。
-- 正式 AR 跟随 VisionKit RAF，每帧更新相机、光标和业务；没有旧 `_tickPhase` 轮转。实验页的采样上限不代表正式页帧率。
+- 正式 AR 在 VisionKit RAF 上限频到 30 FPS，更新背景、SLAM 相机位姿和业务；OSD 扫描阶段的识别事件独立消费。OSD 与 SLAM 顺序运行，避免同时占用两个原生会话。
 
 ## 场景媒体
 

@@ -1,6 +1,6 @@
 # 小程序文档索引
 
-本目录的现行说明以 VisionKit v2 + Three.js 运行时为准。安装与入口见[项目 README](../README.md)，Web 的接口契约维护在相邻 `spatial-memory/docs/miniapp-api.md`。
+本目录的现行说明以 VisionKit OSD / SLAM + Three.js 运行时为准。安装与入口见[项目 README](../README.md)，Web 的接口契约维护在相邻 `spatial-memory/docs/miniapp-api.md`。
 
 ## 开发与播放
 
@@ -12,11 +12,11 @@
 | [场景播放](scene-asset.md) | 当前播放协议、观看位置、媒体同步与跨端验证 |
 | [场景自动联调](scene-auto-debug.md) | 本地 Web 到小程序的准备、自动检查与画面取证 |
 | [活动](activities.md) | 店铺打卡、弹幕、参与记录与刷新清理 |
-| [识别流程](anchor-recognition.md) | 匹配模式、并发、位移重启与诊断 |
+| [识别流程](anchor-recognition.md) | 本机识别、参考图、内容锁定与重新扫描 |
 
 ## 素材与性能
 
-- [拉取触发](fetch-trigger-strategy.md)：固定参考点净位移与冷却。
+- [拉取触发](fetch-trigger-strategy.md)：GPS 定时刷新与匹配锁定。
 - [巨大模型查询](get-huge-assets-params.md)：团队/地图范围、接口校验与投放身份。
 - [串行放置](asset-place-queue-strategy.md)：加载完成、错峰放置与取消。
 - [容量与去重](node-list-queue-strategy.md)：当前容量桶、揭示、冷却与释放。

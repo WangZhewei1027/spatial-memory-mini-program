@@ -95,6 +95,10 @@ async function main() {
     await backend.fetchActivityRecords("placement", { latitude: 31, longitude: 121 }, 50);
     await backend.fetchActivityProgress("placement", "participant");
     await backend.submitActivityRecord({ placement_id: "placement" });
+    await backend.fetchAnchorCandidates({ workspace_id: "workspace" });
+    await backend.fetchAnchorContent({ workspace_id: "workspace", anchor_id: "target" });
+    assert.match(calls.at(-1).header["X-Client-Id"], /^[A-Za-z0-9_-]{16,64}$/);
+    assert.equal(calls.at(-1).header["X-Client-Id"], calls.at(-2).header["X-Client-Id"]);
     assert.deepEqual(calls.map((call) => call.url), [
       `${base}/api/miniapp/organizations?ids=org`,
       `${base}/api/miniapp/workspaces?ids=workspace`,
@@ -106,9 +110,9 @@ async function main() {
       `${base}/api/miniapp/activity-records?placement_id=placement&user_lat=31&user_lng=121&max_distance_meters=50`,
       `${base}/api/miniapp/activity-progress?placement_id=placement&participant_id=participant`,
       `${base}/api/miniapp/activity-records`,
+      `${base}/api/miniapp/anchors/candidates`,
+      `${base}/api/miniapp/anchors/content`,
     ]);
-    assert.equal(backend.RECOGNIZE_API.baseUrl + backend.RECOGNIZE_API.path,
-      `${base}/api/miniapp/anchors/recognize`);
     console.log(`PASS ${env}: all data APIs and recognition use ${base}`);
   }
 
@@ -131,11 +135,16 @@ async function main() {
   }
   console.log("PASS native domain, TLS and timeout failures retain their cause for scene and name requests");
   assert.throws(() => loadBackend("develop", false, "ios", ""), /未检测到电脑局域网地址/);
-  assert.equal(loadBackend("develop", false, "devtools", "").backend.RECOGNIZE_API.baseUrl, "http://127.0.0.1:3000");
-  for (const env of ["trial", "release"]) {
-    assert.equal(loadBackend(env, false, "ios", "").backend.RECOGNIZE_API.baseUrl, "https://www.spatialmemory.online");
+  for (const [env, platform, lan, base] of [
+    ["develop", "devtools", "", "http://127.0.0.1:3000"],
+    ["trial", "ios", "", "https://www.spatialmemory.online"],
+    ["release", "ios", "", "https://www.spatialmemory.online"],
+    ["develop", "ios", "http://10.20.30.40:3000", "http://10.20.30.40:3000"],
+  ]) {
+    const { backend, calls } = loadBackend(env, false, platform, lan);
+    await backend.fetchAnchorCandidates({});
+    assert.equal(calls[0].url, `${base}/api/miniapp/anchors/candidates`);
   }
-  assert.equal(loadBackend("develop", false, "ios", "http://10.20.30.40:3000").backend.RECOGNIZE_API.baseUrl, "http://10.20.30.40:3000");
   for (const env of [undefined, "", "unknown"]) {
     assert.throws(() => loadBackend(env), /无法确定小程序环境/);
   }

@@ -64,8 +64,9 @@ const wx = {
     options.success({ tempFilePath: "/tmp/export.jpg" });
   },
 };
+const runtimeLogs = [];
 const context = vm.createContext({
-  console: { ...console, log() {}, warn() {}, error: console.error },
+  console: { ...console, log(...args) { runtimeLogs.push(args); }, warn() {}, error: console.error },
   setTimeout,
   clearTimeout,
   wx,
@@ -167,21 +168,30 @@ async function main() {
     "PASS actual business GLB: geometry + embedded image via native resource adapter, no browser globals/temp leaks",
   );
 
-  const { ARRuntime, RETICLE_MODEL_PATH } = lib("ar-runtime");
-  assert.equal(RETICLE_MODEL_PATH, "assets/ar-plane-marker.glb");
+  const { ARRuntime } = lib("ar-runtime");
+  {
+    const display = Object.assign(Object.create(ARRuntime.prototype), {
+      camera: new THREE.PerspectiveCamera(60, 1, .01, 300), renderer: { setSize() {} },
+    });
+    display.resize(390, 844);
+    assert.equal(display.camera.aspect, 390 / 844);
+    const edge = new THREE.Vector3(Math.tan(Math.PI / 6) * 390 / 844, 0, -1).project(display.camera);
+    assert.ok(Math.abs(edge.x - 1) < 1e-9, "portrait display projection uses the actual canvas ratio");
+    display.resize(844, 390);
+    assert.equal(display.camera.aspect, 844 / 390);
+  }
   {
     const { createSceneCore } = load(path.join(root, "lib/scene-runtime/vendor/scene-core"));
     const core = createSceneCore({ content: { instances: [], durationSeconds: 20, loop: false } });
     const deltas = [];
     const clockRuntime = Object.assign(Object.create(ARRuntime.prototype), {
       canvas: { width: 320, height: 480 }, scene: new THREE.Scene(), content: new THREE.Group(),
-      camera: new THREE.PerspectiveCamera(), reticle: new THREE.Group(),
-      session: { start() {}, stop() {} }, background: { draw: () => true },
-      renderer: { render() {}, info: { render: { calls: 0 }, memory: { geometries: 0, textures: 0 } } },
+      camera: new THREE.PerspectiveCamera(),
+      session: { mode: 'osd', start() {}, stop() {} }, background: { draw: () => true },
+      renderer: { render() {}, setSize() {}, info: { render: { calls: 0 }, memory: { geometries: 0, textures: 0 } } },
       onReady() {}, onTick(dt) { deltas.push(dt); core.advance(dt); },
     });
-    const frame = { camera: { viewMatrix: new THREE.Matrix4().elements,
-      getProjectionMatrix: (near, far) => new THREE.PerspectiveCamera(60, 1, near, far).projectionMatrix.elements } };
+    const frame = { get camera() { throw new Error("OSD must not read a metric pose"); } };
     clockRuntime.start(); core.play();
     for (const now of [1000, 1350, 1750, 2050]) clockRuntime.frame(frame, { now, acquireMs: 0 });
     assert.ok(Math.abs(core.time - 1.05) < 1e-9, 'slow render frames must preserve elapsed scene time, matching native audio');
@@ -190,45 +200,16 @@ async function main() {
     assert.equal(deltas.at(-1), 0, 'foreground restart discards time spent in the background');
     clockRuntime.frame(frame, { now: 90250, acquireMs: 0 });
     assert.ok(Math.abs(core.time - 1.3) < 1e-9);
+    clockRuntime.frame(frame, { now: 93000, acquireMs: 0 });
+    assert.equal(runtimeLogs.filter(args => args[0] === '[ThreeAR][timings]').length, 0,
+      'normal scanning must not emit periodic rendering diagnostics');
+    clockRuntime.debugTimings = true;
+    clockRuntime.frame(frame, { now: 97000, acquireMs: 0 });
+    assert.equal(runtimeLogs.filter(args => args[0] === '[ThreeAR][timings]').length, 1,
+      'rendering diagnostics remain available with explicit opt-in');
     core.dispose();
     console.log('PASS real AR frame clock preserves slow frames and resets across foreground sessions');
   }
-  let reticleHits = 0;
-  let reticleHit = new THREE.Matrix4().makeTranslation(0, 0, -1).elements;
-  const cursorRuntime = Object.assign(Object.create(ARRuntime.prototype), {
-    canvas,
-    camera: new THREE.PerspectiveCamera(),
-    reticle: new THREE.Group(),
-    reticleReady: false,
-    session: {
-      hitTest(x, y) {
-        assert.equal(x, 0.5);
-        assert.equal(y, 0.5);
-        reticleHits++;
-        return reticleHit ? [{ transform: reticleHit }] : [];
-      },
-    },
-    onReticleError(error) {
-      throw error;
-    },
-  });
-  cursorRuntime.updateReticle(true);
-  assert.equal(
-    cursorRuntime.reticle.visible,
-    false,
-    "do not plant before the real cursor model is ready",
-  );
-  assert.equal(reticleHits, 0);
-  await cursorRuntime.loadReticleModel();
-  const oldMarker = cursorRuntime.reticle.getObjectByName("Torus");
-  assert.ok(
-    oldMarker?.isMesh,
-    "restore the actual old GLB rather than a generated circle",
-  );
-  assert.equal(oldMarker.geometry.attributes.position.count, 150);
-  assert.ok(Math.abs(oldMarker.scale.x - 0.7128448486328125) < 1e-9);
-  assert.equal(oldMarker.material.emissive.b, 1);
-
   const baseModel = new THREE.Group();
   baseModel.add(
     new THREE.Mesh(new THREE.BoxGeometry(), new THREE.MeshBasicMaterial()),
@@ -257,51 +238,6 @@ async function main() {
   );
 
   load(path.join(root, "components/xr-start/index"));
-  const tickHost = {
-    _arReady: true,
-    _runtime: cursorRuntime,
-    retrievalMode: "gps",
-    nodeList: [],
-    sampleCaptureMotion() {},
-    tickFlyingDanmakus() {},
-    tickRepulsion() {},
-    tickAudioVolume() {},
-    tickModelAnimation() {},
-    tickHugeModels() {},
-    tickConfetti() {},
-  };
-  for (let i = 1; i <= 5; i++) {
-    reticleHit = new THREE.Matrix4().makeTranslation(i * 0.01, 0, -1).elements;
-    component.methods.handleTick.call(tickHost, 1 / 60);
-    assert.equal(cursorRuntime.reticle.position.x, i * 0.01);
-  }
-  assert.equal(
-    reticleHits,
-    5,
-    "no 100 ms gate between consecutive component frames",
-  );
-  tickHost.retrievalMode = "anchor";
-  tickHost._nextRecognitionAt = Infinity;
-  component.methods.handleTick.call(tickHost, 1 / 60);
-  assert.equal(cursorRuntime.reticle.visible, false);
-  assert.equal(reticleHits, 5);
-  tickHost.retrievalMode = "gps";
-  reticleHit = null;
-  component.methods.handleTick.call(tickHost, 1 / 60);
-  assert.equal(cursorRuntime.reticle.visible, false);
-  reticleHit = new Array(16).fill(NaN);
-  component.methods.handleTick.call(tickHost, 1 / 60);
-  assert.equal(cursorRuntime.reticle.visible, false);
-  reticleHit = new THREE.Matrix4().makeTranslation(1, 0, -2).elements;
-  component.methods.handleTick.call(tickHost, 1 / 60);
-  assert.equal(cursorRuntime.reticle.visible, true);
-  tickHost._retrievalPaused = true;
-  component.methods.handleTick.call(tickHost, 1 / 60);
-  assert.equal(cursorRuntime.reticle.visible, false);
-  resources.disposeTree(cursorRuntime.reticle);
-  console.log(
-    "PASS original cursor GLB/material/scale, per-frame placement updates and invalid/mode/pause hiding",
-  );
   for (const m of fs
     .readFileSync(path.join(root, "components/xr-start/index.wxml"), "utf8")
     .matchAll(/bind[\w:]+="(\w+)"/g))
@@ -324,6 +260,13 @@ async function main() {
     scene: new THREE.Scene(),
   };
   host._runtime.camera.updateMatrixWorld();
+  host._runtime.session = { mode: "osd" };
+  host._audioEntries = [{ audioRefs: { ctx: { volume: 0 }, baseVolume: .6 },
+    node: { get position() { throw new Error("OSD audio must not calculate physical distance"); } } }];
+  host._arReady = true;
+  host.tickAudioVolume(true);
+  assert.equal(host._audioEntries[0].audioRefs.ctx.volume, .6);
+  host._audioEntries = [];
   host.scene = host._runtime.scene;
   host.shadowRoot = new THREE.Group();
   host.scene.add(host.shadowRoot);
@@ -433,7 +376,6 @@ async function main() {
   assert.equal(modelReleases, 1);
   assert.equal(host.shadowRoot.children.length, 0);
   // Anchor mode blocks local planting and local danmaku at the entry point.
-  await host.placeNode();
   host.showDanmakuInXR("not associated with the matched anchor");
   assert.equal(host.shadowRoot.children.length, 0);
   host._clearRemoteAssets();
@@ -441,276 +383,96 @@ async function main() {
     "PASS late image/model downloads release resources after clearing, even with the same anchor/id; local content blocked in anchor mode",
   );
 
-  host.retrievalMode = "gps";
-  const reticle = new THREE.Group();
-  reticle.visible = false;
-  host.scene.add(reticle);
-  host._runtime.reticle = reticle;
-  host._runtime.session = {
-    hitTest() {
-      throw new Error("planting must use the displayed cursor");
-    },
-  };
-  host._modelCache = {
-    acquire() {
-      throw new Error("no visible cursor must not load a tree");
-    },
-  };
-  await host.placeNode();
-  assert.equal(host.nodeList.length, 0);
-  reticle.visible = true;
-  reticle.position.set(1.2, -0.4, -2.3);
-  reticle.rotation.y = 0.4;
-  const plantedAt = reticle.position.clone();
-  const treeHandle = () => {
-    const object = new THREE.Group();
-    // Deliberately offset the geometry pivot to catch a floating/off-centre tree.
-    object.add(
-      new THREE.Mesh(
-        new THREE.BoxGeometry(1, 3, 1).translate(2, 5, -1),
-        new THREE.MeshBasicMaterial(),
-      ),
-    );
-    return { object, animations: [], release() {} };
-  };
-  let finishTree;
-  host._modelCache = {
-    acquire: () =>
-      new Promise((resolve) => {
-        finishTree = resolve;
-      }),
-  };
-  const planting = host.placeNode(0.1, 0.9);
-  reticle.position.set(8, 2, -9); // Phone/cursor moves while the model downloads.
-  finishTree(treeHandle());
-  await planting;
-  const tree = host.nodeList[0];
-  assert.ok(tree.node.position.distanceTo(plantedAt) < 1e-9);
-  assert.ok(tree.node.quaternion.angleTo(reticle.quaternion) < 1e-7);
-  assert.equal(tree.repulsionEnabled, false);
-  const treeBounds = new THREE.Box3().setFromObject(tree.node);
-  assert.ok(
-    Math.abs(treeBounds.min.y - plantedAt.y) < 1e-7,
-    "tree base must touch the cursor plane",
-  );
-  assert.ok(
-    Math.abs(treeBounds.getCenter(new THREE.Vector3()).x - plantedAt.x) < 1e-7,
-  );
-  assert.ok(
-    Math.abs(treeBounds.getCenter(new THREE.Vector3()).z - plantedAt.z) < 1e-7,
-  );
-
-  reticle.position.copy(plantedAt).add(new THREE.Vector3(0.25, 0, 0));
-  host._modelCache = { acquire: async () => treeHandle() };
-  await host.placeNode();
-  const secondTree = host.nodeList[1],
-    secondTreeAt = secondTree.node.position.clone();
-  const loose = new THREE.Group();
-  loose.position.copy(plantedAt).add(new THREE.Vector3(0.1, 0, 0));
-  host.shadowRoot.add(loose);
-  host._registerNode(null, loose, null, { type: "image" });
-  const looseAt = loose.position.clone();
-  host._frameDelta = 1 / 30;
-  for (let i = 0; i < 120; i++) host.tickRepulsion();
-  assert.ok(tree.node.position.distanceTo(plantedAt) < 1e-9);
-  assert.ok(secondTree.node.position.distanceTo(secondTreeAt) < 1e-9);
-  assert.ok(
-    loose.position.distanceTo(looseAt) < 1e-9,
-    "trees must not repel other assets either",
-  );
-  const otherLoose = new THREE.Group();
-  otherLoose.position.copy(looseAt).add(new THREE.Vector3(0.2, 0, 0));
-  host.shadowRoot.add(otherLoose);
-  host._registerNode(null, otherLoose, null, { type: "image" });
-  host.tickRepulsion();
-  assert.ok(
-    loose.position.distanceTo(looseAt) > 0,
-    "ordinary assets retain repulsion",
-  );
-  assert.ok(tree.node.position.distanceTo(plantedAt) < 1e-9);
-  const originalPlaceNode = host.placeNode,
-    originalRaycaster = host._raycaster;
-  let tapPlantings = 0,
-    mediaTaps = 0;
-  host.placeNode = (...args) => {
-    assert.equal(
-      args.length,
-      0,
-      "finger coordinates must not determine the planting site",
-    );
-    tapPlantings++;
-  };
-  host.createSelectorQuery = () => {
-    let callback;
-    const query = {
-      select() {
-        return query;
-      },
-      boundingClientRect(cb) {
-        callback = cb;
-        return query;
-      },
-      exec() {
-        callback({ left: 10, top: 20, width: 100, height: 200 });
-      },
-    };
-    return query;
-  };
-  host._raycaster = {
-    setFromCamera() {},
-    intersectObjects: () => [{ object: tree.node.children[0] }],
-  };
-  const offCenterTap = { changedTouches: [{ clientX: 90, clientY: 170 }] };
-  host.onCanvasTap(offCenterTap);
-  assert.equal(
-    tapPlantings,
-    1,
-    "an existing non-interactive tree must not swallow planting taps",
-  );
-  tree.onTap = () => mediaTaps++;
-  host.onCanvasTap(offCenterTap);
-  assert.equal(mediaTaps, 1);
-  assert.equal(
-    tapPlantings,
-    1,
-    "interactive media taps must not also plant a tree",
-  );
-  host.placeNode = originalPlaceNode;
-  host._raycaster = originalRaycaster;
-  delete host.createSelectorQuery;
-  host._clearRemoteAssets();
-  reticle.removeFromParent();
-  console.log(
-    "PASS tree planting snapshots the visible cursor, grounds offset geometry and excludes trees from all repulsion",
-  );
-
-  const capture = load(path.join(root, "components/xr-start/matching/capture"));
-  const gate = capture.captureMotion.createGate(0, 3000);
-  assert.equal(capture.captureMotion.decision(gate, 2999), "preparing");
-  assert.equal(capture.captureMotion.decision(gate, 3000), "ready");
-  capture.captureMotion.lock(gate, { position: [0, 0, 0] }, 3000);
-  assert.equal(
-    capture.captureMotion.sample(gate, { position: [1.49, 0, 0] }, 4000, {
-      restartDistanceMeters: 1.5,
-    }),
-    null,
-  );
-  assert.ok(
-    capture.captureMotion.sample(gate, { position: [1.5, 0, 0] }, 4000, {
-      restartDistanceMeters: 1.5,
-    }),
-  );
-  let frameInfo;
-  const source = {
-    requestCameraFrame: (callback) =>
-      callback(
-        {
-          getCameraJpgBuffer: () => new Uint8Array([255, 216, 255, 217]).buffer,
-        },
-        480,
-        640,
-      ),
-  };
-  let file = await capture.captureCamera(source, (info) => {
-    frameInfo = info;
-  });
-  assert.equal(frameInfo.pixelConverter, "visionkit-jpeg");
-  assert.equal(frameInfo.rotation, 0);
-  capture.removeTempFile(file);
-  const fallback = {
-    requestCameraFrame: (callback) =>
-      callback(
-        { getCameraBuffer: (w, h) => new Uint8Array(w * h * 4).buffer },
-        480,
-        640,
-      ),
-  };
-  file = await capture.captureCamera(fallback, (info) => {
-    frameInfo = info;
-  });
-  assert.equal(frameInfo.pixelConverter, "visionkit-rgba");
-  assert.equal(lastJPEGOptions.canvas.width % 16, 0);
-  capture.removeTempFile(file);
-  let finishFrame;
-  const pending = {
-    requestCameraFrame: (callback) =>
-      new Promise((resolve) => {
-        finishFrame = () =>
-          resolve(
-            callback(
-              {
-                getCameraJpgBuffer: () =>
-                  new Uint8Array([255, 216, 255, 217]).buffer,
-              },
-              480,
-              640,
-            ),
-          );
-      }),
-  };
-  const pendingCapture = capture.captureCamera(pending);
-  assert.equal(capture.isCaptureBusy(pending), true);
-  capture.disposeCapture(pending);
-  finishFrame();
-  await assert.rejects(pendingCapture, /取图已取消/);
-  assert.equal(virtualFiles.size, 0);
-  console.log(
-    "PASS matching policy and native capture: 3s delay, displacement lock, JPEG/RGBA fallback, rotation removal, cancellation/file cleanup",
-  );
-  host.scene.requestCameraFrame = source.requestCameraFrame;
-  host.currentGPS = {
-    latitude: 31,
-    longitude: 121,
-    accuracy: 10,
-    sampledAt: Date.now(),
-  };
+  host.currentGPS = { latitude: 31, longitude: 121, accuracy: 10, sampledAt: Date.now() };
   host._retrievalPaused = false;
-  host._disposed = false;
   host._arReady = true;
   host.retrievalMode = "anchor";
-  host._nextRecognitionAt = 0;
-  host.resetCaptureTiming(0);
-  wx.uploadFile = (options) => {
-    const { DEVELOPMENT_API_BASE_URL } = load(path.join(root, "utils/backend-environment.ts"));
-    assert.ok(options.url.startsWith(`${DEVELOPMENT_API_BASE_URL}/api/miniapp/anchors/recognize?`));
-    Promise.resolve().then(() =>
-      options.success({
-        statusCode: 200,
-        header: {},
-        data: JSON.stringify({
-          data: {
-            matched: true,
-            anchor: { id: "matched-place", name: "Place" },
-            assets: [
-              {
-                id: "result-text",
-                file_type: "text",
-                text_content: "Anchor text",
-              },
-            ],
-          },
-        }),
-      }),
-    );
-    return { abort() {} };
+  host._osdPhase = "scanning";
+  wx.uploadFile = () => { throw new Error("camera upload is forbidden"); };
+  wx.request = options => {
+    assert.ok(options.url.endsWith("/api/miniapp/anchors/content"));
+    options.success({ statusCode: 200, data: {
+      anchor: { id: "matched-place" }, assets: [{ id: "result-text", file_type: "text", text_content: "Anchor text" }],
+    } });
   };
-  await host.recognizeAnchor();
+  let tracking = false, spatialRenders = 0, sessionStarts = 0;
+  const trackingStates = [];
+  const nativeCamera = new THREE.PerspectiveCamera(47, 390 / 844, .01, 300);
+  nativeCamera.position.set(2, 1.6, 3);
+  const nativeFrame = { get camera() {
+    nativeCamera.updateMatrixWorld(true);
+    return { viewMatrix: nativeCamera.matrixWorldInverse.toArray(), getProjectionMatrix(near, far) {
+      nativeCamera.near = near; nativeCamera.far = far; nativeCamera.updateProjectionMatrix();
+      return nativeCamera.projectionMatrix.toArray();
+    } };
+  } };
+  host._runtime = Object.assign(Object.create(ARRuntime.prototype), host._runtime, {
+    canvas: { width: 390, height: 844 }, content: host.shadowRoot,
+    background: { draw: () => true },
+    renderer: { setSize() {}, render(scene, camera) { scene.updateMatrixWorld(true); camera.updateMatrixWorld(); spatialRenders++; }, info: { render: {}, memory: {} } },
+    session: { mode: 'osd', start() { sessionStarts++; }, stop() {}, isTracking: () => tracking, getOSDDiagnostics: () => ({}) },
+    onReady: () => host.handleARReady(), onTick: dt => host.handleTick(dt),
+    onState: (state, message) => { trackingStates.push(state); host.onARState(state, message); },
+  });
+  await host._acceptOSDMatch({ id: "matched-place", name: "Place", reference_version: "v1" });
+  assert.equal(host._osdPhase, 'tracking');
+  assert.equal(host.nodeList.length, 0);
+  host._runtime.frame(nativeFrame, { now: 1000, acquireMs: 0 });
+  assert.equal(host._arReady, false); assert.equal(spatialRenders, 0);
+  tracking = true;
+  const invalidPose = { camera: { viewMatrix: Array(16).fill(0), getProjectionMatrix: () => nativeCamera.projectionMatrix.toArray() } };
+  host._runtime.frame(invalidPose, { now: 1010, acquireMs: 0 });
+  assert.equal(host.nodeList.length, 0, 'singular poses must never place content');
+  host._runtime.frame(nativeFrame, { now: 1034, acquireMs: 0 });
   assert.equal(host._matchedAnchorId, "matched-place");
-  assert.equal(host._captureGate.locked, true);
+  assert.equal(host._osdPhase, "locked");
   assert.equal(host._nextRecognitionAt, Infinity);
   assert.equal(host.nodeList.length, 1);
   assert.equal(host.nodeList[0].assetId, "result-text");
-  host._runtime.camera.position.x = 1.5;
-  host.sampleCaptureMotion(host._runtime.camera, Date.now(), true);
+  assert.deepEqual(host._runtime.camera.position.toArray(), nativeCamera.position.toArray());
+  const lockedPosition = host.nodeList[0].node.getWorldPosition(new THREE.Vector3()).clone();
+  const firstScreenPosition = lockedPosition.clone().project(host._runtime.camera);
+  host.handleTick(1 / 30);
+  assert.equal(host.nodeList[0].assetId, "result-text", "the real billboard/animation tick preserves locked content");
+  nativeCamera.position.x += 1;
+  nativeCamera.rotation.y = .1;
+  host._runtime.frame(nativeFrame, { now: 1068, acquireMs: 0 });
+  assert.ok(host.nodeList[0].node.getWorldPosition(new THREE.Vector3()).distanceTo(lockedPosition) < 1e-8,
+    'moving/rotating the native camera must preserve world placement');
+  assert.ok(lockedPosition.clone().project(host._runtime.camera).distanceTo(firstScreenPosition) > .1,
+    'world-locked content must move on screen with camera motion');
+  const projection = host._runtime.camera.projectionMatrix.clone();
+  host._runtime.resize(844, 390);
+  assert.ok(projection.equals(host._runtime.camera.projectionMatrix), 'resize must not overwrite native camera calibration');
+  const rendersBeforeLoss = spatialRenders;
+  tracking = false; host._runtime.frame(nativeFrame, { now: 1100, acquireMs: 0 });
+  assert.equal(spatialRenders, rendersBeforeLoss); assert.equal(host._arReady, false);
+  assert.equal(host.nodeList.length, 1, 'tracking loss hides content without clearing its world anchor');
+  tracking = true; host._runtime.frame(nativeFrame, { now: 1134, acquireMs: 0 });
+  assert.equal(host.nodeList.length, 1, 'recovery must not place a duplicate');
+  assert.ok(trackingStates.includes('trackingrestored'));
+  host._runtime.frame(null, { now: 1168, acquireMs: 0 });
+  assert.equal(host._arReady, false, 'a missing native frame must stop placement using a stale pose');
+  host._runtime.frame(nativeFrame, { now: 1200, acquireMs: 0 });
+  assert.equal(host._arReady, true); assert.equal(host.nodeList.length, 1);
+  await host.recognizeAnchor();
+  assert.equal(host._osdPhase, "locked", "moving must not unlock content");
+  host.recognizeAnchor = async () => {};
+  host.rescan();
   assert.equal(host.nodeList.length, 0);
   assert.equal(host.shadowRoot.children.length, 0);
-  assert.equal(host._captureGate.locked, false);
-  assert.ok(host._captureGate.readyAt > Date.now() + 2900);
-  host.clearRecognitionFrame();
-  assert.equal(virtualFiles.size, 0);
-  console.log(
-    "PASS recognition integration: real matching controller -> Three text -> lock -> 1.5m restart -> complete scene/file cleanup",
-  );
+  assert.equal(host._osdPhase, "idle");
+  assert.equal(host._runtime.session.mode, 'osd');
+  assert.deepEqual(Array.from(host._runtime.camera.position.toArray()), [0, 0, 0]);
+  host._runtime.frame(nativeFrame, { now: 1234, acquireMs: 0 });
+  assert.equal(host._arReady, true);
+  const startsBeforeRescan = sessionStarts;
+  host.rescan();
+  assert.equal(sessionStarts, startsBeforeRescan + 1, 'rescan must restart even when already in OSD mode');
+  assert.equal(host._arReady, false, 'a restarted scan waits for its new camera frame');
+  host._runtime.frame(nativeFrame, { now: 1268, acquireMs: 0 });
+  assert.equal(host._arReady, true);
+  console.log("PASS OSD -> SLAM initialization -> world-locked Three content with camera parallax -> tracking recovery -> rescan");
 
   let decoderRemoved = 0,
     audioDestroyed = 0,

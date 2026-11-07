@@ -15,8 +15,8 @@ GPS、巨大模型、商户及识别点接口返回地图 Placement，返回值�
 预览页调用 `POST /api/miniapp/scenes/preview`，请求 `{ scene_id, organization_id }`。接口校验团队归属、团队和场景的归档状态，返回不可缓存的当前场景。已归档 Scene 的独立预览不可用。未保存的本地编辑不会进入预览。
 
 - 场景模型、文字与媒体占位对象准备后，获得有效相机帧即启用「放置场景」按钮。只有点击才显示整场，不再等待两秒自动放置。
-- 显示时取手机相机的最新世界位置与水平朝向，用共享 Scene Core 的 `scenePlacementFromCamera` 对齐场景的 `content.viewerPosition`。缺省观看位置为 `(0, 1.5, 2)` 米，对应场景原点在手机前方 2 米、下方 1.5 米；QR、GPS 和识别点触发的 Scene 使用同一基准。Web 保存自定义观看位置后，下次加载按同一位置参数放置，实例局部坐标不变。1.5 米是约定的观看高度，不是设备实测地面；手机俯仰和侧倾不会倾斜虚拟地面，VisionKit 的真实投影保持不变。
-- 点击时若相机帧已超过 250ms，拒绝使用过期位置，等新帧后可再次点击。隐藏页面、AR 错误、重试或卸载会取消加载并释放迟到的资源。
+- 显示时取 SLAM 相机的位置与水平朝向，用共享 Scene Core 的 `scenePlacementFromCamera` 对齐场景的 `content.viewerPosition`。缺省观看位置为 `(0, 1.5, 2)` 米，对应场景原点在手机前方 2 米、下方 1.5 米；QR、GPS 和识别点触发的 Scene 使用同一基准。Web 保存自定义观看位置后，下次加载按同一位置参数放置，实例局部坐标不变。1.5 米是约定的观看高度，不是设备实测地面；Scene 放置后留在 SLAM 世界空间，不使用平面 hitTest。
+- 点击时若相机帧已超过 250ms，等待新相机画面，等新帧后可再次点击。隐藏页面、AR 错误、重试或卸载会取消加载并释放迟到的资源。
 - 画布占满页面，悬浮按钮显示加载 / 定位 / 放置 / 重试状态。放置后提供暂停、继续和重播控制，纯音频或出场后没有可点击内容时仍可操作。错误通过临时提示展示，空场景不会占用播放容量。
 
 ## 播放器
@@ -30,7 +30,7 @@ GPS、巨大模型、商户及识别点接口返回地图 Placement，返回值�
 - `asset` 与 `text` 二选一。文字内容、颜色、字号（米）、宽度（米）、对齐和可选背景直接保存在 Scene；不创建团队素材。换行、底边中心和纹理尺寸规则与 Web 相同，字形取决于设备字体。
 - `timing` 的 `startSeconds/endSeconds` 控制出入场，结束点不包含；null 跟随场景时长。`fadeInSeconds/fadeOutSeconds` 使用共享线性包络，同时改变画面透明度和声音音量。旧模型未设 timing 时全程可见、结束定格。
 - `opacity` 及同名关键帧控制可视素材的不透明度（0–1），与出入场包络相乘；`volume` 关键帧在同一播放头采样，与出入场声音包络相乘。视觉透明度不会静音视频或音频，暂停/跳转也应用当前值。
-- `media.spatial` 开启位置音频，`refDistance` 为保持原音量的距离、`maxDistance` 为衰减计算的最远距离、`rolloffFactor` 为衰减强度；距离单位为米。播放器每帧使用手机相机世界位置和音源世界位置（包含场景投放、分组及位置关键帧），按共享 Core 的反距离公式衰减。最大距离以外保持该距离的增益，不会突然截断。默认关闭，旧场景音量保持不变。原生 `InnerAudioContext` / `MediaAudioPlayer` 没有可接入 WebAudio 的流式节点及声像接口，因此本播放器支持距离衰减；Web 另外提供左右声像。保留边下载边播放，不为声像切换成整文件 PCM 下载。
+- `media.spatial` 开启位置音频，`refDistance` 为保持原音量的距离、`maxDistance` 为衰减计算的最远距离、`rolloffFactor` 为衰减强度；距离单位为米。播放器每帧使用 SLAM 相机世界位置和音源世界位置（包含场景投放、分组及位置关键帧），按共享 Core 的反距离公式衰减。最大距离以外保持该距离的增益，不会突然截断。默认关闭，旧场景音量保持不变。原生 `InnerAudioContext` / `MediaAudioPlayer` 没有可接入 WebAudio 的流式节点及声像接口，因此小程序支持距离衰减，Web 另外提供左右声像。保留保存音量、关键帧、淡入淡出与边下载边播放，不为声像切换成整文件 PCM 下载。
 - `media` 支持素材内裁切、音量、静音、片段循环，音视频固定原速播放，`playbackRate` 固定为 `1`。普通音频直接将远程 URL 交给原生 `InnerAudioContext({ useWebAudioImplement: false })`，边缓冲边播放；不设置倍率，不经过完整下载和 PCM 解码。旧 WebM/Ogg/FLAC 等跨端原生格式不统一的音频保留 WebAudio 下载/解码路径，直接播放原始 PCM，不做重采样。
 - 新上传视频为 H.264/AAC MP4，服务端 faststart 把索引放到头部。播放器只用 HTTP Range 读取 MP4 atom 头和 moov（上限 2 MiB），取得时长/音轨信息，再将远程 URL 交给 VideoDecoder，避免等待完整下载。旧 MP4 也可按 atom 偏移读取尾部索引；旧 WebM 或不支持 Range 的服务器保留下载后本地检查的兼容路径。网络请求失败不触发第二次整文件下载。
 - 视频画面使用手动模式，以毫秒 seek 到共享 `mediaTime` 算出的源时间，合并等待中的定位请求并复制 RGBA 帧为独立纹理。视频音轨使用另一只 audio-only、PTS 模式的远程 VideoDecoder 和 MediaAudioPlayer，画面 seek 不打断声音；音量按同一包络更新，暂停立即静音，恢复与跳转重新定位音轨。旧容器的本地音轨保留 WebAudio 缓冲路径。无音轨或静音视频不创建音频播放器。
@@ -41,7 +41,7 @@ GPS、巨大模型、商户及识别点接口返回地图 Placement，返回值�
 
 Core 提供 `play/pause/seek/advance/sync/sample/subscribe/observe/bind/dispose`，不依赖 DOM、全局 RAF、定时器或项目注册表。压缩 bundle 的大小由构建产物记录；`miniprogram/lib/scene-runtime/vendor/build-info.json` 记录版本和源码哈希。更新 npm pack 快照及构建步骤见相邻 Web 仓库 `packages/scene-core/README.md`。旧 schema 4/5 编辑文档与 Theatre 状态只在后端标准数据库迁移中转换和归档，小程序没有旧协议运行时分支。
 
-`npm test` 覆盖实际 Three 播放器、地图队列、手动放置、重复点击、跟踪间断、后台取消、异步资源释放和错误重试。开发者工具的无相机联调见 [场景自动联调](scene-auto-debug.md)；VisionKit 相机追踪及实际放置效果需真机验证。
+`npm test` 覆盖实际 Three 播放器、地图队列、手动放置、重复点击、跟踪间断、后台取消、异步资源释放和错误重试。开发者工具的无相机联调见 [场景自动联调](scene-auto-debug.md)；VisionKit 相机背景、OSD 识别及实际展示效果需真机验证。
 
 `npm run test:scene-memory` 检查反复装载后的对象回收与堆内存平台期；开发者工具可在联调页 query 加 `stressCycles=100` 检查实际 WebGL 资源计数。两端模型矩阵与媒体/文字比对脚本位于相邻 Web 仓库，通过 `npm run test:cross-runtime` 一起执行。媒体适配器独立测试为 `npm run test:scene-media`；当前模拟器与测试边界见 [自动联调](scene-auto-debug.md)。
 

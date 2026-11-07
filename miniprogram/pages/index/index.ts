@@ -62,7 +62,6 @@ Page({
       });
       return;
     }
-    console.log("[index] parsed config:", CONFIG);
     await this.fetchNames();
     // 首屏渲染后异步刷新历史列表名称，反映后端重命名（不阻塞首屏）
     this.refreshHistoryNames();

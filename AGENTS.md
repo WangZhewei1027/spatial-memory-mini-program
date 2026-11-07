@@ -12,12 +12,12 @@
 | 素材队列、容量与释放 | [串行放置](docs/asset-place-queue-strategy.md)、[容量与去重](docs/node-list-queue-strategy.md) |
 | 场景协议、媒体与观看位置 | [场景播放](docs/scene-asset.md)、[自动联调](docs/scene-auto-debug.md) |
 | 活动与参与记录 | [活动](docs/activities.md) |
-| 图片匹配与位移重启 | [识别流程](docs/anchor-recognition.md) |
+| OSD 识别、锁定与重新扫描 | [识别流程](docs/anchor-recognition.md) |
 
 ## 实现边界
 
 - 后端请求经过 `miniprogram/utils/backend.ts`。团队与地图由扫码上下文提供；普通发现记录的 `id` 是 Placement ID，独立场景预览使用 Scene ID。
-- 生产渲染使用 VisionKit v2 + Three；xr-frame 的坐标与粒子规则只用于桥接实验。Three 相机前方是 -Z。
+- 生产识别使用 VisionKit v1 OSD，命中后切换到 v2 SLAM + Three 空间展示；GPS 与独立 Scene 直接使用 v2。每次只运行一个会话；只消费相机位姿，平面交互留在实验页。配置限制见正式运行时文档。Three 相机前方是 -Z。
 - `components/xr-start` 的方法由各模块组合，每实例状态通过 `buildInitialState()` 初始化；异步加载完成后检查当前内容代次，退出时释放晚到资源。
 - 模型模板由 `ModelCache` 引用计数管理，实例清理调用 handle 的 `release()`；共享模板的物理释放由缓存负责。
 - Scene 使用保存的米制变换和共享 Core；普通地图模型归一化策略不适用于 Scene 内实例。

@@ -1,65 +1,30 @@
 const config = require("./config");
-const { CONFIG, RECOGNIZE_API } = require("../../../utils/backend");
-const { captureCamera, isCaptureBusy, removeTempFile, createCaptureTiming, disposeCapture } = require("./capture");
+const { CONFIG, fetchAnchorCandidates, fetchAnchorContent } = require("../../../utils/backend");
+const { loadOSDReference } = require("./reference");
+const { removeFile } = require("../../../lib/three-runtime/resources");
 const matchLog = require("./log");
+const { methods: diagnostics, pathInfo } = require("./diagnostics");
 
-const SERVER_STAGES = ["request_parse_ms", "validation_ms", "rate_limit_ms",
-  "gps_query_ms", "reference_read_ms", "database_context_ms", "database_finalize_ms",
-  "model_request_ms", "model_queue_ms", "model_decode_ms", "model_inference_ms", "model_service_total_ms",
-  "ranking_ms", "candidate_recheck_ms", "assets_read_ms", "matching_total_ms", "api_total_ms"];
-// 设备标识：随机生成并存在本地，只用于服务端按设备限流（同一 Wi-Fi/运营商出口
-// 的多个游客共用公网 IP，按 IP 限流会互相挤占）。不含任何用户信息。
-const CLIENT_ID_KEY = "anchorMatchClientId";
-let clientId = null;
-function getClientId() {
-  if (clientId) return clientId;
-  try { clientId = wx.getStorageSync(CLIENT_ID_KEY) || null; } catch (_) { clientId = null; }
-  if (!/^[A-Za-z0-9_-]{16,64}$/.test(clientId || "")) {
-    clientId = Date.now().toString(36) + Array.from({ length: 4 }, () => Math.random().toString(36).slice(2, 8)).join("");
-    try { wx.setStorageSync(CLIENT_ID_KEY, clientId); } catch (_) { /* 存储失败时本次会话内仍复用 */ }
+function gpsBody(gps) {
+  return { workspace_id: CONFIG.workspaceId, latitude: gps.latitude, longitude: gps.longitude,
+    accuracy: gps.accuracy, gps_timestamp: gps.sampledAt, coordinate_system: "wgs84" };
+}
+function checked(response) {
+  if (response.statusCode !== 200) throw new Error(response.data?.error || "请求失败，请重新扫描");
+  return response.data;
+}
+function candidatesFrom(data) {
+  if (!Array.isArray(data?.candidates) || data.candidates.length > 200) throw new Error("识别目标数据无效");
+  const ids = new Set();
+  for (const item of data.candidates) {
+    if (!item || typeof item.id !== "string" || !item.id || ids.has(item.id) ||
+        typeof item.name !== "string" || typeof item.image_url !== "string" || !/^https?:\/\//.test(item.image_url) ||
+        typeof item.reference_version !== "string" || !item.reference_version)
+      throw new Error("识别目标数据无效");
+    ids.add(item.id);
   }
-  return clientId;
+  return data.candidates;
 }
-function safeLabel(value, limit = 100) {
-  return typeof value === "string" && value.length <= limit && /^[a-zA-Z0-9._:-]+$/.test(value) ? value : null;
-}
-function serverStages(diagnostics) {
-  if (!diagnostics?.timings_ms) return null;
-  const result = {};
-  for (const key of SERVER_STAGES) {
-    const value = diagnostics.timings_ms[key];
-    result[key] = Number.isFinite(value) && value >= 0 ? value : null;
-  }
-  return result;
-}
-function diagnosticMeta(diagnostics) {
-  return {
-    serverRequestId: safeLabel(diagnostics?.request_id),
-    upstreamRequestId: safeLabel(diagnostics?.upstream_request_id),
-    edgeRegion: safeLabel(diagnostics?.edge_region),
-    modelDevice: safeLabel(diagnostics?.model_device),
-    modelCode: safeLabel(diagnostics?.model_code),
-    upstreamStatus: Number.isInteger(diagnostics?.upstream_status) ? diagnostics.upstream_status : null,
-  };
-}
-function responseMeta(headers = {}) {
-  const values = {};
-  for (const key of Object.keys(headers)) values[key.toLowerCase()] = headers[key];
-  return {
-    serverRequestId: safeLabel(values["x-recognition-request-id"]),
-    edgeRegion: safeLabel(values["x-sb-edge-region"]),
-    platformRequestId: safeLabel(values["sb-request-id"] || values["x-vercel-id"], 200),
-  };
-}
-
-const reasons = {
-  no_nearby_anchor: "附近没有匹配点，请走近预设地点",
-  reference_not_ready: "参考图尚未就绪，请在管理端检查",
-  model_version_mismatch: "参考图模型版本不一致，请重新提取特征",
-  below_threshold: "未匹配，请将镜头朝向预设地点",
-  ambiguous: "多个地点相似，请调整拍摄角度",
-  reference_changed: "参考图已更新，正在重新确认",
-};
 
 function locate() {
   return new Promise((resolve, reject) => {
@@ -84,111 +49,275 @@ function locate() {
 }
 
 module.exports = {
-  ...createCaptureTiming(config),
-  disposeRecognitionCapture() {
-    disposeCapture(this.scene);
-  },
-
-  clearRecognitionFrame() {
-    removeTempFile(this._recognitionFrame?.path);
-    this._recognitionFrame = null;
-    if (!this._disposed) this.triggerEvent("recognitionframe", { path: "" });
-  },
-
-  _retainRecognitionFrame(filePath, info, result, requestId) {
-    if (!config.debugFramePreview) return;
-    const previous = this._recognitionFrame?.path;
-    this._recognitionFrame = {
-      path: filePath, requestId, ...info,
-      bestSimilarity: result.diagnostics?.best_similarity ?? result.anchor?.cosine_similarity ?? null,
-      threshold: result.diagnostics?.threshold ?? null,
-    };
-    if (previous && previous !== filePath) removeTempFile(previous);
-    this.triggerEvent("recognitionframe", this._recognitionFrame);
-  },
-
+  ...diagnostics,
   _recognitionStatus(message) {
-    matchLog("状态", { mode: this.retrievalMode, message });
-    if (!this._disposed)
-      this.triggerEvent("recognitionstatus", {
-        mode: this.retrievalMode,
-        message,
-      });
-  },
-
-  _clearRemoteAssets() {
-    this._recognitionTiming = null;
-    this._contentEpoch++;
-    for (const ctx of this._pendingAudioContexts || []) {
-      try {
-        ctx.stop();
-        ctx.destroy();
-      } catch (_) {}
-    }
-    this._pendingAudioContexts?.clear();
-    this._allowedAssetIds.clear();
-    this._placeQueue = [];
-    this._pendingDisplayAssets = [];
-    const clearedNodeCount = this.nodeList.length;
-    for (const entry of this.nodeList) this._destroyNode(entry);
-    this.nodeList = [];
-    this.flyingDanmakus = [];
-    this.stopRandomConfetti?.();
-    matchLog("清空场景素材", { clearedNodeCount, hugeNodeCount: this._hugeNodeList?.length || 0 });
-    for (const entry of this._hugeNodeList || []) this._destroyNode(entry);
-    this._hugeNodeList = [];
-    this._pendingHugeAssets = [];
-    this._hugePlaceQueue = [];
-    this._seenAssets.clear();
-    this._firstRevealDone = false;
-    this._matchedAnchorId = null;
-    // 兜底回收此前构建异常留下的、未能登记的动态根节点。
-    const orphans = [...(this.shadowRoot?.children || [])];
-    for (const node of orphans) this._destroyNode({ node });
-    if (orphans.length) matchLog("清理未登记场景节点", { count: orphans.length });
-  },
-
-  _stopRecognitionRequests(exceptId) {
-    for (const [id, request] of this._recognitionRequests || []) {
-      if (id === exceptId) continue;
-      request.cancelled = true;
-      try { request.uploadTask?.abort(); } catch (_) {}
-      request.rejectUpload?.(new Error("识别已取消"));
-      this._recognitionRequests.delete(id);
-    }
-    this._recognizing = !!this._recognitionRequests?.size;
-  },
-
-  _cancelRetrieval() {
-    matchLog("取消当前识别", {
-      mode: this.retrievalMode,
-      inFlightCount: this._recognitionRequests?.size || 0,
+    if (!this._disposed) this.triggerEvent("recognitionstatus", {
+      mode: this.retrievalMode, message, locked: this._osdPhase === "locked",
     });
+  },
+  _recognitionCurrent(epoch) {
+    return this._modeEpoch === epoch && !this._disposed && !this._retrievalPaused &&
+      this.retrievalMode === "anchor" && this._arReady;
+  },
+  _releaseOSDMarkers(reason = "replace_batch") {
+    this.reportOSDScan(reason);
+    this._osdDiagnostics = null;
+    this._osdBatchEpoch = (this._osdBatchEpoch || 0) + 1;
+    // Detach the registry before native removal can emit synchronous callbacks.
+    const markers = this._osdMarkers;
+    this._osdMarkers = new Map();
+    this._osdEvidence = null;
+    for (const [id, entry] of markers || []) {
+      try { this._runtime?.session.removeOSDMarker(id); }
+      catch (error) { matchLog("移除识别目标失败", { message: error.message }, "warn"); }
+      removeFile(entry.path);
+    }
+  },
+  _cancelRetrieval() {
     this._modeEpoch++;
-    this._stopRecognitionRequests();
-    this.isFetchingAssets = false;
-    this._isFetchingHuge = false;
+    this._releaseOSDMarkers("cancel");
+    this._osdPhase = "idle";
+    this._pendingOSDPlacement = null;
+    this._osdPreparing = false;
+    this._osdCandidates = [];
     this._nextRecognitionAt = 0;
-    this._lastCaptureStartedAt = null;
-    this._lastRecognitionResultSequence = 0;
     this._recognitionGPS = null;
     this._recognitionGPSRequest = null;
-    this.resetCaptureTiming();
+    this.isFetchingAssets = false;
+    this._isFetchingHuge = false;
   },
-
-  restartRecognitionAfterMovement(movement) {
-    if (this.retrievalMode !== "anchor" || this._retrievalPaused || this._disposed) return;
-    matchLog("移动后重新识别", {
-      ...movement,
-      distanceThresholdMeters: config.restartDistanceMeters,
-      prepareMs: config.initialCaptureDelayMs,
-    });
+  rescan() {
+    if (this._disposed || this._retrievalPaused || this.retrievalMode !== "anchor") return;
     this._cancelRetrieval();
     this._clearRemoteAssets();
-    this._recognitionStatus("已移动，3 秒后重新识别…");
+    this._recognitionStatus("正在准备重新扫描…");
+    if (this._ensureARMode("osd", { restart: true })) void this.recognizeAnchor();
   },
-
-  /** 组件持续定位（gps.js startGPSWatch）的最新结果，足够新且精度可用时返回，否则 null */
+  setRetrievalMode(mode) {
+    if (!["gps", "anchor"].includes(mode) || mode === this.retrievalMode || this._disposed) return;
+    this._cancelRetrieval();
+    this._clearRemoteAssets();
+    this.retrievalMode = mode;
+    this.setData({ retrievalMode: mode });
+    this._recognitionStatus(mode === "anchor" ? "请将镜头对准目标" : "根据附近位置直接显示素材");
+    if (!this._ensureARMode(mode === "anchor" ? "osd" : "slam")) return;
+    if (mode === "anchor") void this.recognizeAnchor();
+    else {
+      this._maybeStartConfetti?.();
+      this.fetchNearbyAssets();
+      this.fetchHugeAssets();
+    }
+  },
+  pauseRetrieval() {
+    this._cancelScenePreview?.();
+    this._retrievalPaused = true;
+    this._cancelRetrieval();
+    this._clearRemoteAssets();
+  },
+  resumeRetrieval() {
+    if (!this._retrievalPaused || this._disposed) return;
+    this._retrievalPaused = false;
+    if (!this._ensureARMode(this._desiredARMode())) return;
+    if (this._scenePreviewMode) { if (this._arReady) this._beginScenePreview(); return; }
+    this._maybeStartConfetti?.();
+    if (this._arReady) { this.fetchNearbyAssets(); this.fetchHugeAssets(); }
+  },
+  async recognizeAnchor() {
+    if (!this._recognitionCurrent(this._modeEpoch) || this._osdPreparing ||
+        this._runtime?.session.mode !== "osd" ||
+        ["loading", "tracking", "locked"].includes(this._osdPhase) || Date.now() < this._nextRecognitionAt) return;
+    if (!CONFIG.workspaceId) {
+      this._nextRecognitionAt = Infinity;
+      this._recognitionStatus("请先选择具体地图");
+      return;
+    }
+    const epoch = this._modeEpoch;
+    let batchEpoch = this._osdBatchEpoch || 0;
+    const current = () => this._recognitionCurrent(epoch) && batchEpoch === (this._osdBatchEpoch || 0);
+    this._osdPreparing = true;
+    const refreshing = this._osdPhase === "scanning" && this._osdMarkers?.size > 0;
+    if (!refreshing) {
+      this._osdPhase = "preparing";
+      this._osdLog("准备扫描", { workspaceId: CONFIG.workspaceId,
+        native: this._runtime?.session?.getOSDDiagnostics?.() || null });
+    }
+    try {
+      if (!this._osdCandidates?.length || this._osdCursor >= this._osdCandidates.length) {
+        if (!refreshing) this._recognitionStatus("正在获取附近识别目标…");
+        const gps = await this._locateForRecognition(epoch);
+        if (!current()) return;
+        this._osdLog("定位就绪", { source: gps.source, accuracyM: gps.accuracy, ageMs: Date.now() - gps.sampledAt });
+        const requestAt = Date.now();
+        const response = await fetchAnchorCandidates(gpsBody(gps));
+        if (!current()) return;
+        this._osdLog("候选接口返回", { status: response.statusCode, elapsedMs: Date.now() - requestAt });
+        const data = checked(response);
+        if (!current()) return;
+        this._osdCandidates = candidatesFrom(data);
+        this._osdCursor = 0;
+        this._osdLog("附近目标", { count: this._osdCandidates.length, radiusM: data.gps_radius_meters,
+          targets: this._osdCandidates.slice(0, config.batchSize).map(c => ({ id: c.id, name: c.name, distanceM: c.distance_meters })),
+          listed: Math.min(this._osdCandidates.length, config.batchSize) });
+      }
+      if (!this._osdCandidates.length) {
+        this._releaseOSDMarkers("no_candidates");
+        this._osdPhase = "empty";
+        this._nextRecognitionAt = Date.now() + config.emptyRetryMs;
+        this._recognitionStatus("附近没有识别目标，请走近目标后重新扫描");
+        return;
+      }
+      const batch = this._osdCandidates.slice(this._osdCursor, this._osdCursor + config.batchSize);
+      this._osdCursor += batch.length;
+      const candidates = new Map(batch.map(candidate => [candidate.id, candidate]));
+      if (refreshing && this._osdMarkers.size === batch.length &&
+          [...this._osdMarkers.values()].every(ref => candidates.get(ref.id)?.reference_version === ref.reference_version)) {
+        // Refresh metadata without interrupting native detection or an in-progress
+        // confirmation. Signed URLs may change while the reference version stays put.
+        for (const [id, ref] of this._osdMarkers)
+          this._osdMarkers.set(id, { ...candidates.get(ref.id), path: ref.path });
+        this._nextRecognitionAt = Date.now() + config.batchDurationMs;
+        this._osdLog("继续扫描", { registered: this._osdMarkers.size, referencesUnchanged: true });
+        return;
+      }
+      // Keep the previous batch active during discovery. A match releases it and
+      // changes batchEpoch, so a late refresh cannot overwrite loading/locked state.
+      this._osdPhase = "preparing";
+      this._releaseOSDMarkers();
+      batchEpoch = this._osdBatchEpoch;
+      this._beginOSDDiagnostics();
+      const failures = [];
+      for (const candidate of batch) {
+        if (!current()) return;
+        this._recognitionStatus(`正在准备参考图（${this._osdMarkers.size + 1}/${batch.length}）…`);
+        let path;
+        const referenceAt = Date.now();
+        this._osdLog("准备参考图", { anchorId: candidate.id, name: candidate.name,
+          reference: pathInfo(candidate.image_url), version: candidate.reference_version.slice(0, 12) });
+        try {
+          path = await loadOSDReference(candidate.image_url, current, (stage, fields) => {
+            if (current()) this._osdLog("参考图处理", { anchorId: candidate.id, stage, ...fields });
+          });
+          if (!current()) { removeFile(path); return; }
+          const markerId = this._runtime.session.addOSDMarker(path);
+          if (this._osdMarkers.has(markerId)) throw new Error("识别目标编号重复，请重新扫描");
+          this._osdMarkers.set(markerId, { ...candidate, path });
+          this._osdLog("标记已注册", { anchorId: candidate.id, name: candidate.name, markerId,
+            path: pathInfo(path), elapsedMs: Date.now() - referenceAt });
+        } catch (error) {
+          removeFile(path);
+          if (!current()) return;
+          failures.push(`${candidate.name || "参考图"}：${error.message || "加载失败"}`);
+          this._osdLog("参考图失败", { anchorId: candidate.id, message: error.message || error.errMsg || "加载失败" }, "warn");
+        }
+      }
+      if (!current()) return;
+      this._osdEvidence = null;
+      this._osdPhase = this._osdMarkers.size ? "scanning" : "error";
+      this._nextRecognitionAt = Date.now() + (this._osdMarkers.size ? config.batchDurationMs : config.errorRetryMs);
+      if (this._osdDiagnostics) this._osdDiagnostics.reportedAt = Date.now();
+      this._osdLog("开始扫描", { registered: this._osdMarkers.size, failed: failures.length,
+        identity: "markerId",
+        batchDurationMs: config.batchDurationMs, minimumObservations: config.minimumObservations,
+        confirmDurationMs: config.confirmDurationMs, native: this._runtime?.session?.getOSDDiagnostics?.() || null });
+      this._recognitionStatus(this._osdMarkers.size
+        ? `请对准目标，保持片刻${this._osdCandidates.length > config.batchSize ? ` · 正在扫描第 ${Math.ceil(this._osdCursor / config.batchSize)} 组` : ""}${failures.length ? ` · ${failures.length} 张参考图不可用` : ""}`
+        : failures[0] || "参考图不可用，请重新扫描");
+    } catch (error) {
+      if (!current()) return;
+      this._osdLog("扫描准备失败", { message: error.message || error.errMsg || "未知错误" }, "error");
+      this._releaseOSDMarkers();
+      this._osdCandidates = [];
+      this._osdPhase = "error";
+      this._nextRecognitionAt = Date.now() + config.errorRetryMs;
+      this._recognitionStatus(error.message || "识别准备失败，请重新扫描");
+    } finally {
+      if (this._modeEpoch === epoch) this._osdPreparing = false;
+    }
+  },
+  handleOSDAnchors(event, anchors) {
+    this._recordOSDEvent(event, anchors);
+    if (!this._recognitionCurrent(this._modeEpoch) || this._osdPhase !== "scanning") {
+      this._ignoreOSD("phase_not_scanning"); return;
+    }
+    if (!Array.isArray(anchors)) { this._ignoreOSD("payload_not_array"); return; }
+    if (event === "removeAnchors") {
+      if (anchors.some(a => a && (a.markerId === this._osdEvidence?.id || a.id === this._osdEvidence?.anchorId))) this._resetOSDEvidence("target_removed");
+      return;
+    }
+    const visible = anchors.filter(a => {
+      // iOS can return an empty path; native paths can also differ from wx temp
+      // paths. Identity is the markerId registered in this batch, within the
+      // current VK session (whose generation guard discards old callbacks).
+      const ref = this._osdMarkers.get(a?.markerId);
+      const reason = !a || a.type !== 2 ? "not_osd_type" : !ref ? "unknown_marker"
+        : !Number.isFinite(a.origin?.x) || !Number.isFinite(a.origin?.y) ||
+          !Number.isFinite(a.size?.width) || a.size.width <= 0 || !Number.isFinite(a.size?.height) || a.size.height <= 0 ? "invalid_rect" : null;
+      if (reason) { this._rejectOSD(reason, a); return false; }
+      if (this._osdDiagnostics) this._osdDiagnostics.accepted++;
+      return true;
+    });
+    const ids = new Set(visible.map(a => a.markerId));
+    if (ids.size !== 1) { this._resetOSDEvidence(ids.size ? "multiple_targets" : "no_valid_target"); return; }
+    const anchor = visible[0], now = Date.now();
+    let evidence = this._osdEvidence;
+    if (!evidence || evidence.id !== anchor.markerId || now - evidence.lastAt > config.maxObservationGapMs) {
+      this._resetOSDEvidence(evidence?.id !== anchor.markerId ? "target_changed" : "observation_gap");
+      evidence = this._osdEvidence = { id: anchor.markerId, anchorId: anchor.id, since: now, lastAt: now, count: 0 };
+    }
+    evidence.count++;
+    evidence.lastAt = now;
+    const confirmed = evidence.count >= config.minimumObservations && now - evidence.since >= config.confirmDurationMs;
+    this._logOSDProgress(evidence, confirmed);
+    if (confirmed)
+      void this._acceptOSDMatch(this._osdMarkers.get(anchor.markerId));
+  },
+  async _acceptOSDMatch(candidate) {
+    if (this._osdPhase !== "scanning" || !candidate) return;
+    const epoch = this._modeEpoch, matchedAt = Date.now();
+    this._osdPhase = "loading";
+    this._releaseOSDMarkers("matched");
+    this._nextRecognitionAt = Infinity;
+    this._recognitionStatus(`已识别：${candidate.name || "目标"}，正在加载内容…`);
+    try {
+      const gps = await this._locateForRecognition(epoch);
+      if (!this._recognitionCurrent(epoch)) return;
+      const requestAt = Date.now();
+      this._osdLog("读取命中内容", { anchorId: candidate.id });
+      const response = await fetchAnchorContent({ ...gpsBody(gps), anchor_id: candidate.id, reference_version: candidate.reference_version });
+      if (!this._recognitionCurrent(epoch)) return;
+      this._osdLog("内容接口返回", { anchorId: candidate.id, status: response.statusCode, elapsedMs: Date.now() - requestAt });
+      const result = checked(response);
+      if (result?.anchor?.id !== candidate.id || !Array.isArray(result.assets)) throw new Error("目标内容数据无效，请重新扫描");
+      const assets = result.assets.filter(a => a && typeof a.id === "string" && ["text", "image", "model", "audio", "video", "scene"].includes(a.file_type));
+      this._pendingOSDPlacement = { epoch, matchedAt, candidate, assets };
+      this._osdPhase = "tracking";
+      this._recognitionStatus(`已识别：${candidate.name || "目标"} · 请缓慢左右移动手机，建立空间定位`);
+      this._osdLog("切换空间追踪", { anchorId: candidate.id, assets: assets.length });
+      if (this._ensureARMode("slam")) this._finishOSDPlacement();
+    } catch (error) {
+      if (!this._recognitionCurrent(epoch)) return;
+      // Explicit retry: don't immediately accept a different target after a content failure.
+      this._osdPhase = "error";
+      this._osdLog("命中内容失败", { anchorId: candidate.id, message: error.message || error.errMsg || "未知错误" }, "error");
+      this._recognitionStatus(error.message || "内容加载失败，请重新扫描");
+    }
+  },
+  _finishOSDPlacement() {
+    const pending = this._pendingOSDPlacement;
+    if (!pending || this._osdPhase !== "tracking" || !this._recognitionCurrent(pending.epoch) ||
+        this._runtime?.session.mode !== "slam") return;
+    this._pendingOSDPlacement = null;
+    const { epoch, matchedAt, candidate, assets } = pending;
+    this._clearRemoteAssets();
+    this._matchedAnchorId = candidate.id;
+    this._allowedAssetIds = new Set(assets.map(a => a.id));
+    this._recognitionTiming = { requestId: `osd-${epoch}-${matchedAt}`, startedAt: matchedAt, matchedAt,
+      anchorId: candidate.id, contentEpoch: this._contentEpoch };
+    this._osdPhase = "locked";
+    this.displayAssets(assets);
+    this._osdLog("内容已锁定", { anchorId: candidate.id, assets: assets.length, space: "world", elapsedMs: Date.now() - matchedAt });
+    this._recognitionStatus(`已识别：${candidate.name || "目标"}${assets.length ? " · 内容已固定在空间中" : " · 暂无关联内容"}`);
+  },
   _watchedGPS() {
     const gps = this.currentGPS;
     if (!gps || !Number.isFinite(gps.sampledAt)) return null;
@@ -220,438 +349,37 @@ module.exports = {
     return request.promise;
   },
 
-  setRetrievalMode(mode) {
-    if (
-      !["gps", "anchor"].includes(mode) ||
-      this.retrievalMode === mode ||
-      this._disposed
-    )
-      return;
-    matchLog("切换模式", { from: this.retrievalMode, to: mode });
-    this._cancelRetrieval();
-    this._clearRemoteAssets();
-    this.clearRecognitionFrame();
-    this.retrievalMode = mode;
-    this.setData({ retrievalMode: mode });
-    if (mode === "gps") this._maybeStartConfetti?.();
-    this._recognitionStatus(
-      mode === "anchor" ? "等待 AR 相机就绪" : "根据附近位置直接显示素材",
-    );
-    if (mode === "anchor") this.recognizeAnchor();
-    else if (this._arReady) {
-      this.fetchNearbyAssets();
-      this.fetchHugeAssets();
+  _clearRemoteAssets() {
+    this._recognitionTiming = null;
+    this._contentEpoch++;
+    for (const ctx of this._pendingAudioContexts || []) {
+      try {
+        ctx.stop();
+        ctx.destroy();
+      } catch (_) {}
     }
+    this._pendingAudioContexts?.clear();
+    this._allowedAssetIds.clear();
+    this._placeQueue = [];
+    this._pendingDisplayAssets = [];
+    const clearedNodeCount = this.nodeList.length;
+    for (const entry of this.nodeList) this._destroyNode(entry);
+    this.nodeList = [];
+    this.flyingDanmakus = [];
+    this.stopRandomConfetti?.();
+    if (clearedNodeCount || this._hugeNodeList?.length)
+      this._osdLog("清空场景素材", { clearedNodeCount, hugeNodeCount: this._hugeNodeList?.length || 0 });
+    for (const entry of this._hugeNodeList || []) this._destroyNode(entry);
+    this._hugeNodeList = [];
+    this._pendingHugeAssets = [];
+    this._hugePlaceQueue = [];
+    this._seenAssets.clear();
+    this._firstRevealDone = false;
+    this._matchedAnchorId = null;
+    // 兜底回收此前构建异常留下的、未能登记的动态根节点。
+    const orphans = [...(this.shadowRoot?.children || [])];
+    for (const node of orphans) this._destroyNode({ node });
+    if (orphans.length) matchLog("清理未登记场景节点", { count: orphans.length });
   },
 
-  pauseRetrieval() {
-    this._cancelScenePreview?.();
-    matchLog("暂停识别", { mode: this.retrievalMode });
-    this._retrievalPaused = true;
-    this._cancelRetrieval();
-    this._clearRemoteAssets();
-  },
-
-  resumeRetrieval() {
-    if (!this._retrievalPaused || this._disposed) return;
-    matchLog("恢复识别", { mode: this.retrievalMode, arReady: !!this._arReady });
-    this._retrievalPaused = false;
-    if (this._scenePreviewMode) { if (this._arReady) this._beginScenePreview(); return; }
-    this._maybeStartConfetti?.();
-    this.resetCaptureTiming();
-    if (this._arReady) {
-      this.fetchNearbyAssets();
-      this.fetchHugeAssets();
-    }
-  },
-
-  async recognizeAnchor() {
-    // This entry can run every frame: report AR readiness once, not every tick.
-    if (this.retrievalMode === "anchor" && !this._disposed && !this._retrievalPaused && !this._arReady) {
-      if (!this._loggedWaitingForAr) matchLog("等待 AR 相机就绪");
-      this._loggedWaitingForAr = true;
-    } else {
-      this._loggedWaitingForAr = false;
-    }
-    if (
-      this.retrievalMode !== "anchor" ||
-      this._disposed ||
-      this._retrievalPaused ||
-      isCaptureBusy(this.scene) ||
-      (this._recognitionRequests?.size || 0) >= (config.maxInFlightRequests ?? 6) ||
-      !this._arReady ||
-      Date.now() < this._nextRecognitionAt
-    )
-      return;
-    const base = (config.apiBaseUrl || RECOGNIZE_API.baseUrl).replace(/\/+$/, "");
-    const apiPath = config.apiPath || RECOGNIZE_API.path;
-    // HTTP 仅允许 backend.ts 为开发环境选定的地址；线上仍要求 HTTPS。
-    const validApiOrigin = /^https:\/\/[^/]+$/.test(base) ||
-      (base === RECOGNIZE_API.baseUrl && /^http:\/\/[^/]+$/.test(base));
-    if (!validApiOrigin || !/^\/[a-zA-Z0-9/_-]+$/.test(apiPath) || !CONFIG.workspaceId) {
-      matchLog("配置不完整，无法发起识别", {
-        validApiOrigin,
-        workspaceConfigured: !!CONFIG.workspaceId,
-      }, "warn");
-      this._recognitionStatus(
-        !CONFIG.workspaceId ? "请先选择具体空间" : "请配置匹配服务地址",
-      );
-      this._nextRecognitionAt = Infinity;
-      return;
-    }
-    this.sampleCaptureMotion(this.getCamTransform?.(), Date.now(), true);
-    if (!this.captureAllowed()) return;
-    const epoch = this._modeEpoch;
-    const startedAt = Date.now();
-    this._recognitionSequence = (this._recognitionSequence || 0) + 1;
-    const sequence = this._recognitionSequence;
-    const requestId = `${startedAt.toString(36)}-${sequence}`;
-    const request = { sequence, cancelled: false, uploadTask: null, rejectUpload: null };
-    if (!this._recognitionRequests) this._recognitionRequests = new Map();
-    this._recognitionRequests.set(requestId, request);
-    this._nextRecognitionAt = startedAt + config.intervalMs;
-    const log = (event, fields = {}, level = "info") =>
-      matchLog(event, { elapsedMs: Date.now() - startedAt, ...fields }, level, requestId);
-    let phase = "gps";
-    let outcome = "pending";
-    log("开始识别", {
-      workspaceId: CONFIG.workspaceId,
-      timeoutMs: config.timeoutMs,
-      inFlightCount: this._recognitionRequests.size,
-      intervalMs: config.intervalMs,
-    });
-    const current = () =>
-      !this._disposed && !this._retrievalPaused && this._modeEpoch === epoch && !request.cancelled;
-    this._recognizing = true;
-    let filePath;
-    let frameInfo = {};
-    let retryDelay = null;
-    let captureStartedAt = null;
-    let uploadStartedAt = null;
-    let resultStartedAt = null;
-    let matchedAt = null;
-    let actualCaptureIntervalMs = null;
-    let httpStatus = null;
-    let serverTimingsMs = null;
-    let serviceMeta = {};
-    const timingsMs = {
-      gpsMs: null, captureMs: null, uploadRoundtripMs: null, responseParseMs: null,
-      resultHandlingMs: null, sceneClearMs: null, displayDispatchMs: null,
-    };
-    // watch 持续定位 / cache 单次定位缓存 / shared 等待同一个单次定位 / fresh 新的单次定位
-    let gpsSource = null;
-    const clearScene = () => {
-      const at = Date.now();
-      try { this._clearRemoteAssets(); }
-      finally { timingsMs.sceneClearMs = (timingsMs.sceneClearMs ?? 0) + Date.now() - at; }
-    };
-    const parseResponse = (data) => {
-      const at = Date.now();
-      try { return JSON.parse(data); }
-      finally { timingsMs.responseParseMs = Date.now() - at; }
-    };
-    try {
-      this._recognitionStatus("正在定位…");
-      const gpsStartedAt = Date.now();
-      let gps;
-      try { gps = await this._locateForRecognition(epoch); }
-      finally { timingsMs.gpsMs = Date.now() - gpsStartedAt; }
-      gpsSource = gps.source;
-      if (!current()) return;
-      log("定位完成", {
-        accuracyMeters: gps.accuracy, gpsAgeMs: Date.now() - gps.sampledAt,
-        gpsMs: timingsMs.gpsMs, gpsSource,
-      });
-      if (
-        !Number.isFinite(gps.accuracy) ||
-        gps.accuracy < 0 ||
-        gps.accuracy > 100
-      )
-        throw new Error("定位精度不足，请移至开阔处");
-      // 单次定位的结果也回填到持续定位状态，供 GPS 模式和下一轮识别使用
-      if (gps.source !== "watch") this.updateGPS(gps);
-      // GPS 共用请求恢复时，不让多个等待者同时抓取同一瞬间的画面。
-      const captureSlotAt = Date.now();
-      if (isCaptureBusy(this.scene) ||
-          (this._lastCaptureStartedAt != null && captureSlotAt - this._lastCaptureStartedAt < config.intervalMs)) {
-        outcome = "capture_slot_skipped";
-        return;
-      }
-      captureStartedAt = captureSlotAt;
-      actualCaptureIntervalMs = this._lastCaptureStartedAt == null ? null : captureStartedAt - this._lastCaptureStartedAt;
-      this._lastCaptureStartedAt = captureStartedAt;
-      log("开始取图", {
-        targetIntervalMs: config.intervalMs, actualCaptureIntervalMs,
-        intervalOverrunMs: actualCaptureIntervalMs == null ? null : Math.max(0, actualCaptureIntervalMs - config.intervalMs),
-        inFlightCount: this._recognitionRequests.size,
-      });
-      this._nextRecognitionAt = Math.max(this._nextRecognitionAt, captureStartedAt + config.intervalMs);
-      this._recognitionStatus("正在识别，请将镜头朝向预设地点…");
-      phase = "capture";
-      try { filePath = await captureCamera(this.scene, (info) => { frameInfo = info; }, current); }
-      finally { timingsMs.captureMs = Date.now() - captureStartedAt; }
-      if (!current()) return;
-      log("相机取图完成", { captureMs: timingsMs.captureMs, ...frameInfo });
-      phase = "upload";
-      uploadStartedAt = Date.now();
-      log("上传识别请求", { origin: base, path: apiPath, functionRegion: config.functionRegion || "auto" });
-      const result = await new Promise((resolve, reject) => {
-        request.rejectUpload = reject;
-        request.uploadTask = wx.uploadFile({
-          url: `${base}${apiPath}?workspace_id=${encodeURIComponent(CONFIG.workspaceId)}`,
-          header: {
-            "X-Recognition-Request-Id": requestId,
-            "X-Client-Id": getClientId(),
-            ...(config.functionRegion ? { "x-region": config.functionRegion } : {}),
-          },
-          filePath,
-          name: "image",
-          timeout: config.timeoutMs,
-          formData: {
-            latitude: String(gps.latitude),
-            longitude: String(gps.longitude),
-            accuracy: String(gps.accuracy),
-            gps_timestamp: String(gps.sampledAt),
-            coordinate_system: "wgs84",
-          },
-          success: (res) => {
-            httpStatus = res.statusCode;
-            serviceMeta = responseMeta(res.header);
-            timingsMs.uploadRoundtripMs = Date.now() - uploadStartedAt;
-            if (!current()) {
-              log("忽略过期响应", { httpStatus: res.statusCode });
-            }
-            log("收到 HTTP 响应", {
-              httpStatus: res.statusCode,
-              ...serviceMeta,
-              uploadRoundtripMs: Date.now() - uploadStartedAt,
-            }, res.statusCode === 200 ? "info" : "warn");
-            if (res.statusCode !== 200) {
-              const messages = {
-                401: "识别接口需要开放访问，请检查服务端配置",
-                403: "识别接口被拒绝访问，请检查服务网关",
-                429: "识别请求过多，稍后重试",
-                503: "匹配服务尚未就绪",
-              };
-              let serverMessage = "";
-              let serverCode = null;
-              let serverRetryMs = null;
-              try {
-                const body = parseResponse(res.data);
-                serverCode = safeLabel(body?.code);
-                serverTimingsMs = serverStages(body?.diagnostics);
-                const meta = diagnosticMeta(body?.diagnostics);
-                for (const key of Object.keys(meta)) if (meta[key] !== null) serviceMeta[key] = meta[key];
-                if (safeLabel(body?.request_id)) serviceMeta.serverRequestId = safeLabel(body.request_id);
-                if (Number.isFinite(body?.retry_after_ms) && body.retry_after_ms > 0) serverRetryMs = body.retry_after_ms;
-                if (typeof body?.error === "string") {
-                  serverMessage = body.error.replace(/[\u0000-\u001f\u007f]/g, " ").trim().slice(0, 200);
-                }
-              } catch (_) {
-                // Proxy HTML/errors must retain a readable fallback.
-              }
-              log("服务端拒绝识别", {
-                httpStatus: res.statusCode,
-                serverMessage: serverMessage || null,
-                code: serverCode,
-                ...serviceMeta,
-                timingsMs: serverTimingsMs,
-              }, "warn");
-              if (res.statusCode === 429) {
-                const header = res.header || {};
-                const retryKey = Object.keys(header).find(key => key.toLowerCase() === "retry-after");
-                const headerMs = retryKey ? Number(header[retryKey]) * 1000 : NaN;
-                const fallback = ["model_busy", "model_queue_full", "model_queue_timeout"].includes(serverCode) ? 1000 : 60000;
-                // 兼容旧部署：没有明确错误码时按工作空间配额退避。
-                retryDelay = Math.min(60000, Math.max(1000,
-                  serverRetryMs ?? (serverCode && Number.isFinite(headerMs) && headerMs > 0 ? headerMs : fallback)));
-              } else if (serverRetryMs !== null) {
-                // 结构化 502/504 等错误也可给出短暂退避；缺失/无效时沿用默认错误间隔。
-                retryDelay = Math.min(60000, Math.max(1000, serverRetryMs));
-              }
-              reject(
-                new Error(
-                  serverMessage || messages[res.statusCode] ||
-                    `识别服务异常（${res.statusCode}）`,
-                ),
-              );
-              return;
-            }
-            try {
-              const body = parseResponse(res.data);
-              if (
-                !body.data ||
-                typeof body.data.matched !== "boolean" ||
-                !Array.isArray(body.data.assets)
-              )
-                throw new Error();
-              resolve(body.data);
-            } catch (_) {
-              log("响应格式异常", { httpStatus: res.statusCode }, "warn");
-              reject(new Error("匹配服务返回格式异常"));
-            }
-          },
-          fail: (error) => {
-            timingsMs.uploadRoundtripMs = Date.now() - uploadStartedAt;
-            const message = String(error?.errMsg || "");
-            log("上传失败", {
-              kind: /abort/i.test(message) ? "aborted" : /timeout/i.test(message) ? "timeout" : "network_or_domain",
-              uploadRoundtripMs: Date.now() - uploadStartedAt,
-              stale: !current(),
-            }, current() ? "warn" : "info");
-            reject(new Error("识别请求失败，请检查网络及上传域名配置"));
-          },
-        });
-      });
-      if (!current()) return;
-      if (sequence < (this._lastRecognitionResultSequence || 0)) {
-        outcome = "stale_result";
-        log("忽略乱序旧结果", { sequence, lastAppliedSequence: this._lastRecognitionResultSequence });
-        return;
-      }
-      this._lastRecognitionResultSequence = sequence;
-      const resultMeta = diagnosticMeta(result.diagnostics);
-      for (const key of Object.keys(resultMeta)) if (resultMeta[key] !== null) serviceMeta[key] = resultMeta[key];
-      if (safeLabel(result.request_id)) serviceMeta.serverRequestId = safeLabel(result.request_id);
-      resultStartedAt = Date.now();
-      phase = "match";
-      this._retainRecognitionFrame(filePath, frameInfo, result, requestId);
-      log("匹配结果", {
-        matched: result.matched,
-        reason: result.reason || null,
-        reasonText: reasons[result.reason] || null,
-        anchorId: result.anchor?.id || null,
-        anchorName: result.anchor?.name || null,
-        cosineSimilarity: result.anchor?.cosine_similarity ?? null,
-        distanceMeters: result.anchor?.distance_meters ?? null,
-        gpsRadiusMeters: result.gps_radius_meters ?? null,
-        assetCount: result.assets.length,
-        embeddingVersion: result.embedding_version || null,
-      });
-      if (result.diagnostics) {
-        const d = result.diagnostics;
-        const number = (value) => typeof value === "number" && Number.isFinite(value) ? value : null;
-        const timingsMs = serverStages(d);
-        serverTimingsMs = timingsMs;
-        log("匹配诊断", {
-          ...serviceMeta,
-          candidateCount: number(d.candidate_count),
-          readyReferenceCount: number(d.ready_reference_count),
-          threshold: number(d.threshold),
-          requiredMargin: number(d.required_margin),
-          bestSimilarity: number(d.best_similarity),
-          secondSimilarity: number(d.second_similarity),
-          scoreGap: number(d.score_gap),
-          bestDistanceMeters: number(d.best_distance_meters),
-          timingsMs,
-        });
-      }
-      if (!result.matched || !result.anchor?.id) {
-        outcome = "not_matched";
-        clearScene();
-        this._recognitionStatus(
-          reasons[result.reason] || "未匹配，请调整拍摄位置",
-        );
-        return;
-      }
-      const anchorId = result.anchor.id;
-      matchedAt = Date.now();
-      clearScene();
-      // 匹配点触发的模型按普通近景素材展示；不走全空间巨型模型 GPS 通道。
-      const assets = result.assets.filter(
-        (a) =>
-          a &&
-          ["text", "image", "model", "audio", "video", "scene"].includes(a.file_type),
-      );
-      const incomingIds = new Set(assets.map((a) => a.id));
-      this._allowedAssetIds = incomingIds;
-      this._pendingDisplayAssets = (this._pendingDisplayAssets || []).filter(
-        (a) => incomingIds.has(a.id),
-      );
-      this._placeQueue = (this._placeQueue || []).filter((a) =>
-        incomingIds.has(a.id),
-      );
-      this.nodeList = this.nodeList.filter((entry) => {
-        if (incomingIds.has(entry.assetId)) return true;
-        this._destroyNode(entry);
-        return false;
-      });
-      this._matchedAnchorId = anchorId;
-      this._recognitionTiming = {
-        requestId, startedAt, captureStartedAt, matchedAt, anchorId,
-        contentEpoch: this._contentEpoch,
-      };
-      phase = "display";
-      const displayStartedAt = Date.now();
-      try { this.displayAssets(assets); }
-      finally { timingsMs.displayDispatchMs = Date.now() - displayStartedAt; }
-      this.lockCaptureForMatch();
-      this._nextRecognitionAt = Infinity;
-      this._stopRecognitionRequests(requestId);
-      outcome = "matched_locked";
-      log("匹配成功，停止取图", {
-        anchorId,
-        restartDistanceMeters: config.restartDistanceMeters,
-      });
-      log("已交给 AR 素材展示队列", {
-        anchorId,
-        acceptedAssetCount: assets.length,
-        unsupportedAssetCount: result.assets.length - assets.length,
-      });
-      this._recognitionStatus(
-        `已匹配：${result.anchor.name || "匹配点"} · ${assets.length} 个素材`,
-      );
-    } catch (error) {
-      if (!current()) return;
-      if (sequence < (this._lastRecognitionResultSequence || 0)) {
-        outcome = "stale_error";
-        return;
-      }
-      // 请求失败不能证明新画面未命中，不能淘汰仍在推理的较早成功结果。
-      outcome = "error";
-      if (retryDelay === null) retryDelay = config.errorRetryMs ?? 5000;
-      log("识别失败", { phase, message: error.message || "未知错误" }, "error");
-      clearScene();
-      this._recognitionStatus(error.message || "识别失败，请稍后重试");
-    } finally {
-      const finishedAt = Date.now();
-      if (resultStartedAt !== null) timingsMs.resultHandlingMs = finishedAt - resultStartedAt;
-      // 上传主动取消或同步抛错时没有网络回调，只能记录本地等待到结束的时间。
-      if (uploadStartedAt !== null && timingsMs.uploadRoundtripMs === null) {
-        timingsMs.uploadRoundtripMs = finishedAt - uploadStartedAt;
-      }
-      const captureStagesMs = {};
-      for (const key of ["rawReadMs", "geometryPrepareMs", "snapshotMs", "canvasPrepareMs", "gpuInitMs", "gpuAttemptMs", "gpuUploadMs", "gpuDrawReadMs",
-        "convertMs", "convertWorkMs", "convertYieldWaitMs", "maxConvertSliceMs", "canvasWriteMs", "jpegExportMs"]) {
-        captureStagesMs[key] = Number.isFinite(frameInfo[key]) ? frameInfo[key] : null;
-      }
-      const serverTotalMs = serverTimingsMs?.api_total_ms;
-      // 差值还含路由、序列化和回调等开销，不能标为纯网络时间。
-      const overheadEstimateMs = Number.isFinite(serverTotalMs) && serverTotalMs >= 0 &&
-        Number.isFinite(timingsMs.uploadRoundtripMs) && timingsMs.uploadRoundtripMs >= serverTotalMs
-        ? timingsMs.uploadRoundtripMs - serverTotalMs : null;
-      log("识别耗时汇总", {
-        outcome: current() ? outcome : "cancelled", phase, httpStatus, gpsSource,
-        ...serviceMeta,
-        targetIntervalMs: config.intervalMs, actualCaptureIntervalMs,
-        captureToMatchMs: matchedAt !== null && captureStartedAt !== null ? matchedAt - captureStartedAt : null,
-        clientTimingsMs: { ...timingsMs, totalMs: finishedAt - startedAt },
-        pixelConverter: frameInfo.pixelConverter || null, gpuFallbackReason: frameInfo.gpuFallbackReason || null,
-        captureStagesMs, serverTimingsMs, transportAndPlatformEstimateMs: overheadEstimateMs,
-      });
-      if (filePath !== this._recognitionFrame?.path) removeTempFile(filePath);
-      request.rejectUpload = null;
-      if (this._recognitionRequests?.get(requestId) === request) this._recognitionRequests.delete(requestId);
-      if (current() && outcome === "error" && retryDelay !== null) {
-        this._nextRecognitionAt = Math.max(this._nextRecognitionAt, Date.now() + retryDelay);
-      }
-      this._recognizing = !!this._recognitionRequests?.size;
-      log("本轮结束", {
-        outcome: current() ? outcome : "cancelled",
-        inFlightCount: this._recognitionRequests?.size || 0,
-        nextAttemptAfterMs: current() && Number.isFinite(this._nextRecognitionAt)
-          ? Math.max(0, this._nextRecognitionAt - Date.now()) : null,
-      });
-    }
-  },
 };

@@ -11,7 +11,7 @@ module.exports = {
     if (manifest.content.instances?.length === 0) return null;
     const player = createCompositionPlayer(manifest, {
       modelCache: this._modelCache, canvas: this._canvas,
-      getListenerCamera: () => this.getCamTransform(),
+      getListenerCamera: () => this._runtime?.session?.mode === "osd" ? null : this.getCamTransform(),
       onState: (state, message, current) => this._scenePlayerState(asset, state, message, current),
     });
     try {

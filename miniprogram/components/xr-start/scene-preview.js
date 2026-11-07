@@ -21,7 +21,7 @@ module.exports = {
     const asset = { id: this.data.sceneId, file_type: "scene", _contentEpoch: this._contentEpoch };
     this._allowedAssetIds.add(asset.id);
     this._scenePreviewAsset = asset;
-    this._scenePreviewStatus("loading", "正在加载场景，请缓慢移动手机…");
+    this._scenePreviewStatus("loading", "正在加载场景…");
     let player;
     try {
       const { statusCode, data } = await fetchScenePreview(asset.id, this.data.sceneOrganizationId);
@@ -31,7 +31,7 @@ module.exports = {
       if (request !== this._scenePreviewRequest || !this._isAssetPlacementCurrent(asset)) { player?.dispose(); return; }
       if (!player) { this._scenePreviewStatus("empty", "场景中还没有内容，请在管理端添加并保存"); return; }
       this._scenePreviewPlayer = player;
-      this._scenePreviewStatus("tracking", "正在获取相机位置…");
+      this._scenePreviewStatus("tracking", "请缓慢左右移动手机，等待空间定位就绪…");
     } catch (error) {
       player?.dispose();
       if (request === this._scenePreviewRequest && this._isAssetPlacementCurrent(asset))
@@ -49,7 +49,7 @@ module.exports = {
     if (!this._scenePreviewMode || !this._arReady || this._retrievalPaused || this._disposed || this._scenePreviewPlaced || !this._scenePreviewPlayer) return false;
     // Reject a click against an old camera pose after tracking has stopped.
     if (this._scenePreviewFrameAt === null || now - this._scenePreviewFrameAt > MAX_FRAME_GAP_MS) {
-      this._scenePreviewStatus("tracking", "正在获取相机位置…");
+      this._scenePreviewStatus("tracking", "请缓慢左右移动手机，等待空间定位恢复…");
       return false;
     }
     const player = this._scenePreviewPlayer;

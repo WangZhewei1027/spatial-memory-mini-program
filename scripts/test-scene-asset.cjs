@@ -213,6 +213,10 @@ async function main() {
     page.place(); assert.equal(placed, 1);
     page.onSceneStatus({ detail: { state: "ready", message: "轻触场景" } });
     assert.equal(page.data.state, "ready");
+    page.onRenderStatus({ detail: { state: "tracking", message: "请缓慢左右移动手机" } });
+    assert.equal(page.data.state, "tracking"); assert.match(page.data.message, /移动手机/);
+    page.onRenderStatus({ detail: { state: "trackingrestored", message: "空间追踪已就绪" } });
+    assert.equal(page.data.state, "ready", "tracking recovery restores the placed Scene UI");
     page.place(); assert.equal(placed, 1, "placed Scene has no second placement action");
     console.log("PASS QR entry: no map/location requests, valid parameters, AR error and retry");
   }
@@ -891,7 +895,8 @@ async function main() {
         content: new T.Group(), reticle: new T.Group(),
         background: { draw: () => true, dispose() {} },
         renderer: { render() {}, resetState() {}, dispose() {}, info: { render: {}, memory: {} } },
-        session: { start() {}, stop() {} },
+        session: { mode: 'slam', isTracking: () => true, start() {}, stop() {}, getOSDDiagnostics: () => ({}) },
+        onState: (state, message) => host.onARState(state, message),
         onReady: () => host.handleARReady(), onTick: dt => host.handleTick(dt),
       });
       runtime.scene.add(runtime.content);

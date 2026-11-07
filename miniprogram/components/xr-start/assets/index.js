@@ -164,6 +164,7 @@ module.exports = function (XR_CONFIG) {
       this._placingBusy = true;
       const baseStagger = XR_CONFIG.placeStaggerMs || 40;
       while (this._placeQueue && this._placeQueue.length > 0) {
+        if (this._runtime?.session?.mode === "slam" && !this._arReady) break;
         const asset = this._placeQueue.shift();
         // 关联匹配请求，而非素材加载完成时碰巧处于活动状态的另一轮请求。
         const timing =
@@ -199,6 +200,13 @@ module.exports = function (XR_CONFIG) {
           this.reportAssetError?.(asset, error);
         } finally {
           this._placingAssetId = null;
+        }
+        // An async load can finish while SLAM is unavailable. The placer releases
+        // that result; retain the request so recovery can place it with a fresh pose.
+        if (!placementError && this._runtime?.session?.mode === "slam" && !this._arReady &&
+            this._isAssetPlacementCurrent(asset) && !this.nodeList.some(entry => entry.assetId === asset.id && !entry._destroyed)) {
+          this._placeQueue.unshift(asset);
+          break;
         }
         if (timing) {
           const completedAt = Date.now();
@@ -292,7 +300,9 @@ module.exports = function (XR_CONFIG) {
       const fwd = this._runtime.camera.getWorldDirection(this._forwardScratch);
       // atan2(z, x) → 以 +X 轴为 0° 的朝向角，与 cos/sin 放置约定匹配
       const camYaw = Math.atan2(fwd.z, fwd.x);
-      const halfArc = ((XR_CONFIG.placeForwardArcDeg || 120) * Math.PI) / 180;
+      const halfArc = this._runtime.session?.mode === "osd"
+        ? Math.atan(Math.tan(camTransform.fov * Math.PI / 360) * camTransform.aspect) * 0.5
+        : ((XR_CONFIG.placeForwardArcDeg || 120) * Math.PI) / 180;
       const angle = camYaw + (Math.random() - 0.5) * 2 * halfArc;
       const { min: rMin, max: rMax } = (XR_CONFIG.placeRadius &&
         XR_CONFIG.placeRadius[type]) || { min: 1.0, max: 2.0 };

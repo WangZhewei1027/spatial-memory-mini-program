@@ -18,11 +18,11 @@
 | `miniprogram/pages/index/` | 扫码参数、最近入口和历史切换 |
 | `miniprogram/pages/ar/`、`components/xr-start/` | 地图 GPS/匹配发现、素材放置与活动展示 |
 | `miniprogram/pages/scene/` | 独立场景预览、手动放置与播放控制 |
-| `miniprogram/lib/three-runtime/` | VisionKit v2、Three.js、模型/纹理和原生媒体适配 |
+| `miniprogram/lib/three-runtime/` | VisionKit OSD / SLAM、Three.js、模型/纹理和原生媒体适配 |
 | `miniprogram/lib/scene-runtime/` | 共享 Scene Core 与实际场景播放器 |
 | `miniprogram/labs/xr-three/` | 独立实验、历史桥接与无相机场景联调 |
 
-正式 AR 使用 VisionKit v2 + WebGL2 + Three.js；xr-frame 只用于桥接实验和参考示例。团队素材与独立活动分别读取；活动记录不作为普通素材写入。
+正式 AR 使用 VisionKit OSD 识别、v2 SLAM 空间展示与 WebGL2 + Three.js；xr-frame 只用于桥接实验和参考示例。团队素材与独立活动分别读取；活动记录不作为普通素材写入。
 
 ## 检查与构建
 

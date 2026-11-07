@@ -1,1195 +1,384 @@
-const assert = require("node:assert/strict");
-const fs = require("node:fs");
-const path = require("node:path");
-const vm = require("node:vm");
-const root = path.resolve(__dirname, "..");
-const componentPath = "miniprogram/components/xr-start/";
-function load(relative, dependencies = {}, globals = {}) {
-  const filename = path.join(root, relative);
+const assert = require('node:assert/strict');
+const { test } = require('node:test');
+const fs = require('node:fs');
+const vm = require('node:vm');
+const path = require('node:path');
+const base = path.resolve(__dirname, '../miniprogram');
+const config = require(path.join(base, 'components/xr-start/matching/config'));
+const target = (id = 'a') => ({ id, name: id, image_url: `https://media.test/${id}.png`, reference_version: `version-${id}` });
+const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
+function load(file, dependencies, globals = {}) {
   const m = { exports: {} };
-  vm.runInNewContext(
-    fs.readFileSync(filename, "utf8"),
-    {
-      module: m,
-      exports: m.exports,
-      require: (id) =>
-        dependencies[id] ??
-        require(require.resolve(id, { paths: [path.dirname(filename)] })),
-      wx: global.wx,
-      Component: global.Component,
-      console,
-      setTimeout,
-      clearTimeout,
-      Date,
-      Set,
-      Map,
-      Uint8Array,
-      Uint8ClampedArray,
-      ...globals,
-    },
-    { filename },
-  );
+  vm.runInNewContext(fs.readFileSync(path.join(base, file), 'utf8'), {
+    module: m, exports: m.exports, require: name => {
+      assert.ok(name in dependencies, `unexpected dependency: ${name}`);
+      return dependencies[name];
+    }, console, setTimeout, clearTimeout, ...globals,
+  });
   return m.exports;
 }
-let response,
-  responseBody,
-  uploaded,
-  removed = [],
-  pendingUpload,
-  deferredLocation,
-  capturePath = "/tmp/frame.jpg";
-const config = {
-  apiBaseUrl: "https://ar.example.test",
-  pixelConverter: "cpu",
-  intervalMs: 0,
-  errorRetryMs: 0,
-  initialCaptureDelayMs: 0,
-  maxInFlightRequests: 6,
-  restartDistanceMeters: 1.5,
-  timeoutMs: 20000,
-};
-const matched = (id = "a", assets = [{ id: "child", file_type: "image" }]) => ({
-  matched: true,
-  anchor: { id, name: id },
-  assets,
-});
-function mockWx() {
-  global.wx = {
-    getLocation(opts) {
-      if (deferredLocation) deferredLocation = opts;
-      else opts.success({ latitude: 31, longitude: 121, accuracy: 10 });
-    },
-    uploadFile(opts) {
-      uploaded = opts;
-      if (response === "pending") pendingUpload = opts;
-      else
-        opts.success({
-          statusCode: typeof response === "number" ? response : 200,
-          data: responseBody ?? JSON.stringify({ data: response }),
-        });
-      return {
-        abort() {
-          opts.fail({ errMsg: "abort" });
-        },
-      };
-    },
-    getXrFrameSystem() {
-      return { Transform: "Transform", Vector3: { createFromNumber: (x, y, z) => ({ x, y, z }) } };
-    },
+function fixture(overrides = {}) {
+  let now = 1000, nextId = overrides.firstMarkerId ?? 0;
+  const calls = [], logs = [], files = new Set(), removed = [], native = new Map();
+  const log = (event, fields, level) => logs.push({ event, fields: JSON.parse(JSON.stringify(fields)), level });
+  const api = {
+    CONFIG: { workspaceId: 'map' },
+    async fetchAnchorCandidates(body) { calls.push(['candidates', body]); return { statusCode: 200, data: { candidates: [target()] } }; },
+    async fetchAnchorContent(body) { calls.push(['content', body]); return { statusCode: 200, data: { anchor: { id: body.anchor_id }, assets: [{ id: 'content-a', file_type: 'text' }] } }; },
+    ...overrides,
   };
-}
-function instance(logs, captureOverrides = {}) {
-  mockWx();
-  const matching = load(componentPath + "matching/index.js", {
-    ...(logs ? { "./log": (event, fields, level, requestId) => logs.push({ event, fields, level, requestId }) } : {}),
-    "./config": config,
-    "../../../utils/backend": {
-      CONFIG: { workspaceId: "workspace" },
-      RECOGNIZE_API: { baseUrl: "", path: "/api/miniapp/anchors/recognize" },
-      getPublicApiHeaders: () => { throw new Error("Recognition must not request credentials"); },
-    },
-    "./capture": {
-      isCaptureBusy: () => false,
-      createCaptureTiming: require(path.join(root, componentPath, "matching/capture.js")).createCaptureTiming,
-      captureCamera: async (_scene, onInfo) => {
-        onInfo?.({ rawWidth: 1920, rawHeight: 1080, width: 640, height: 360, rotation: 0, uvOrder: "uv" });
-        return capturePath;
-      },
-      removeTempFile: (p) => {
-        if (p) removed.push(p);
-      },
-      ...captureOverrides,
-    },
+  const removeFile = p => { if (p) { removed.push(p); files.delete(p); } };
+  const clock = { Date: class extends Date { static now() { return now; } } };
+  const diagnostics = load('components/xr-start/matching/diagnostics.js', { './config': config, './log': log }, clock);
+  const methods = load('components/xr-start/matching/index.js', {
+    './config': config, './log': log, '../../../utils/backend': api,
+    './diagnostics': diagnostics,
+    '../../../lib/three-runtime/resources': { removeFile },
+    './reference': { loadOSDReference: overrides.loadReference || (async url => { const p = `/tmp/${url.split('/').pop()}-${nextId}.jpg`; files.add(p); return p; }) },
+  }, {
+    Date: class extends Date { static now() { return now; } },
+    wx: { uploadFile() { throw new Error('No camera uploads'); }, getLocation({ success }) { success({ latitude: 31, longitude: 121, accuracy: 10 }); } },
   });
-  const x = Object.assign(
-    {
-      retrievalMode: "anchor",
-      _arReady: true,
-      _modeEpoch: 0,
-      _contentEpoch: 0,
-      _allowedAssetIds: new Set(),
-      _nextRecognitionAt: 0,
-      nodeList: [],
-      _hugeNodeList: [],
-      _seenAssets: new Map(),
-      setData(data) { this.data = { ...this.data, ...data }; },
-      statuses: [],
-      frames: [],
-      displayed: [],
-      triggerEvent(name, detail) {
-        if (name === "recognitionframe") this.frames.push(detail);
-        else this.statuses.push(detail.message);
-      },
-      getCamTransform() {
-        return { worldPosition: this.testPosition || { x: 0, y: 0, z: 0 }, worldMatrix: { transformDirection: v => v } };
-      },
-      updateGPS(gps) {
-        this.currentGPS = gps;
-      },
-      _destroyNode(e) {
-        removed.push(e.assetId);
-        if (e.node) this.shadowRoot?.removeChild(e.node);
-      },
-      displayAssets(assets) {
-        this.displayed.push(assets);
-      },
-      fetchNearbyAssets() {
-        this.gpsCalls = (this.gpsCalls || 0) + 1;
-      },
-      fetchHugeAssets() {},
+  const host = Object.assign({
+    retrievalMode: 'anchor', _arReady: true, _modeEpoch: 0, _contentEpoch: 0,
+    _nextRecognitionAt: 0, _osdPhase: 'idle', _allowedAssetIds: new Set(),
+    _seenAssets: new Map(), nodeList: [], statuses: [], displayed: [],
+    setData() {}, triggerEvent(_name, value) { this.statuses.push(value); },
+    displayAssets(assets) { this.displayed.push(assets); }, _destroyNode() {},
+    fetchNearbyAssets() {}, fetchHugeAssets() {},
+    _desiredARMode() { return this.retrievalMode === 'anchor' ? 'osd' : 'slam'; },
+    _ensureARMode(mode) {
+      this._runtime.session.mode = mode;
+      this._arReady = !(mode === 'slam' && overrides.deferTracking);
+      return this._arReady;
     },
-    matching,
-  );
-  return x;
+    _runtime: { session: {
+      mode: 'osd',
+      addOSDMarker(p) { const id = nextId++; native.set(id, p); return id; },
+      removeOSDMarker(id) { native.delete(id); },
+    } },
+  }, methods);
+  const observe = (id = [...native.keys()][0], patch = {}) => host.handleOSDAnchors('updateAnchors', [{
+    id: id + 100, markerId: id, type: 2, path: native.get(id), origin: { x: 0.2, y: 0.2 }, size: { width: 0.4, height: 0.4 }, ...patch,
+  }]);
+  return { host, api, calls, logs, files, removed, native, observe, tick: ms => { now += ms; }, settle: async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); } };
 }
-const tests = [];
-function test(name, fn) {
-  tests.push([name, fn]);
-}
-const flush = () => new Promise((resolve) => setImmediate(resolve));
-
-test("mini-program relative requires resolve without Node directory fallback", () => {
-  const sourceRoot = path.join(root, "miniprogram");
-  function inspect(directory) {
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-      const filename = path.join(directory, entry.name);
-      if (entry.isDirectory()) {
-        inspect(filename);
-        continue;
-      }
-      if (!entry.name.endsWith(".js")) continue;
-      const source = fs.readFileSync(filename, "utf8");
-      for (const [, target] of source.matchAll(/require\(\s*["'](\.[^"']+)["']\s*\)/g)) {
-        const base = path.resolve(path.dirname(filename), target);
-        const exists = ["", ".js", ".ts", ".json"].some((extension) => {
-          try { return fs.statSync(base + extension).isFile(); }
-          catch { return false; }
-        });
-        assert.ok(exists, `${path.relative(root, filename)}: ${target} must name a file; use /index for directory modules`);
-      }
+test('iOS empty-path OSD trace confirms by registered markerId and locks content once', async () => {
+  const f = fixture({ firstMarkerId: 10001 });
+  await f.host.recognizeAnchor();
+  // iPhone 15 Pro / WeChat 8.0.80 / SDK 3.17.6: path is empty, id changes
+  // every update, markerId stays 10001. Replay the observed 268 callbacks.
+  const sample = { type: 2, markerId: 10001, path: '',
+    origin: { x: .13948634266853333, y: .31419575214385986 },
+    size: { width: .7120342254638672, height: .37108778953552246 } };
+  for (let id = 0; id < 268; id++) {
+    f.host.handleOSDAnchors(id === 0 ? 'addAnchors' : 'updateAnchors', [{ ...sample, id }]);
+    f.tick(1000 / 30); await f.settle();
+  }
+  assert.equal(f.host._osdPhase, 'locked', 'valid iOS detections must not be rejected because path is empty');
+  assert.equal(f.calls.filter(([kind]) => kind === 'content').length, 1);
+  assert.equal(f.host.displayed.length, 1);
+  assert.equal(f.logs.filter(x => x.event === '回调被过滤').length, 0);
+  f.host.rescan(); await f.settle();
+  assert.equal(f.host._osdPhase, 'scanning');
+  assert.ok(f.native.has(10002));
+  for (let i = 0; i < 3; i++) {
+    f.host.handleOSDAnchors('updateAnchors', [{ ...sample, id: 300 + i }]);
+    f.tick(350); await f.settle();
+  }
+  assert.equal(f.host._osdEvidence, null, 'removed marker IDs cannot confirm in a new scan');
+  assert.equal(f.calls.filter(([kind]) => kind === 'content').length, 1);
+  f.host.pauseRetrieval();
+});
+test('OSD waits for a valid SLAM pose, and rescan/hide cancels pending spatial placement', async () => {
+  for (const action of ['ready', 'rescan', 'hide', 'gps']) {
+    const f = fixture({ deferTracking: true });
+    await f.host.recognizeAnchor(); await f.host._acceptOSDMatch(target());
+    assert.equal(f.host._osdPhase, 'tracking');
+    assert.equal(f.host._runtime.session.mode, 'slam');
+    assert.equal(f.host.displayed.length, 0, 'OSD camera cannot place world content');
+    assert.equal(f.native.size, 0); assert.equal(f.files.size, 0);
+    f.host._finishOSDPlacement();
+    assert.equal(f.host.displayed.length, 0, 'native start success is not spatial readiness');
+    if (action === 'rescan') f.host.rescan();
+    if (action === 'hide') f.host.pauseRetrieval();
+    if (action === 'gps') f.host.setRetrievalMode('gps');
+    await f.settle();
+    f.host._arReady = true;
+    f.host._finishOSDPlacement(); f.host._finishOSDPlacement();
+    assert.equal(f.host.displayed.length, action === 'ready' ? 1 : 0);
+    if (action === 'rescan') {
+      assert.equal(f.host._runtime.session.mode, 'osd');
+      assert.equal(f.host._osdPhase, 'scanning');
     }
-  }
-  inspect(sourceRoot);
-});
-
-test("production recognition uses the shared backend endpoint without Edge region or credentials", () => {
-  const production = require(path.join(root, componentPath, "matching/config.js"));
-  assert.equal(production.apiBaseUrl, "");
-  assert.equal(production.apiPath, "/api/miniapp/anchors/recognize");
-  assert.equal(production.functionRegion, "");
-  assert.equal(production.Authorization, undefined);
-  assert.equal(production.apikey, undefined);
-});
-
-test("custom API path and function region preserve anonymous upload and trace identifiers", async () => {
-  const previous = { apiBaseUrl: config.apiBaseUrl, apiPath: config.apiPath, functionRegion: config.functionRegion };
-  try {
-    config.apiBaseUrl = "https://edge.example.test/";
-    config.apiPath = "/functions/v1/recognize-anchor";
-    config.functionRegion = "ap-southeast-1";
-    const logs = [];
-    const x = instance(logs);
-    response = miss();
-    await x.recognizeAnchor();
-    assert.equal(uploaded.url, "https://edge.example.test/functions/v1/recognize-anchor?workspace_id=workspace");
-    assert.equal(uploaded.header["x-region"], "ap-southeast-1");
-    assert.equal(uploaded.header["X-Recognition-Request-Id"], logs.find(e => e.event === "开始识别").requestId);
-    assert.deepEqual(Object.keys(uploaded.header).map(key => key.toLowerCase()).sort(), ["x-client-id", "x-recognition-request-id", "x-region"]);
-    assert.equal(uploaded.name, "image");
-    assert.equal(uploaded.formData.coordinate_system, "wgs84");
-    const upload = logs.find(e => e.event === "上传识别请求").fields;
-    assert.equal(upload.origin, "https://edge.example.test");
-    assert.equal(upload.path, config.apiPath);
-    assert.equal(upload.functionRegion, "ap-southeast-1");
-
-    config.functionRegion = "";
-    const automatic = instance();
-    await automatic.recognizeAnchor();
-    assert.deepEqual(Object.keys(uploaded.header), ["X-Recognition-Request-Id", "X-Client-Id"]);
-  } finally {
-    config.apiBaseUrl = previous.apiBaseUrl;
-    if (previous.apiPath === undefined) delete config.apiPath; else config.apiPath = previous.apiPath;
-    if (previous.functionRegion === undefined) delete config.functionRegion; else config.functionRegion = previous.functionRegion;
+    f.host.pauseRetrieval();
   }
 });
-
-test("warmup prevents both GPS and capture, and resume starts a new preparation window", async () => {
-  const previous = config.initialCaptureDelayMs;
-  config.initialCaptureDelayMs = 3000;
-  try {
-    const x = instance();
-    let gpsCalls = 0;
-    global.wx.getLocation = () => { gpsCalls++; };
-    uploaded = null;
-    await x.recognizeAnchor();
-    assert.equal(gpsCalls, 0);
-    assert.equal(uploaded, null);
-    assert.match(x.statuses.at(-1), /稍后/);
-    x.pauseRetrieval();
-    x.resumeRetrieval();
-    await x.recognizeAnchor();
-    assert.equal(gpsCalls, 0);
-    assert.ok(x._captureGate.readyAt > Date.now() + 2900);
-  } finally {
-    config.initialCaptureDelayMs = previous;
+test('diagnostics distinguish absent SDK callbacks from rejected observations without flooding logs', async () => {
+  const silent = fixture(); await silent.host.recognizeAnchor();
+  silent.tick(3000); silent.host.reportOSDScan?.();
+  const idle = silent.logs.find(x => x.event === '扫描摘要');
+  assert.ok(idle, 'scanning with zero SDK callbacks must produce a diagnostic summary');
+  assert.equal(idle.fields.result, 'no_native_events');
+  assert.equal(idle.fields.callbacks, 0);
+  const filtered = fixture(); await filtered.host.recognizeAnchor();
+  for (let i = 0; i < 1000; i++) filtered.observe(999, { path: '' });
+  filtered.tick(3000); filtered.host.reportOSDScan?.();
+  const rejected = filtered.logs.find(x => x.event === '扫描摘要');
+  assert.equal(rejected.fields.result, 'all_observations_rejected');
+  assert.equal(rejected.fields.rejected.unknown_marker, 1000);
+  assert.equal(filtered.logs.filter(x => x.event === '回调被过滤').length, 1);
+  assert.ok(filtered.logs.length < 20, 'native frame events must not flood console');
+  silent.host.pauseRetrieval(); filtered.host.pauseRetrieval();
+});
+test('OSD confirms stable observations, locks content after target loss, and rescans manually', async () => {
+  const f = fixture(); await f.host.recognizeAnchor();
+  assert.equal(f.host._osdPhase, 'scanning'); assert.equal(f.native.size, 1);
+  f.observe(); f.tick(350); f.observe(); assert.equal(f.calls.length, 1);
+  f.tick(350); f.observe(); await f.settle();
+  assert.equal(f.host._osdPhase, 'locked'); assert.equal(f.host._matchedAnchorId, 'a');
+  assert.equal(f.host.displayed.length, 1); assert.equal(f.native.size, 0); assert.equal(f.files.size, 0);
+  assert.equal(f.logs.find(x => x.event === '扫描摘要').fields.result, 'confirmed');
+  assert.equal(f.logs.filter(x => x.event === '确认命中').length, 1);
+  f.tick(60000); f.host.handleOSDAnchors('removeAnchors', [{ id: 100, markerId: 0 }]); await f.host.recognizeAnchor();
+  assert.equal(f.calls.length, 2); assert.equal(f.host._osdPhase, 'locked');
+  f.host.rescan(); await f.settle();
+  assert.equal(f.host._matchedAnchorId, null); assert.equal(f.host._osdPhase, 'scanning');
+  assert.equal(f.host._contentEpoch, 2); assert.equal(f.native.size, 1);
+  f.host.pauseRetrieval(); assert.equal(f.native.size, 0); assert.equal(f.files.size, 0);
+});
+test('diagnostics expose stalled confirmation, malformed payloads and cancellation without signed URLs', async () => {
+  const f = fixture({ fetchAnchorCandidates: async () => ({ statusCode: 200, data: {
+    candidates: [{ ...target(), image_url: 'https://media.test/image.png?token=DO_NOT_LOG#secret' }],
+  } }) });
+  await f.host.recognizeAnchor();
+  f.host.handleOSDAnchors('updateAnchors', { anchors: [] });
+  assert.equal(f.logs.find(x => x.event === '回调未进入确认').fields.reason, 'payload_not_array');
+  f.observe(); f.tick(2000); f.observe(); f.tick(1000); f.host.reportOSDScan();
+  const summary = f.logs.find(x => x.event === '扫描摘要');
+  assert.equal(summary.fields.result, 'awaiting_confirmation');
+  assert.equal(summary.fields.resets.observation_gap, 1);
+  assert.equal(summary.fields.bestObservations, 1);
+  assert.ok(!JSON.stringify(f.logs).includes('DO_NOT_LOG'));
+  const run = summary.fields.run;
+  f.host.pauseRetrieval();
+  assert.equal(f.logs.findLast(x => x.event === '扫描摘要').fields.run, run);
+  const count = f.logs.length;
+  f.tick(3000); f.host.reportOSDScan(); f.observe();
+  assert.equal(f.logs.length, count, 'cancelled scans stop diagnostic polling');
+});
+test('wrong type, unknown markers, conflicting targets and observation gaps do not confirm', async () => {
+  const f = fixture(); await f.host.recognizeAnchor();
+  f.observe(0, { type: 1 }); f.observe(999, { path: f.native.get(0) }); assert.equal(f.host._osdEvidence, null);
+  f.observe(); f.tick(2000); f.observe(); f.tick(350); f.observe();
+  assert.equal(f.calls.length, 1); assert.equal(f.host._osdEvidence.count, 2);
+  f.host.handleOSDAnchors('removeAnchors', [{ id: 100, markerId: 0 }]);
+  assert.equal(f.host._osdEvidence, null);
+  f.host._osdMarkers.set(2, { ...target('b'), path: '/b.jpg' });
+  const anchor = id => ({ id, markerId: id, type: 2, path: id === 0 ? f.native.get(0) : '/b.jpg', origin: { x: 0, y: 0 }, size: { width: .5, height: .5 } });
+  f.host.handleOSDAnchors('updateAnchors', [anchor(0), anchor(2)]);
+  assert.equal(f.host._osdEvidence, null); assert.equal(f.calls.length, 1);
+  f.host.pauseRetrieval();
+});
+test('missing or rewritten native paths still identify the registered target by markerId', async () => {
+  for (const nativePath of [undefined, '/native/reference.jpg']) {
+    const f = fixture(); await f.host.recognizeAnchor();
+    f.observe(0, { path: nativePath }); f.tick(350);
+    f.observe(0, { path: nativePath }); f.tick(350);
+    f.observe(0, { path: nativePath }); await f.settle();
+    assert.equal(f.host._osdPhase, 'locked');
+    assert.equal(f.calls.filter(([kind]) => kind === 'content').length, 1);
+    f.host.pauseRetrieval();
   }
 });
-test("movement during GPS no longer postpones capture", async () => {
-  const x = instance();
-  response = { matched: false, assets: [] };
-  deferredLocation = true;
-  uploaded = null;
-  const run = x.recognizeAnchor();
-  x.testPosition = { x: 10, y: 0, z: 0 };
-  x.sampleCaptureMotion(x.getCamTransform(), Date.now() + 100, true);
-  deferredLocation.success({ latitude: 31, longitude: 121, accuracy: 10 });
-  deferredLocation = null;
-  await run;
-  assert.ok(uploaded);
-  assert.equal(x._recognizing, false);
+test('batches remain bounded and visit candidates beyond the first five', async () => {
+  const f = fixture({ fetchAnchorCandidates: async () => ({ statusCode: 200, data: { candidates: Array.from({ length: 7 }, (_, i) => target(String(i))) } }) });
+  await f.host.recognizeAnchor(); assert.equal(f.native.size, 5); assert.equal(f.files.size, 5);
+  f.tick(config.batchDurationMs); await f.host.recognizeAnchor();
+  assert.equal(f.native.size, 2); assert.equal(f.files.size, 2);
+  assert.deepEqual([...f.host._osdMarkers.values()].map(x => x.id), ['5', '6']);
+  f.host.setRetrievalMode('gps'); assert.equal(f.files.size, 0); assert.equal(f.native.size, 0);
+});
+test('unchanged single-batch targets keep their native markers through a minute without callbacks', async () => {
+  const f = fixture({ firstMarkerId: 10001 });
+  await f.host.recognizeAnchor();
+  const registered = [...f.native.entries()];
+  // Replay the user's five 12-second scan windows, with no native detections.
+  for (let i = 0; i < 5; i++) {
+    f.tick(config.batchDurationMs); await f.host.recognizeAnchor();
+    assert.deepEqual([...f.native.entries()], registered,
+      'an unchanged single batch must not be removed/re-added every 12 seconds');
+  }
+  assert.equal(f.removed.length, 0);
+  assert.equal(f.logs.filter(x => x.event === '标记已注册').length, 1);
+  assert.equal(f.host._osdPhase, 'scanning');
+  assert.equal(f.host.displayed.length, 0, 'silence must never be converted into a match');
+  f.host.reportOSDScan();
+  assert.equal(f.logs.findLast(x => x.event === '扫描摘要').fields.elapsedMs, 60000,
+    'diagnostics must accumulate across unchanged candidate refreshes');
+  f.host.pauseRetrieval(); assert.equal(f.native.size, 0); assert.equal(f.files.size, 0);
+});
+test('candidate refresh retains confirmation but replaces changed references and removes absent targets', async () => {
+  let candidates = [target()];
+  const f = fixture({ fetchAnchorCandidates: async () => ({ statusCode: 200, data: { candidates } }) });
+  await f.host.recognizeAnchor();
+  const marker = [...f.native.keys()][0];
+  f.tick(config.batchDurationMs - 350); f.observe();
+  candidates = [{ ...target(), name: 'updated name', image_url: 'https://media.test/a.png?signature=new' }];
+  f.tick(350); await f.host.recognizeAnchor(); f.observe();
+  assert.equal(f.host._osdEvidence.count, 2, 'refresh must not reset a pending confirmation');
+  assert.equal(f.host._osdMarkers.get(marker).name, 'updated name');
+  assert.equal(f.removed.length, 0);
+  candidates = [{ ...target(), reference_version: 'version-2' }];
+  f.tick(config.batchDurationMs); await f.host.recognizeAnchor();
+  assert.equal(f.native.size, 1); assert.equal(f.files.size, 1);
+  assert.ok(!f.native.has(marker)); assert.equal(f.removed.length, 1);
+  assert.equal(f.host._osdEvidence, null);
+  candidates = [];
+  f.tick(config.batchDurationMs); await f.host.recognizeAnchor();
+  assert.equal(f.host._osdPhase, 'empty');
+  assert.equal(f.native.size, 0); assert.equal(f.files.size, 0);
+});
+test('a match during candidate refresh wins over late results and errors', async () => {
+  for (const statusCode of [200, 500]) {
+    const d = deferred();
+    let response = { statusCode: 200, data: { candidates: [target()] } };
+    const g = fixture({ fetchAnchorCandidates: () => response });
+    await g.host.recognizeAnchor(); response = d.promise;
+    g.tick(config.batchDurationMs - 350); g.observe();
+    g.tick(350); const refresh = g.host.recognizeAnchor(); await g.settle();
+    assert.equal(g.host._osdPhase, 'scanning');
+    g.observe(); g.tick(350); g.observe(); await g.settle();
+    assert.equal(g.host._osdPhase, 'locked');
+    d.resolve({ statusCode, data: { candidates: [target('replacement')] } }); await refresh;
+    assert.equal(g.host._osdPhase, 'locked');
+    assert.equal(g.host.displayed.length, 1); assert.equal(g.native.size, 0); assert.equal(g.files.size, 0);
+    g.host.pauseRetrieval();
+  }
+});
+test('late candidate discovery and late reference files cannot revive a cancelled scan', async () => {
+  const d = deferred(); const f = fixture({ fetchAnchorCandidates: () => d.promise });
+  const task = f.host.recognizeAnchor(); await f.settle(); f.host.pauseRetrieval();
+  d.resolve({ statusCode: 200, data: { candidates: [target()] } }); await task;
+  assert.equal(f.native.size, 0); assert.equal(f.host._osdPhase, 'idle');
+  const image = deferred(); const g = fixture({ loadReference: () => image.promise });
+  const pending = g.host.recognizeAnchor(); await g.settle(); g.host.setRetrievalMode('gps');
+  image.resolve('/late.jpg'); await pending;
+  assert.ok(g.removed.includes('/late.jpg')); assert.equal(g.native.size, 0);
+});
+test('late content and errors never overwrite a newer scan, including the same target', async () => {
+  const d = deferred(); const f = fixture({ fetchAnchorContent: () => d.promise });
+  await f.host.recognizeAnchor();
+  const accept = f.host._acceptOSDMatch(target()); await f.settle();
+  f.host.rescan(); await f.settle();
+  d.resolve({ statusCode: 200, data: { anchor: { id: 'a' }, assets: [{ id: 'late', file_type: 'text' }] } }); await accept;
+  assert.equal(f.host.displayed.length, 0); assert.equal(f.host._osdPhase, 'scanning');
+  f.host.pauseRetrieval();
+});
+test('empty candidates, malformed data, bad reference and stale content have actionable states', async () => {
+  const f = fixture({ fetchAnchorCandidates: async () => ({ statusCode: 200, data: { candidates: [] } }) });
+  await f.host.recognizeAnchor(); assert.equal(f.host._osdPhase, 'empty');
+  const malformed = fixture({ fetchAnchorCandidates: async () => ({ statusCode: 200, data: { candidates: [{}] } }) });
+  await malformed.host.recognizeAnchor(); assert.equal(malformed.host._osdPhase, 'error');
+  const bad = fixture({ loadReference: async () => { throw new Error('参考图过小'); } });
+  await bad.host.recognizeAnchor(); assert.equal(bad.native.size, 0); assert.match(bad.host.statuses.at(-1).message, /过小/);
+  const stale = fixture({ fetchAnchorContent: async () => ({ statusCode: 409, data: { error: '参考图已更新，请重新扫描' } }) });
+  await stale.host.recognizeAnchor(); await stale.host._acceptOSDMatch(target());
+  assert.equal(stale.host._osdPhase, 'error'); assert.equal(stale.host._nextRecognitionAt, Infinity);
+  assert.equal(stale.native.size, 0); assert.equal(stale.files.size, 0);
+});
+test('OSD session uses one native session, never probes v2, and discards callbacks after stop', () => {
+  const { VKSessionController } = require(path.join(base, 'lib/three-runtime/vk-session'));
+  let options, stopped = 0, destroyed = 0, observed = 0, start;
+  const listeners = new Map();
+  const native = { version: 'v1', getAllOSDMarker: () => [{ markerId: 0, path: '/private/user/reference.jpg?token=secret' }],
+    on: (n, f) => listeners.set(n, f), off() {}, start: f => { start = f; },
+    requestAnimationFrame: () => 1, cancelAnimationFrame() {}, stop: () => stopped++, destroy: () => destroyed++,
+    addOSDMarker: () => 0, removeOSDMarker() {} };
+  const session = new VKSessionController({ mode: 'osd', api: { isVKSupport() { throw Error('v2 forbidden'); }, createVKSession: o => { options = o; return native; } },
+    size: () => ({ width: 10, height: 10 }), onState() {}, onAnchors: () => observed++, onFrame() {} });
+  session.start(); start(); assert.deepEqual(options.track, { OSD: true }); assert.equal(options.version, 'v1');
+  assert.equal(session.addOSDMarker('/reference.jpg'), 0);
+  const snapshot = session.getOSDDiagnostics();
+  assert.equal(snapshot.actualVersion, 'v1'); assert.equal(snapshot.planeEnabled, false);
+  assert.equal(snapshot.nativeMarkerCount, 1); assert.equal(snapshot.nativeMarkers[0].file, 'reference.jpg');
+  assert.ok(!JSON.stringify(snapshot).includes('secret'));
+  assert.deepEqual(snapshot.anchorListeners, ['addAnchors', 'updateAnchors', 'removeAnchors']);
+  assert.deepEqual(snapshot.anchorEvents, {});
+  const old = listeners.get('updateAnchors'); old([]);
+  assert.deepEqual(session.getOSDDiagnostics().anchorEvents, { updateAnchors: 1 });
+  session.stop(); old([]);
+  assert.equal(observed, 1); assert.equal(stopped, 1); assert.equal(destroyed, 1); assert.deepEqual(session.hitTest(), []);
+  session.start(); start(); old([]);
+  const restarted = session.getOSDDiagnostics();
+  assert.ok(restarted.sessionGeneration > snapshot.sessionGeneration);
+  assert.deepEqual(restarted.anchorEvents, {}, 'old session callbacks must not enter new-session diagnostics');
+  session.stop();
+});
+test('switching OSD to SLAM destroys the old session, ignores planes, and rejects v1 fallback', () => {
+  const { VKSessionController } = require(path.join(base, 'lib/three-runtime/vk-session'));
+  let alive = 0, observed = 0, forceFallback = false;
+  const instances = [], states = [];
+  const api = { isVKSupport: () => true, createVKSession(options) {
+    assert.equal(alive++, 0, 'two camera sessions must never coexist');
+    const listeners = new Map();
+    const native = { options, listeners, state: 3, version: forceFallback ? 'v1' : options.version,
+      on: (n, f) => listeners.set(n, f), off() {}, start: f => f(),
+      requestAnimationFrame: () => 1, cancelAnimationFrame() {}, stop() {}, destroy() { alive--; },
+      hitTest() { throw Error('production must not use plane results'); } };
+    instances.push(native); return native;
+  } };
+  const session = new VKSessionController({ mode: 'osd', api, size: () => ({ width: 1, height: 1 }),
+    onState: (state, message) => states.push([state, message]), onAnchors: () => observed++, onFrame() {} });
+  session.start(); const late = instances[0].listeners.get('updateAnchors');
+  session.mode = 'slam'; session.start(); late([]);
+  assert.equal(observed, 0);
+  assert.equal(instances[1].options.version, 'v2');
+  assert.deepEqual(instances[1].options.track, { plane: { mode: 1, force: true } });
+  assert.equal(instances[1].listeners.size, 0); assert.deepEqual(session.hitTest(), []);
+  assert.equal(session.isTracking(), false);
+  instances[1].state = 1; assert.equal(session.isTracking(), true);
+  session.mode = 'osd'; session.start();
+  assert.deepEqual(instances[2].options.track, { OSD: true });
+  forceFallback = true; session.mode = 'slam'; session.start();
+  assert.equal(session.running, false); assert.equal(alive, 0);
+  assert.equal(states.at(-1)[0], 'error'); assert.match(states.at(-1)[1], /v2/);
 });
 
-async function clocked(fn) {
-  const realNow = Date.now;
-  let time = 100000;
-  Date.now = () => time;
-  try { await fn(ms => { time += ms; }); }
-  finally { Date.now = realNow; }
+function referenceFixture({ width = 1600, height = 1200, deferExport = false } = {}) {
+  const removed = [], drawn = [], progress = [];
+  let current = true, exportOptions, canvasOptions;
+  const { loadOSDReference } = load('components/xr-start/matching/reference.js', {
+    '../../../lib/three-runtime/resources': { download: async () => '/source.png', removeFile: p => { if (p) removed.push(p); } },
+  }, { wx: {
+    getImageInfo: ({ success }) => success({ width, height }),
+    createOffscreenCanvas(options) {
+      canvasOptions = options;
+      const ctx = { fillStyle: '', fillRect() { drawn.push(this.fillStyle); }, drawImage() { drawn.push('image'); } };
+      return { getContext: () => ctx, createImage: () => ({ set src(_value) { this.onload(); } }) };
+    },
+    canvasToTempFilePath(options) { exportOptions = options; if (!deferExport) options.success({ tempFilePath: '/rgb.jpg' }); },
+  } });
+  return { run: () => loadOSDReference('https://media.test/source.png', () => current, (stage, fields) => progress.push({ stage, fields })), removed, drawn, progress,
+    cancel: () => { current = false; }, finish: () => exportOptions.success({ tempFilePath: '/rgb.jpg' }),
+    options: () => ({ canvasOptions, exportOptions }) };
 }
-const reply = (request, data) => request.success({ statusCode: 200, data: JSON.stringify({ data }) });
-const miss = () => ({ matched: false, reason: "below_threshold", assets: [] });
-
-test("one-second capture cadence permits six in-flight requests and skips overflow without queuing", async () => {
-  config.intervalMs = 1000;
-  try {
-    await clocked(async advance => {
-      const x = instance();
-      response = "pending";
-      const runs = [x.recognizeAnchor()];
-      await flush();
-      const first = pendingUpload;
-      advance(999);
-      await x.recognizeAnchor();
-      assert.equal(x._recognitionRequests.size, 1);
-      advance(1);
-      runs.push(x.recognizeAnchor());
-      await flush();
-      assert.notEqual(pendingUpload, first);
-      for (let i = 2; i < 6; i++) {
-        advance(1000);
-        runs.push(x.recognizeAnchor());
-        await flush();
-      }
-      assert.equal(x._recognitionRequests.size, 6);
-      const last = pendingUpload;
-      advance(1000);
-      await x.recognizeAnchor();
-      assert.equal(pendingUpload, last);
-      assert.equal(x._recognitionRequests.size, 6);
-      x.pauseRetrieval();
-      await Promise.all(runs);
-      assert.equal(x._recognitionRequests.size, 0);
-    });
-  } finally { config.intervalMs = 0; }
-});
-
-test("a slow capture skips ticks without blocking concurrent uploads after export", async () => {
-  config.intervalMs = 1000;
-  try {
-    await clocked(async advance => {
-      let busy = false;
-      const captures = [];
-      const x = instance(undefined, {
-        isCaptureBusy: () => busy,
-        captureCamera: (_scene, _onInfo, current) => new Promise(resolve => {
-          busy = true;
-          captures.push({ current, finish(file) { busy = false; resolve(file); } });
-        }),
-      });
-      response = "pending";
-      uploaded = null;
-      const first = x.recognizeAnchor();
-      await flush();
-      assert.equal(captures.length, 1);
-      advance(2000);
-      await x.recognizeAnchor();
-      assert.equal(captures.length, 1, "busy capture must skip ticks rather than queue frames");
-      assert.equal(x._recognitionRequests.size, 1);
-      assert.equal(uploaded, null);
-      captures[0].finish("/tmp/serialized-first.jpg");
-      await flush();
-      const firstUpload = pendingUpload;
-      const second = x.recognizeAnchor();
-      await flush();
-      assert.equal(captures.length, 2, "pending network must not prevent a new capture");
-      assert.equal(x._recognitionRequests.size, 2);
-      captures[1].finish("/tmp/serialized-second.jpg");
-      await flush();
-      const secondUpload = pendingUpload;
-      reply(firstUpload, miss());
-      reply(secondUpload, miss());
-      await Promise.all([first, second]);
-      assert.equal(x._recognitionRequests.size, 0);
-    });
-  } finally { config.intervalMs = 0; }
-});
-
-test("mode changes invalidate the capture callback and discard a late exported frame", async () => {
-  let finish;
-  let isCurrent;
-  const x = instance(undefined, {
-    captureCamera: (_scene, _onInfo, current) => new Promise(resolve => {
-      isCurrent = current;
-      finish = resolve;
-    }),
-  });
-  uploaded = null;
-  const run = x.recognizeAnchor();
-  await flush();
-  assert.equal(isCurrent(), true);
-  x.setRetrievalMode("gps");
-  assert.equal(isCurrent(), false);
-  finish("/tmp/stale-export.jpg");
-  await run;
-  assert.equal(uploaded, null);
-  assert.ok(removed.includes("/tmp/stale-export.jpg"));
-  assert.equal(x._recognitionRequests.size, 0);
-});
-
-test("a single match displays only returned children and stops every future capture", async () => {
-  const x = instance();
-  response = matched();
-  await x.recognizeAnchor();
-  assert.equal(x.displayed.length, 1);
-  assert.equal(x.displayed[0][0].id, "child");
-  assert.equal(x._captureGate.locked, true);
-  assert.equal(x._nextRecognitionAt, Infinity);
-  const first = uploaded;
-  response = miss();
-  for (let i = 0; i < 10; i++) await x.recognizeAnchor();
-  assert.equal(uploaded, first);
-  assert.equal(x.displayed.length, 1);
-  assert.equal(uploaded.name, "image");
-  assert.ok(uploaded.header["X-Recognition-Request-Id"]);
-  assert.equal(uploaded.header.Authorization, undefined);
-  assert.equal(uploaded.header.apikey, undefined);
-  assert.equal(uploaded.formData.coordinate_system, "wgs84");
-  assert.equal(uploaded.formData.latitude, "31");
-  assert.ok(Date.now() - Number(uploaded.formData.gps_timestamp) < 1000);
-  assert.equal(new URL(uploaded.url).searchParams.get("workspace_id"), "workspace");
-});
-
-test("a miss keeps scanning and the first subsequent match locks immediately", async () => {
-  const x = instance();
-  response = miss();
-  await x.recognizeAnchor();
-  assert.equal(x.displayed.length, 0);
-  assert.equal(x._captureGate.locked, false);
-  response = matched("b");
-  await x.recognizeAnchor();
-  assert.equal(x.displayed.length, 1);
-  assert.equal(x._matchedAnchorId, "b");
-});
-
-test("a match aborts concurrent uploads and late failures cannot clear the matched scene", async () => {
-  const x = instance();
-  response = "pending";
-  const one = x.recognizeAnchor();
-  await flush();
-  const old = pendingUpload;
-  const two = x.recognizeAnchor();
-  await flush();
-  reply(pendingUpload, matched("winner"));
-  await two;
-  old.fail({ errMsg: "late failure" });
-  reply(old, miss());
-  await one;
-  assert.equal(x._matchedAnchorId, "winner");
-  assert.equal(x.displayed.length, 1);
-  assert.equal(x._nextRecognitionAt, Infinity);
-  assert.equal(x._recognitionRequests.size, 0);
-});
-
-test("old match responses cannot override a newer completed miss", async () => {
-  const x = instance();
-  response = "pending";
-  const one = x.recognizeAnchor();
-  await flush();
-  const old = pendingUpload;
-  const two = x.recognizeAnchor();
-  await flush();
-  reply(pendingUpload, miss());
-  await two;
-  reply(old, matched("stale"));
-  await one;
-  assert.equal(x.displayed.length, 0);
-  assert.equal(x._captureGate.locked, false);
-});
-
-test("older 429 cannot postpone scanning after a newer match result", async () => {
-  const x = instance();
-  response = "pending";
-  const one = x.recognizeAnchor();
-  await flush();
-  const old = pendingUpload;
-  const two = x.recognizeAnchor();
-  await flush();
-  reply(pendingUpload, miss());
-  await two;
-  const nextAt = x._nextRecognitionAt;
-  old.success({ statusCode: 429, data: JSON.stringify({ error: "rate limited" }) });
-  await one;
-  assert.equal(x._nextRecognitionAt, nextAt);
-});
-
-test("newer model-busy errors do not suppress an earlier in-progress successful match", async () => {
-  const x = instance();
-  response = "pending";
-  const one = x.recognizeAnchor();
-  await flush();
-  const older = pendingUpload;
-  const two = x.recognizeAnchor();
-  await flush();
-  pendingUpload.success({ statusCode: 429, data: JSON.stringify({ error: "busy", code: "model_busy", retry_after_ms: 2000 }) });
-  await two;
-  assert.ok(x._nextRecognitionAt >= Date.now() + 1900);
-  assert.ok(x._nextRecognitionAt < Date.now() + 2100);
-  reply(older, matched("valid"));
-  await one;
-  assert.equal(x._matchedAnchorId, "valid");
-  assert.equal(x._captureGate.locked, true);
-});
-
-test("moving 1.5m after success clears assets and restarts the full three-second preparation", async () => {
-  await clocked(async advance => {
-    const x = instance();
-    response = matched();
-    await x.recognizeAnchor();
-    x.nodeList = [{ assetId: "child" }];
-    config.initialCaptureDelayMs = 3000;
-    try {
-      advance(100);
-      x.testPosition = { x: 1.49, y: 0, z: 0 };
-      x.sampleCaptureMotion(x.getCamTransform());
-      assert.equal(x._captureGate.locked, true);
-      assert.equal(x.nodeList.length, 1);
-      advance(100);
-      x.testPosition = { x: 1.5, y: 0, z: 0 };
-      x.sampleCaptureMotion(x.getCamTransform());
-      assert.equal(x._captureGate.locked, false);
-      assert.equal(x.nodeList.length, 0);
-      assert.equal(x._matchedAnchorId, null);
-      uploaded = null;
-      advance(2999);
-      await x.recognizeAnchor();
-      assert.equal(uploaded, null);
-      advance(1);
-      response = miss();
-      await x.recognizeAnchor();
-      assert.ok(uploaded);
-    } finally { config.initialCaptureDelayMs = 0; }
-  });
-});
-
-test("GPS lookup is shared and resolving it does not create a burst of simultaneous captures", async () => {
-  config.intervalMs = 1000;
-  try {
-    await clocked(async advance => {
-      const x = instance();
-      deferredLocation = true;
-      response = "pending";
-      const one = x.recognizeAnchor();
-      const gps = deferredLocation;
-      advance(1000);
-      const two = x.recognizeAnchor();
-      assert.equal(deferredLocation, gps);
-      gps.success({ latitude: 31, longitude: 121, accuracy: 10 });
-      deferredLocation = null;
-      await flush();
-      assert.equal(x._recognitionRequests.size, 1);
-      reply(pendingUpload, miss());
-      await Promise.all([one, two]);
-    });
-  } finally { config.intervalMs = 0; deferredLocation = null; }
-});
-test("switch aborts upload and late successful response cannot render", async () => {
-  const x = instance();
-  response = "pending";
-  const run = x.recognizeAnchor();
-  await flush();
-  const old = pendingUpload;
-  x.setRetrievalMode("gps");
-  old.success({ statusCode: 200, data: JSON.stringify({ data: matched() }) });
-  await run;
-  assert.equal(x.displayed.length, 0);
-  assert.equal(x.gpsCalls, 1);
-  assert.equal(x._recognizing, false);
-});
-test("switch during GPS sampling prevents upload", async () => {
-  const x = instance();
-  deferredLocation = true;
-  uploaded = null;
-  const run = x.recognizeAnchor();
-  x.setRetrievalMode("gps");
-  deferredLocation.success({ latitude: 31, longitude: 121, accuracy: 10 });
-  deferredLocation = null;
-  await run;
-  assert.equal(uploaded, null);
-});
-test("hide pauses recognition and destroys all local, remote and pending audio content", async () => {
-  const x = instance();
-  let destroyed = false;
-  x.nodeList = [{ assetId: null }, { assetId: "remote" }];
-  x._pendingAudioContexts = new Set([
-    {
-      stop() {},
-      destroy() {
-        destroyed = true;
-      },
-    },
-  ]);
-  x.pauseRetrieval();
-  assert.equal(x.nodeList.length, 0);
-  assert.equal(x.flyingDanmakus.length, 0);
-  assert.ok(destroyed);
-  uploaded = null;
-  await x.recognizeAnchor();
-  assert.equal(uploaded, null);
-  x.resumeRetrieval();
-  assert.equal(x._retrievalPaused, false);
-});
-test("GPS mode and missing endpoint never upload", async () => {
-  const x = instance();
-  x.retrievalMode = "gps";
-  uploaded = null;
-  await x.recognizeAnchor();
-  assert.equal(uploaded, null);
-  x.retrievalMode = "anchor";
-  const base = config.apiBaseUrl;
-  config.apiBaseUrl = "";
-  await x.recognizeAnchor();
-  config.apiBaseUrl = base;
-  assert.equal(uploaded, null);
-  assert.equal(x._nextRecognitionAt, Infinity);
-  assert.match(x.statuses.at(-1), /配置/);
-});
-test("HTTP overrides outside the selected development backend never upload", async () => {
-  const previous = config.apiBaseUrl;
-  try {
-    config.apiBaseUrl = "http://other.example.test:3000";
-    const x = instance();
-    uploaded = null;
-    await x.recognizeAnchor();
-    assert.equal(uploaded, null);
-    assert.equal(x._nextRecognitionAt, Infinity);
-    assert.match(x.statuses.at(-1), /配置/);
-  } finally {
-    config.apiBaseUrl = previous;
+test('reference conversion produces bounded RGB JPEG and releases source files', async () => {
+  const f = referenceFixture(); assert.equal(await f.run(), '/rgb.jpg');
+  assert.deepEqual(f.drawn, ['#ffffff', 'image']);
+  assert.equal(f.options().canvasOptions.width, 1080); assert.equal(f.options().canvasOptions.height, 810);
+  assert.equal(f.options().exportOptions.fileType, 'jpg');
+  assert.deepEqual(f.progress.map(p => p.stage), ['downloaded', 'image_info', 'jpeg_ready']);
+  assert.equal(f.progress.at(-1).fields.width, 1080);
+  assert.deepEqual(f.removed, ['/source.png']);
+  for (const dimensions of [{ width: 100, height: 100 }, { width: 2000, height: 300 }]) {
+    const bad = referenceFixture(dimensions); await assert.rejects(bad.run(), /参考图/);
+    assert.deepEqual(bad.removed, ['/source.png']); assert.equal(bad.options().exportOptions, undefined);
   }
 });
-test("poor GPS accuracy fails closed", async () => {
-  const x = instance();
-  global.wx.getLocation = (opts) =>
-    opts.success({ latitude: 31, longitude: 121, accuracy: 150 });
-  uploaded = null;
-  await x.recognizeAnchor();
-  assert.equal(uploaded, null);
-  assert.match(x.statuses.at(-1), /精度不足/);
-});
-test("legacy rate limiting backs off without locking capture", async () => {
-  const x = instance();
-  response = 429;
-  await x.recognizeAnchor();
-  assert.ok(x._nextRecognitionAt >= Date.now() + 59000);
-  assert.equal(x._matchedAnchorId, null);
-});
-for (const code of ["model_queue_full", "model_queue_timeout"]) {
-  test(`${code} uses a one-second retry and retains only allowed error diagnostics`, async () => {
-    await clocked(async advance => {
-      const logs = [];
-      const x = instance(logs);
-      response = "pending";
-      const run = x.recognizeAnchor();
-      await flush();
-      advance(60);
-      pendingUpload.success({
-        statusCode: 429,
-        header: {
-          "X-Recognition-Request-ID": "edge-header-request",
-          "X-SB-Edge-Region": "ap-southeast-1", "SB-Request-ID": "platform-trace-123",
-          Authorization: "SECRET_RESPONSE_HEADER", "x-private-token": "SECRET_PRIVATE_HEADER",
-        },
-        data: JSON.stringify({
-          error: "模型队列繁忙", code, request_id: "edge-body-request",
-          secret: "SECRET_RAW_ERROR_BODY", diagnostics: {
-            request_id: "diagnostic-request", upstream_request_id: "eas-request-123",
-            edge_region: "ap-southeast-1", model_device: "cuda:0", model_code: code,
-            upstream_status: 429, token: "SECRET_DIAGNOSTIC_TOKEN", embedding: ["SECRET_VECTOR"],
-            timings_ms: {
-              database_context_ms: 11, database_finalize_ms: 0,
-              model_queue_ms: 15, model_decode_ms: 2, model_inference_ms: 7,
-              model_service_total_ms: 25, model_request_ms: 30, api_total_ms: 40,
-              unknown_stage: "SECRET_UNKNOWN_TIMING",
-            },
-          },
-        }),
-      });
-      await run;
-      assert.equal(x._nextRecognitionAt - Date.now(), 1000);
-      assert.equal(x._captureGate.locked, false);
-      const rejected = logs.find(e => e.event === "服务端拒绝识别").fields;
-      const summary = logs.find(e => e.event === "识别耗时汇总").fields;
-      assert.equal(rejected.code, code);
-      for (const fields of [rejected, summary]) {
-        assert.equal(fields.serverRequestId, "edge-body-request");
-        assert.equal(fields.upstreamRequestId, "eas-request-123");
-        assert.equal(fields.platformRequestId, "platform-trace-123");
-        assert.equal(fields.edgeRegion, "ap-southeast-1");
-        assert.equal(fields.modelDevice, "cuda:0");
-        assert.equal(fields.modelCode, code);
-        assert.equal(fields.upstreamStatus, 429);
-      }
-      for (const stages of [rejected.timingsMs, summary.serverTimingsMs]) {
-        assert.equal(stages.database_context_ms, 11);
-        assert.equal(stages.database_finalize_ms, 0);
-        assert.equal(stages.model_queue_ms, 15);
-        assert.equal(stages.model_decode_ms, 2);
-        assert.equal(stages.model_inference_ms, 7);
-        assert.equal(stages.model_service_total_ms, 25);
-        assert.equal(stages.model_request_ms, 30);
-        assert.equal(stages.api_total_ms, 40);
-        assert.equal(stages.unknown_stage, undefined);
-      }
-      assert.equal(summary.transportAndPlatformEstimateMs, 20);
-      assert.equal(summary.clientTimingsMs.uploadRoundtripMs, 60);
-      assert.doesNotMatch(JSON.stringify(logs), /SECRET_/);
-    });
-  });
-}
-
-test("invalid diagnostic labels and negative or nonnumeric stage times are not forwarded", async () => {
-  const logs = [];
-  const x = instance(logs);
-  response = "pending";
-  const run = x.recognizeAnchor();
-  await flush();
-  pendingUpload.success({ statusCode: 502, header: { "SB-Request-ID": "safe-platform-id" }, data: JSON.stringify({
-    error: "模型暂不可用", diagnostics: {
-      request_id: "SECRET invalid request label", upstream_request_id: "https://secret.example/token",
-      model_device: { token: "SECRET_DEVICE_OBJECT" }, edge_region: "\nSECRET_REGION",
-      model_code: "SECRET invalid code", upstream_status: "SECRET_STATUS",
-      timings_ms: { database_context_ms: -1, database_finalize_ms: "SECRET_TIME",
-        model_inference_ms: 0, raw_response: "SECRET_RAW_RESPONSE" },
-    },
-  }) });
-  await run;
-  const summary = logs.find(e => e.event === "识别耗时汇总").fields;
-  assert.equal(summary.serverRequestId, null);
-  assert.equal(summary.edgeRegion, null);
-  assert.equal(summary.platformRequestId, "safe-platform-id");
-  assert.equal(summary.modelDevice, undefined);
-  assert.equal(summary.modelCode, undefined);
-  assert.equal(summary.upstreamStatus, undefined);
-  assert.equal(summary.serverTimingsMs.database_context_ms, null);
-  assert.equal(summary.serverTimingsMs.database_finalize_ms, null);
-  assert.equal(summary.serverTimingsMs.model_inference_ms, 0);
-  assert.doesNotMatch(JSON.stringify(logs), /SECRET|secret[.]example/);
-});
-
-test("successful Edge diagnostics expose database and model stages with safe response trace metadata", async () => {
-  const logs = [];
-  const x = instance(logs);
-  response = "pending";
-  const run = x.recognizeAnchor();
-  await flush();
-  pendingUpload.success({ statusCode: 200,
-    header: { "X-SB-Edge-Region": "ap-southeast-1", "SB-Request-ID": "edge-platform-success", Cookie: "SECRET_COOKIE" },
-    data: JSON.stringify({ data: {
-      ...matched("edge-match"), request_id: "edge-success-request", secret: "SECRET_SUCCESS_BODY",
-      diagnostics: {
-        upstream_request_id: "eas-success-request", model_device: "cuda:0", upstream_status: 200,
-        candidate_count: 2, ready_reference_count: 2, best_similarity: 0.91,
-        timings_ms: {
-          database_context_ms: 130, database_finalize_ms: 42, model_queue_ms: 8,
-          model_decode_ms: 12, model_inference_ms: 230, model_service_total_ms: 252,
-          model_request_ms: 300, api_total_ms: 480, raw_body: "SECRET_SUCCESS_TIMING",
-        },
-      },
-    } }),
-  });
-  await run;
-  const diagnostics = logs.find(e => e.event === "匹配诊断").fields;
-  const summary = logs.find(e => e.event === "识别耗时汇总").fields;
-  for (const fields of [diagnostics, summary]) {
-    assert.equal(fields.serverRequestId, "edge-success-request");
-    assert.equal(fields.upstreamRequestId, "eas-success-request");
-    assert.equal(fields.platformRequestId, "edge-platform-success");
-    assert.equal(fields.edgeRegion, "ap-southeast-1");
-    assert.equal(fields.modelDevice, "cuda:0");
-    assert.equal(fields.upstreamStatus, 200);
-  }
-  for (const stages of [diagnostics.timingsMs, summary.serverTimingsMs]) {
-    assert.equal(stages.database_context_ms, 130);
-    assert.equal(stages.database_finalize_ms, 42);
-    assert.equal(stages.model_queue_ms, 8);
-    assert.equal(stages.model_decode_ms, 12);
-    assert.equal(stages.model_inference_ms, 230);
-    assert.equal(stages.model_service_total_ms, 252);
-    assert.equal(stages.raw_body, undefined);
-  }
-  assert.equal(summary.outcome, "matched_locked");
-  assert.equal(x._matchedAnchorId, "edge-match");
-  assert.doesNotMatch(JSON.stringify(logs), /SECRET_/);
-});
-
-for (const statusCode of [502, 504]) {
-  test(`${statusCode} honors a structured two-second retry without resuming before the deadline`, async () => {
-    const previous = config.errorRetryMs;
-    config.errorRetryMs = 5000;
-    try {
-      await clocked(async advance => {
-        const x = instance();
-        response = "pending";
-        const run = x.recognizeAnchor();
-        await flush();
-        pendingUpload.success({ statusCode, data: JSON.stringify({
-          error: "模型暂不可用", code: statusCode === 504 ? "model_timeout" : "model_network_error", retry_after_ms: 2000,
-        }) });
-        await run;
-        assert.equal(x._nextRecognitionAt - Date.now(), 2000);
-        uploaded = null;
-        advance(1999);
-        await x.recognizeAnchor();
-        assert.equal(uploaded, null);
-        advance(1);
-        response = miss();
-        await x.recognizeAnchor();
-        assert.ok(uploaded);
-        assert.equal(x._captureGate.locked, false);
-      });
-    } finally { config.errorRetryMs = previous; }
-  });
-}
-
-test("non-429 retry values are bounded and invalid or absent values keep the ordinary five-second delay", async () => {
-  const previous = config.errorRetryMs;
-  config.errorRetryMs = 5000;
-  try {
-    const cases = [
-      [0.5, 1000], [500, 1000], [2000, 2000], [60000, 60000], [120000, 60000],
-      [0, 5000], [-5, 5000], ["2000", 5000], [null, 5000], [undefined, 5000],
-    ];
-    for (const [retryAfterMs, expected] of cases) {
-      await clocked(async () => {
-        const x = instance();
-        response = "pending";
-        const run = x.recognizeAnchor();
-        await flush();
-        pendingUpload.success({ statusCode: 502, data: JSON.stringify({ error: "服务暂不可用", retry_after_ms: retryAfterMs }) });
-        await run;
-        assert.equal(x._nextRecognitionAt - Date.now(), expected, `retry_after_ms=${retryAfterMs}`);
-      });
-    }
-  } finally { config.errorRetryMs = previous; }
-});
-
-test("structured retries from cancelled or superseded uploads cannot restart a paused or matched session", async () => {
-  await clocked(async advance => {
-    const paused = instance();
-    response = "pending";
-    const pending = paused.recognizeAnchor();
-    await flush();
-    const cancelledUpload = pendingUpload;
-    paused.pauseRetrieval();
-    const pausedNextAt = paused._nextRecognitionAt;
-    cancelledUpload.success({ statusCode: 504, data: JSON.stringify({ error: "timeout", retry_after_ms: 2000 }) });
-    await pending;
-    assert.equal(paused._nextRecognitionAt, pausedNextAt);
-    uploaded = null;
-    advance(10000);
-    await paused.recognizeAnchor();
-    assert.equal(uploaded, null);
-
-    const locked = instance();
-    const first = locked.recognizeAnchor();
-    await flush();
-    const older = pendingUpload;
-    const second = locked.recognizeAnchor();
-    await flush();
-    reply(pendingUpload, matched("winner"));
-    await second;
-    older.success({ statusCode: 502, data: JSON.stringify({ error: "unavailable", retry_after_ms: 2000 }) });
-    await first;
-    assert.equal(locked._nextRecognitionAt, Infinity);
-    assert.equal(locked._matchedAnchorId, "winner");
-    assert.equal(locked.displayed.length, 1);
-    uploaded = null;
-    advance(10000);
-    await locked.recognizeAnchor();
-    assert.equal(uploaded, null);
-  });
-});
-
-test("invalid API payload fails closed", async () => {
-  const x = instance();
-  response = { unexpected: true };
-  await x.recognizeAnchor();
-  assert.equal(x.displayed.length, 0);
-  assert.match(x.statuses.at(-1), /格式异常/);
-});
-test("unmatched diagnostics log scores without displaying AR or leaking payload fields", async () => {
-  const logs = [];
-  const x = instance(logs);
-  response = {
-    matched: false, reason: "below_threshold", anchor: null, assets: [],
-    diagnostics: { candidate_count: 1, ready_reference_count: 1, threshold: 0.8,
-      required_margin: 0.03, best_similarity: 0, second_similarity: null, score_gap: null,
-      best_distance_meters: 12, embedding: ["secret-vector"],
-      timings_ms: { model_request_ms: 1500, api_total_ms: 2000, token: "secret-token" } },
-  };
-  await x.recognizeAnchor();
-  const d = logs.find(entry => entry.event === "匹配诊断").fields;
-  assert.equal(d.bestSimilarity, 0);
-  assert.equal(d.threshold, 0.8);
-  assert.equal(d.secondSimilarity, null);
-  assert.equal(d.timingsMs.model_request_ms, 1500);
-  assert.equal(d.timingsMs.assets_read_ms, null);
-  assert.equal(x.displayed.length, 0);
-  assert.equal(x._matchedAnchorId, null);
-  assert.doesNotMatch(JSON.stringify(logs), /secret-vector|secret-token/);
-});
-test("timing summary separates GPS, capture, HTTP, server and display dispatch without counting nested totals twice", async () => {
-  await clocked(async advance => {
-    const logs = [];
-    const x = instance(logs, {
-      captureCamera: async (_scene, onInfo) => {
-        advance(120);
-        onInfo({ rawReadMs: 10, snapshotMs: 2, canvasPrepareMs: 3,
-          convertMs: 60, convertWorkMs: 22, convertYieldWaitMs: 38, maxConvertSliceMs: 4, convertSliceCount: 30,
-          pixelConverter: "cpu", gpuInitMs: 2, gpuAttemptMs: 0, gpuUploadMs: null, gpuDrawReadMs: null, gpuFallbackReason: "webgl_unavailable",
-          canvasWriteMs: 5, jpegExportMs: 20 });
-        return "/tmp/timed-frame.jpg";
-      },
-    });
-    x._locateForRecognition = async () => {
-      advance(12);
-      return { latitude: 31, longitude: 121, accuracy: 10, sampledAt: Date.now(), source: "fresh" };
-    };
-    const clear = x._clearRemoteAssets;
-    x._clearRemoteAssets = function () { advance(7); clear.call(this); };
-    x.displayAssets = function (assets) { advance(3); this.displayed.push(assets); };
-    response = "pending";
-    const run = x.recognizeAnchor();
-    await flush();
-    advance(2000);
-    reply(pendingUpload, { ...matched("timed-anchor"), diagnostics: { timings_ms: {
-      request_parse_ms: 10, gps_query_ms: 200, reference_read_ms: 250,
-      model_request_ms: 1200, matching_total_ms: 1790, api_total_ms: 1800,
-      secret: "unlisted-server-field",
-    } } });
-    await run;
-    const entry = logs.find(e => e.event === "识别耗时汇总");
-    const summary = entry.fields;
-    assert.equal(summary.gpsSource, "fresh");
-    assert.equal(summary.httpStatus, 200);
-    assert.equal(summary.clientTimingsMs.gpsMs, 12);
-    assert.equal(summary.clientTimingsMs.captureMs, 120);
-    assert.equal(summary.clientTimingsMs.uploadRoundtripMs, 2000);
-    assert.equal(summary.clientTimingsMs.responseParseMs, 0);
-    assert.equal(summary.clientTimingsMs.sceneClearMs, 7);
-    assert.equal(summary.clientTimingsMs.displayDispatchMs, 3);
-    assert.equal(summary.clientTimingsMs.resultHandlingMs, 10);
-    assert.equal(summary.clientTimingsMs.totalMs, 2142);
-    assert.equal(summary.captureToMatchMs, 2120);
-    assert.equal(summary.captureStagesMs.maxConvertSliceMs, 4);
-    assert.equal(summary.captureStagesMs.convertMs, 60);
-    assert.equal(summary.captureStagesMs.convertWorkMs, 22);
-    assert.equal(summary.captureStagesMs.convertYieldWaitMs, 38);
-    assert.equal(summary.pixelConverter, "cpu");
-    assert.equal(summary.gpuFallbackReason, "webgl_unavailable");
-    assert.equal(summary.captureStagesMs.gpuInitMs, 2);
-    assert.equal(summary.captureStagesMs.gpuUploadMs, null);
-    assert.equal(summary.serverTimingsMs.model_request_ms, 1200);
-    assert.equal(summary.serverTimingsMs.assets_read_ms, null);
-    assert.equal(summary.transportAndPlatformEstimateMs, 200);
-    assert.equal(x._recognitionTiming.requestId, entry.requestId);
-    assert.equal(x._recognitionTiming.contentEpoch, x._contentEpoch);
-    assert.equal(x._recognitionTiming.matchedAt - x._recognitionTiming.captureStartedAt, 2120);
-    assert.doesNotMatch(JSON.stringify(logs), /unlisted-server-field/);
-  });
-});
-
-test("cadence logs distinguish the one-second target from actual capture spacing and live GPS reuse", async () => {
-  assert.equal(require(path.join(root, componentPath, "matching/config.js")).intervalMs, 1000);
-  config.intervalMs = 1000;
-  try {
-    await clocked(async advance => {
-      const logs = [];
-      const x = instance(logs);
-      response = miss();
-      await x.recognizeAnchor();
-      advance(1200);
-      await x.recognizeAnchor();
-      const starts = logs.filter(e => e.event === "开始取图");
-      assert.equal(starts.length, 2);
-      assert.equal(starts[0].fields.actualCaptureIntervalMs, null);
-      assert.equal(starts[1].fields.targetIntervalMs, 1000);
-      assert.equal(starts[1].fields.actualCaptureIntervalMs, 1200);
-      assert.equal(starts[1].fields.intervalOverrunMs, 200);
-      const summaries = logs.filter(e => e.event === "识别耗时汇总");
-      assert.equal(summaries[1].fields.gpsSource, "watch");
-      assert.equal(summaries[1].fields.transportAndPlatformEstimateMs, null);
-      assert.equal(summaries[1].fields.serverTimingsMs, null);
-    });
-  } finally { config.intervalMs = 0; }
-});
-
-test("failed capture records partial elapsed time and leaves unexecuted stages null", async () => {
-  await clocked(async advance => {
-    const logs = [];
-    const x = instance(logs, { captureCamera: async () => { advance(17); throw new Error("capture failed"); } });
-    x._locateForRecognition = async () => {
-      advance(10);
-      return { latitude: 31, longitude: 121, accuracy: 10, sampledAt: Date.now(), source: "fresh" };
-    };
-    await x.recognizeAnchor();
-    const summary = logs.find(e => e.event === "识别耗时汇总").fields;
-    assert.equal(summary.outcome, "error");
-    assert.equal(summary.phase, "capture");
-    assert.equal(summary.clientTimingsMs.gpsMs, 10);
-    assert.equal(summary.clientTimingsMs.captureMs, 17);
-    assert.equal(summary.clientTimingsMs.totalMs, 27);
-    assert.equal(summary.clientTimingsMs.uploadRoundtripMs, null);
-    assert.equal(summary.clientTimingsMs.displayDispatchMs, null);
-    assert.equal(summary.captureStagesMs.convertMs, null);
-    assert.equal(summary.serverTimingsMs, null);
-    assert.equal(summary.captureToMatchMs, null);
-  });
-});
-
-test("503 exposes the backend reason and HTML errors retain the fallback", async () => {
-  try {
-    const x = instance();
-    response = 503;
-    responseBody = JSON.stringify({ error: "匹配接口未就绪，请检查数据库迁移" });
-    await x.recognizeAnchor();
-    assert.equal(x.statuses.at(-1), "匹配接口未就绪，请检查数据库迁移");
-    assert.equal(x.displayed.length, 0);
-    responseBody = "<html>upstream unavailable</html>";
-    await x.recognizeAnchor();
-    assert.equal(x.statuses.at(-1), "匹配服务尚未就绪");
-  } finally {
-    responseBody = undefined;
-  }
-});
-test("stale node with same id rejected after switching back", () => {
-  const queue = load(componentPath + "assets/queue.js", {
-    "./registry": { image: { bucket: "light" } },
-  })({});
-  let destroyed = false;
-  const x = {
-    _activePlacementEpoch: 0,
-    _contentEpoch: 2,
-    _allowedAssetIds: new Set(["same"]),
-    nodeList: [],
-    _destroyNode() {
-      destroyed = true;
-    },
-    _enforceCapacity() {},
-  };
-  queue._registerNode.call(x, "same", null, null, { type: "image" });
-  assert.ok(destroyed);
-  assert.equal(x.nodeList.length, 0);
-  queue._registerNode.call(x, null, null, null, { type: "text" });
-  assert.equal(x.nodeList.length, 1);
-});
-test("old GPS RPC result is discarded after switching", async () => {
-  let resolve;
-  const noop = () => ({});
-  const assets = load(componentPath + "assets/index.js", {
-    "../../../utils/backend": {
-      CONFIG: {},
-      backendRpc: () =>
-        new Promise((r) => {
-          resolve = r;
-        }),
-    },
-    "./queue": noop,
-    "./audio": noop,
-    "./text": {},
-    "./model": {},
-    "./image": {},
-    "./video": {}, "./scene": {},
-  })({});
-  let rendered = false;
-  const x = {
-    retrievalMode: "gps",
-    _modeEpoch: 0,
-    currentGPS: {},
-    displayAssets() {
-      rendered = true;
-    },
-  };
-  const run = assets.fetchNearbyAssets.call(x);
-  x._modeEpoch++;
-  x.retrievalMode = "anchor";
-  resolve({ statusCode: 200, data: [{ id: "old", file_type: "image" }] });
-  await run;
-  assert.equal(rendered, false);
-});
-function realAssetMethods() {
-  const noop = () => ({});
-  return load(componentPath + "assets/index.js", {
-    "../../../utils/backend": { CONFIG: {} },
-    "./queue": noop, "./audio": noop, "./text": {}, "./model": {}, "./image": {}, "./video": {}, "./scene": {},
-  })(require(path.join(root, componentPath, "config.js")));
-}
-
-test("both mode switches clear all scene nodes, media, queues and confirmation before fetching", () => {
-  for (const from of ["gps", "anchor"]) {
-    const x = instance();
-    x.retrievalMode = from;
-    x.nodeList = [{ assetId: "remote" }, { assetId: null, type: "model" }, { assetId: null, type: "danmaku" }];
-    x.flyingDanmakus = [{}];
-    x._hugeNodeList = [{ node: "huge" }];
-    x._pendingDisplayAssets = [{ id: "old" }];
-    x._placeQueue = [{ id: "old" }];
-    x._pendingHugeAssets = [{}];
-    x._hugePlaceQueue = [{}];
-      x._matchedAnchorId = "old-anchor";
-    const deleted = [];
-    x.shadowRoot = { removeChild(node) { deleted.push(node); } };
-    let stopped = false;
-    x.stopRandomConfetti = () => { stopped = true; };
-    const checkCleared = () => {
-      for (const key of ["nodeList", "flyingDanmakus", "_hugeNodeList", "_pendingDisplayAssets", "_placeQueue", "_pendingHugeAssets", "_hugePlaceQueue"]) {
-        assert.equal(x[key].length, 0, key);
-      }
-      assert.equal(x._matchedAnchorId, null);
-      assert.equal(x._matchedAnchorId, null);
-      assert.ok(stopped);
-    };
-    x.recognizeAnchor = checkCleared;
-    x.fetchNearbyAssets = checkCleared;
-    const to = from === "gps" ? "anchor" : "gps";
-    x.setRetrievalMode(to);
-    assert.equal(x.data.retrievalMode, to);
-    assert.ok(deleted.includes("huge"));
-    checkCleared();
-  }
-});
-
-test("confirmed anchor reuses the existing display pipeline and rejects unconfirmed or unrelated assets", async () => {
-  const x = instance();
-  const methods = realAssetMethods();
-  x.displayAssets = methods.displayAssets;
-  x._preloadDone = true;
-  x._isInRepeatCooldown = () => false;
-  x._pickRevealBatch = a => a;
-  const batches = [];
-  x._enqueueDisplayAssets = a => batches.push(a);
-  const child = { id: "child", file_type: "model", is_huge: true, config: { scale_multiplier: 3 } };
-  x.displayAssets([child]);
-  assert.equal(batches.length, 0);
-  response = matched("a", [child, { id: "anchor", file_type: "anchor" }]);
-  await x.recognizeAnchor();
-  assert.equal(batches.length, 1);
-  assert.equal(batches[0].length, 1);
-  assert.equal(batches[0][0].config.scale_multiplier, 3);
-  assert.equal(batches[0][0].is_huge, true);
-  x.displayAssets([{ id: "unrelated", file_type: "image" }]);
-  assert.equal(batches.length, 1);
-  x.displayAssets([{ ...child, _contentEpoch: x._contentEpoch - 1 }]);
-  assert.equal(batches.length, 1);
-});
-
-test("preload completion after a mode switch cannot revive queued GPS content", () => {
-  const x = instance();
-  const methods = realAssetMethods();
-  x.displayAssets = methods.displayAssets;
-  x.flushPendingDisplayAssets = methods.flushPendingDisplayAssets;
-  x.retrievalMode = "gps";
-  x.displayAssets([{ id: "old-gps", file_type: "image" }]);
-  assert.equal(x._pendingDisplayAssets.length, 1);
-  x.recognizeAnchor = () => {};
-  x.setRetrievalMode("anchor");
-  x._preloadDone = true;
-  x._enqueueDisplayAssets = () => { throw new Error("stale preload rendered"); };
-  x.flushPendingDisplayAssets();
-  assert.equal(x._pendingDisplayAssets.length, 0);
-});
-
-// Three image/model late-load cancellation and video ownership live in test-ar-runtime.cjs.
-
-test("explicit placement generation rejects stale registration even if component generation advanced", () => {
-  instance();
-  const queue = load(componentPath + "assets/queue.js")({});
-  const x = { _contentEpoch: 2, _activePlacementEpoch: 2, _allowedAssetIds: new Set(["same"]),
-    retrievalMode: "anchor", _matchedAnchorId: "a", nodeList: [], _destroyNode() {}, _enforceCapacity() {} };
-  queue._registerNode.call(x, "same", null, null, { type: "model", contentEpoch: 0 });
-  queue._registerNode.call(x, null, null, null, { type: "danmaku" });
-  assert.equal(x.nodeList.length, 0);
-  queue._registerNode.call(x, "same", null, null, { type: "model", contentEpoch: 2 });
-  assert.equal(x.nodeList.length, 1);
-});
-
-test("preview keeps the exact completed upload and cleans replacement, cancellation and disposal", async () => {
-  config.debugFramePreview = true;
-  try {
-    removed = [];
-    capturePath = "/tmp/first-preview.jpg";
-    const x = instance();
-    response = { matched: false, reason: "below_threshold", anchor: null, assets: [], diagnostics: { best_similarity: 0.268, threshold: 0.8 } };
-    await x.recognizeAnchor();
-    assert.equal(x._recognitionFrame.path, uploaded.filePath);
-    assert.equal(x._recognitionFrame.bestSimilarity, 0.268);
-    assert.equal(x._recognitionFrame.width, 640);
-    assert.equal(x._recognitionFrame.height, 360);
-    assert.ok(!removed.includes(capturePath));
-    const firstFrame = x._recognitionFrame;
-    x.pauseRetrieval();
-    assert.equal(x._recognitionFrame, firstFrame);
-    x._retrievalPaused = false;
-    capturePath = "/tmp/second-preview.jpg";
-    await x.recognizeAnchor();
-    assert.ok(removed.includes(firstFrame.path));
-    assert.equal(x._recognitionFrame.path, uploaded.filePath);
-    assert.ok(!removed.includes(capturePath));
-    capturePath = "/tmp/cancelled-preview.jpg";
-    response = "pending";
-    const inFlight = x.recognizeAnchor();
-    await flush();
-    x.pauseRetrieval();
-    await inFlight;
-    assert.ok(removed.includes(capturePath));
-    assert.equal(x._recognitionFrame.path, "/tmp/second-preview.jpg");
-    assert.equal(x.frames.filter(frame => frame.path).length, 2);
-    x._disposed = true;
-    x.clearRecognitionFrame();
-    assert.ok(removed.includes("/tmp/second-preview.jpg"));
-    assert.equal(x._recognitionFrame, null);
-  } finally {
-    config.debugFramePreview = false;
-    capturePath = "/tmp/frame.jpg";
-  }
-});
-test("turning off frame preview preserves immediate temporary-file cleanup", async () => {
-  config.debugFramePreview = false;
-  removed = [];
-  const x = instance();
-  response = matched();
-  await x.recognizeAnchor();
-  assert.equal(x._recognitionFrame, undefined);
-  assert.ok(removed.includes(uploaded.filePath));
-});
-// Native VisionKit capture replaces the removed XR YUV conversion; see test-ar-runtime.cjs.
-(async () => {
-  for (const [name, fn] of tests) {
-    await fn();
-    console.log("PASS", name);
-  }
-  console.log(`${tests.length} tests passed`);
-})().catch((e) => {
-  console.error(e);
-  process.exitCode = 1;
+test('reference export finishing after rescan releases both temporary files', async () => {
+  const f = referenceFixture({ deferExport: true }), task = f.run();
+  for (let i = 0; i < 12; i++) await Promise.resolve();
+  f.cancel(); f.finish(); await assert.rejects(task, /取消/);
+  assert.deepEqual(f.removed.sort(), ['/rgb.jpg', '/source.png']);
 });

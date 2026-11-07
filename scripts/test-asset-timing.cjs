@@ -95,6 +95,27 @@ function startOne(context) {
   assert.equal(context.placements.length, 1);
 }
 
+test("SLAM loss during async loading retains the request until tracking recovers", async () => {
+  const context = harness(), { instance, pending, placements } = context;
+  instance._runtime = { session: { mode: "slam" } };
+  instance._arReady = true;
+  startOne(context);
+  instance._arReady = false;
+  pending.get("image").resolve({ register: false });
+  await instance.drainPromise;
+  assert.equal(instance.nodeList.length, 0);
+  assert.equal(instance._placeQueue.length, 1);
+  assert.equal(instance._placingBusy, false);
+  await instance._drainPlaceQueue();
+  assert.equal(placements.length, 1, "do not retry with an invalid pose");
+  instance._arReady = true;
+  instance._drainPlaceQueue();
+  assert.equal(placements.length, 2);
+  await completeOne(context);
+  assert.equal(instance.nodeList.length, 1);
+  assert.equal(instance._placeQueue.length, 0);
+});
+
 test("preload waiting and serial asynchronous placement report exact per-asset and first-ready times", async () => {
   const context = harness();
   const { instance, timing, clock, logs, placements, pending, asset } = context;
