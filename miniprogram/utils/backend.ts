@@ -235,13 +235,13 @@ function request<T>(
 export interface OrganizationSummary {
   id: string;
   name: string;
-  /** 只包含小程序会用到的展示配置；活动入口来自活动投放。 */
-  config: Record<string, unknown>;
 }
 
 export interface WorkspaceSummary {
   id: string;
   name: string;
+  organization_id: string;
+  config: import("./map-config").MapConfig;
 }
 
 export interface SceneSummary {
@@ -254,18 +254,24 @@ export function fetchScenes(ids: string[], organizationId: string): Promise<ApiR
   return request(`/scenes?ids=${encodeURIComponent(ids.join(","))}&organization_id=${encodeURIComponent(organizationId)}`, "GET");
 }
 
-/** 按 id 批量取组织名称与小程序相关配置（最多 50 个） */
+/** 按 id 批量取组织名称（最多 50 个） */
 export function fetchOrganizations(
   ids: string[],
 ): Promise<ApiResponse<OrganizationSummary[]>> {
   return request(`/organizations?ids=${encodeURIComponent(ids.join(","))}`, "GET");
 }
 
-/** 按 id 批量取工作空间名称（最多 50 个） */
+/** 按 id 批量取未归档地图名称与配置（最多 50 个）；运行时附带团队范围。 */
 export function fetchWorkspaces(
   ids: string[],
+  organizationId?: string,
 ): Promise<ApiResponse<WorkspaceSummary[]>> {
-  return request(`/workspaces?ids=${encodeURIComponent(ids.join(","))}`, "GET");
+  return request(`/workspaces?ids=${encodeURIComponent(ids.join(","))}${organizationId ? `&organization_id=${encodeURIComponent(organizationId)}` : ""}`, "GET");
+}
+
+/** Team-only entries must choose one active map before starting AR. */
+export function fetchTeamWorkspaces(organizationId: string): Promise<ApiResponse<WorkspaceSummary[]>> {
+  return request(`/workspaces?organization_id=${encodeURIComponent(organizationId)}`, "GET");
 }
 
 /** Public playback endpoints: response ids identify placements, not source assets. */

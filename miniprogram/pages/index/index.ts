@@ -3,12 +3,14 @@ import {
   CONFIG,
   fetchOrganizations,
   fetchWorkspaces,
+  fetchTeamWorkspaces,
   fetchScenes,
   loadScanHistory,
   recordScanHistory,
   saveScanHistory,
   scanHistoryKey,
   ScanHistoryEntry,
+  WorkspaceSummary,
 } from "../../utils/backend";
 
 /** 历史记录在下拉菜单中的展示形态 */
@@ -39,6 +41,9 @@ Page({
     deniedPermText: "",
     openingScene: false,
     isScene: false,
+    needsMap: false,
+    mapChoices: [] as WorkspaceSummary[],
+    mapsError: "",
   },
 
   async onLoad(options: Record<string, string | undefined>) {
@@ -113,13 +118,17 @@ Page({
         ? fetchOrganizations([selected.organizationId]).catch(() => null)
         : Promise.resolve(null);
       const wsPromise = selected.workspaceId
-        ? fetchWorkspaces([selected.workspaceId]).catch(() => null)
+        ? fetchWorkspaces([selected.workspaceId], selected.organizationId).catch(() => null)
+        : Promise.resolve(null);
+      const needsMap = !selected.sceneId && !selected.workspaceId;
+      const mapsPromise = needsMap && selected.organizationId
+        ? fetchTeamWorkspaces(selected.organizationId).catch(() => null)
         : Promise.resolve(null);
       const scenePromise = selected.sceneId && selected.organizationId
         ? fetchScenes([selected.sceneId], selected.organizationId).catch(() => null)
         : Promise.resolve(null);
 
-      const [orgRes, wsRes, sceneRes] = await Promise.all([orgPromise, wsPromise, scenePromise]);
+      const [orgRes, wsRes, sceneRes, mapsRes] = await Promise.all([orgPromise, wsPromise, scenePromise, mapsPromise]);
       if (scanHistoryKey(selected) !== scanHistoryKey(CONFIG)) return;
 
       // 只使用当前目标的缓存，切换时不能残留其他目标的标题或 footer。
@@ -128,6 +137,10 @@ Page({
         subtitle: selected.sceneId ? cached?.sceneName || "场景名称暂不可用" : cached?.workspaceName || "",
         isScene: !!selected.sceneId,
         showFooter: false,
+        needsMap,
+        mapChoices: needsMap && mapsRes?.statusCode === 200 && Array.isArray(mapsRes.data)
+          ? mapsRes.data.filter((map) => map.organization_id === selected.organizationId) : [],
+        mapsError: needsMap && (!mapsRes || mapsRes.statusCode !== 200) ? "地图加载失败，点击重试" : "",
       };
       if (
         orgRes &&
@@ -136,11 +149,6 @@ Page({
         orgRes.data.length > 0
       ) {
         patch.title = orgRes.data[0].name;
-        const cfg = orgRes.data[0].config;
-        patch.showFooter =
-          cfg && typeof cfg === "object"
-            ? !selected.sceneId && !!(cfg as Record<string, unknown>).footer_enabled
-            : false;
       }
       if (
         wsRes &&
@@ -148,7 +156,11 @@ Page({
         Array.isArray(wsRes.data) &&
         wsRes.data.length > 0
       ) {
-        patch.subtitle = wsRes.data[0].name;
+        const map = wsRes.data.find((row) => row.id === selected.workspaceId && row.organization_id === selected.organizationId);
+        if (map) {
+          patch.subtitle = map.name;
+          patch.showFooter = map.config?.footer_enabled === true;
+        }
       }
       const sceneName = sceneRes?.statusCode === 200 && Array.isArray(sceneRes.data)
         ? sceneRes.data.find((s) => s.id === selected.sceneId)?.name
@@ -179,7 +191,7 @@ Page({
       const org = e.orgName || "未命名组织";
       const label = e.sceneId
         ? e.sceneName || "场景名称暂不可用"
-        : e.workspaceName || (e.workspaceId ? "地图名称暂不可用" : "全部地图");
+        : e.workspaceName || (e.workspaceId ? "地图名称暂不可用" : "选择地图合集");
       return {
         ...e,
         key: scanHistoryKey(e),
@@ -299,6 +311,10 @@ Page({
       wx.navigateTo({ url: `/pages/scene/scene?sceneId=${encodeURIComponent(CONFIG.sceneId)}&organizationId=${encodeURIComponent(CONFIG.organizationId || "")}` });
       return;
     }
+    if (!CONFIG.organizationId || !CONFIG.workspaceId) {
+      wx.showToast({ title: "请先选择地图合集", icon: "none" });
+      return;
+    }
     const params: string[] = [];
     if (CONFIG.organizationId)
       params.push(`organizationId=${CONFIG.organizationId}`);
@@ -307,5 +323,18 @@ Page({
     wx.navigateTo({
       url: `/pages/ar/ar${query}`,
     });
+  },
+
+  onChooseMap(e: WechatMiniprogram.CustomEvent) {
+    const map = this.data.mapChoices[Number(e.detail.value)];
+    if (!map || map.organization_id !== CONFIG.organizationId) return;
+    setConfig({ organizationId: map.organization_id, workspaceId: map.id });
+    this.setData({ loaded: false, showFooter: false });
+    void this.fetchNames();
+  },
+
+  retryMaps() {
+    this.setData({ loaded: false });
+    void this.fetchNames();
   },
 });

@@ -34,6 +34,8 @@
 - 首页恢复 Scene 使用 `navigateTo`，保留首页供系统返回；返回时不再次自动跳转。
   `pages/index/index?select=1` 可用于直接调试选择页，不清除缓存。
 - 首页 `goToAR()` 根据当前目标进入 Scene 或地图 AR 页。
+- 仅团队入口（含旧“全部地图”历史）从 `/api/miniapp/workspaces?organization_id=…` 获取未归档地图，先选择一个具体合集才显示“开启旅程”。不自动选择唯一地图；列表失败可重试，空列表显示无可用地图。无具体地图的 AR 旧入口返回首页选择。
+- 首页水印取当前地图配置；AR 每次进入或从后台返回时重读识别方式、文本样式、彩带和水印。配置不沿用旧组织缓存，详见[正式运行时](visionkit-three-migration.md)。
 - AR、Scene 等子页面不持久化自己的 URL，避免旧页面参数覆盖较新的扫码选择。
 
 ## Storage 与历史
@@ -70,4 +72,4 @@ Scene 名称通过 `/api/miniapp/scenes?ids=…&organization_id=…` 按团队�
 
 `npm run test:scan-config` 使用真实页面和后端模块，在独立 JS runtime 间保留
 JSON 序列化的 Storage，验证 Scene 无参数冷启动、地图切换、显式 query 优先级、
-历史去重、异步名称刷新和 Storage 故障。测试也包含在 `npm test` 中。
+历史去重、异步名称刷新、团队入口选图、地图水印和 Storage 故障。`npm run test:map-config` 验证配置加载前不启动相机、直接按模式启动、失败重试、后台重读和迟到响应隔离；原生相机仅使用替身。这些测试也包含在 `npm test` 中。

@@ -91,8 +91,8 @@ async function main() {
   app.respond(200, definitions); await loading;
   assert.equal(page.data.shopActivities.length, 1);
   assert.equal(page.data.danmakuActivities.length, 2);
-  page.onOrgConfigLoad({ detail: { shopCheckinEnabled: false, footerEnabled: true } });
-  assert.equal(page.data.shopCheckinEnabled, true, "legacy organization switch does not hide active deployments");
+  page.onMapConfigLoad({ detail: { ready: true, retrievalMode: "gps", footerEnabled: true } });
+  assert.equal(page.data.shopCheckinEnabled, true, "map display configuration does not hide active deployments");
   page.onTextInput({ detail: { value: "Hello" } });
   assert.equal(page.data.canSubmit, true);
   const failed = page.submitText();
@@ -123,7 +123,7 @@ async function main() {
   assert.equal(app.calls.requests[0].data.placement_id, uuid(2));
   assert.notEqual(app.calls.requests[0].data.idempotency_key, firstBody.idempotency_key);
   app.respond(200, { id: uuid(501) }); await second;
-  page.onRetrievalModeChange({ currentTarget: { dataset: { mode: "anchor" } } });
+  page.onMapConfigLoad({ detail: { ready: true, retrievalMode: "anchor", footerEnabled: false } });
   page.onTextInput({ detail: { value: "Hi" } });
   assert.equal(page.data.canSubmit, false);
   const refreshed = page.refreshActivities(); app.respond(200, []); await refreshed;

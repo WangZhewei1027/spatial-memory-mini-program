@@ -38,24 +38,9 @@ Page({
     compassHeading: 0,
     showGpsDebug: false,
     retrievalMode: "gps",
+    mapConfigReady: false,
     recognitionStatus: "等待 AR 相机就绪",
     recognitionLocked: false,
-  },
-
-  onRetrievalModeChange(event: WechatMiniprogram.TouchEvent) {
-    const mode = event.currentTarget.dataset.mode;
-    if (
-      (mode !== "gps" && mode !== "anchor") ||
-      mode === this.data.retrievalMode
-    )
-      return;
-    this.setData({
-      retrievalMode: mode,
-      recognitionStatus: "等待 AR 相机就绪",
-      recognitionLocked: false,
-    });
-    this.selectComponent("#main-frame")?.setRetrievalMode(mode);
-    this.refreshCanSubmit();
   },
 
   onAssetError(event: WechatMiniprogram.CustomEvent) {
@@ -93,6 +78,10 @@ Page({
     // CONFIG 已由 index.ts 的 setConfig 设置（扫码 → Storage → 模块初始化）；
     // ar.ts 始终由 goToAR() 跳转进入，不应在此持久化 URL 参数，
     // 否则微信「最近使用」场景下的过期 URL 会覆盖更新的 Storage 扫码结果。
+    if (!CONFIG.organizationId || !CONFIG.workspaceId) {
+      wx.redirectTo({ url: "/pages/index/index?select=1" });
+      return;
+    }
     const {
       windowWidth: width,
       windowHeight: height,
@@ -237,7 +226,7 @@ Page({
   refreshCanSubmit() {
     const text = this.data.textContent.trim();
     const danmakuInRange = withinActivityScope(this.data.activeDanmaku, this.data.location);
-    this.setData({ danmakuInRange, canSubmit: !!text && text.length <= this.data.danmakuLimit && danmakuInRange && !this.data.isSubmitting && this.data.retrievalMode === "gps" });
+    this.setData({ danmakuInRange, canSubmit: this.data.mapConfigReady && !!text && text.length <= this.data.danmakuLimit && danmakuInRange && !this.data.isSubmitting && this.data.retrievalMode === "gps" });
   },
 
   /** 把 wx.getLocation / onLocationChange 的结果统一成页面用的 LocationData */
@@ -302,7 +291,7 @@ Page({
     this.refreshCanSubmit();
     const { textContent, location, activeDanmaku } = this.data;
     if (!this.data.canSubmit || !location || !activeDanmaku) {
-      wx.showToast({ title: !activeDanmaku ? "当前没有留言活动" : !location ? "请等待定位" : !this.data.danmakuInRange ? "请进入活动范围" : this.data.retrievalMode !== "gps" ? "请切换到 GPS 模式" : "请检查留言内容", icon: "none" });
+      wx.showToast({ title: !this.data.mapConfigReady ? "请等待地图设置加载" : !activeDanmaku ? "当前没有留言活动" : !location ? "请等待定位" : !this.data.danmakuInRange ? "请进入活动范围" : this.data.retrievalMode !== "gps" ? "此地图当前不支持留言" : "请检查留言内容", icon: "none" });
       return;
     }
     const sendText = textContent.trim();
@@ -338,11 +327,11 @@ Page({
     this.setData({ showShopPanel: !this.data.showShopPanel });
   },
 
-  onOrgConfigLoad(e: WechatMiniprogram.CustomEvent) {
-    const { footerEnabled } = e.detail;
-    this.setData({
-      footerEnabled: !!footerEnabled,
-    });
+  onMapConfigLoad(e: WechatMiniprogram.CustomEvent) {
+    const { ready, retrievalMode, footerEnabled } = e.detail;
+    this.setData({ mapConfigReady: ready === true, footerEnabled: ready === true && footerEnabled === true,
+      ...(ready === true ? { retrievalMode, recognitionLocked: false, recognitionStatus: "等待 AR 相机就绪" } : {}) });
+    this.refreshCanSubmit();
   },
 
   /** 店铺导航目标变更时，同步到 XR 组件 */

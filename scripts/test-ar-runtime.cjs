@@ -253,8 +253,9 @@ async function main() {
     component.methods,
   );
   host.startGPSWatch = () => {};
-  host.fetchOrgStyle = () => {};
+  host.loadMapConfig = () => {};
   component.lifetimes.attached.call(host);
+  host._mapConfigReady = true;
   host._runtime = {
     camera: new THREE.PerspectiveCamera(),
     scene: new THREE.Scene(),

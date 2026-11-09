@@ -49,7 +49,14 @@
       >去开启</button>
     </view>
 
-    <view class="card" bindtap="goToAR">
+    <block wx:if="{{loaded && needsMap}}">
+      <picker wx:if="{{mapChoices.length}}" range="{{mapChoices}}" range-key="name" bindchange="onChooseMap">
+        <view class="card"><text class="card-title">选择地图合集</text><view class="arrow"></view></view>
+      </picker>
+      <button wx:elif="{{mapsError}}" class="card card-title" bindtap="retryMaps">{{mapsError}}</button>
+      <text wx:else class="card-desc">暂无可用地图合集</text>
+    </block>
+    <view wx:elif="{{loaded}}" class="card" bindtap="goToAR">
       <view class="card-content">
         <text class="card-title">{{isScene ? '预览场景' : '开启旅程'}}</text>
         <text class="card-desc">{{isScene ? '进入后点击按钮，将场景放置在前方' : '探索 AR 景观与互动体验'}}</text>

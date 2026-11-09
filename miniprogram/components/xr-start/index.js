@@ -3,7 +3,7 @@ const scenePreview = require("./scene-preview");
 const gps = require("./gps");
 const navigation = require("./navigation");
 const matching = require("./matching/index");
-const { CONFIG, fetchOrganizations } = require("../../utils/backend");
+const mapConfig = require("./map-config");
 const { THREE } = require("../../lib/three-runtime/runtime");
 const { ARRuntime } = require("../../lib/three-runtime/ar-runtime");
 const {
@@ -74,30 +74,12 @@ function buildInitialState() {
     _confettiBursts: [],
     _confettiTimer: null,
     _confettiCounter: 0,
-    // 组织配置（organization.config jsonb），由 fetchOrgStyle 填充
-    _orgConfig: {},
-    // 资源是否已加载完成（彩带启动闸门之一）
+    _mapConfigReady: false,
+    _mapConfigEpoch: 0,
+    _mapConfigRequest: null,
     _assetsLoaded: false,
-    // 彩带开关：从 org 配置读取，默认关闭（保守）；带本地缓存兜底
-    _confettiEnabled: (() => {
-      try {
-        const orgId = CONFIG.organizationId || "";
-        const saved = wx.getStorageSync(`config:org:${orgId}:confetti:v1`);
-        return saved === true;
-      } catch (_) {
-        return false;
-      }
-    })(),
-    // 文本资源样式：从 org 配置读取，默认使用气泡样式
-    _textAssetStyle: (() => {
-      try {
-        const orgId = CONFIG.organizationId || "";
-        const saved = wx.getStorageSync(`config:org:${orgId}:textStyle:v1`);
-        return typeof saved === "string" && saved ? saved : "dialog_decorated";
-      } catch (_) {
-        return "dialog_decorated";
-      }
-    })(),
+    _confettiEnabled: false,
+    _textAssetStyle: "dialog_decorated",
   };
 }
 
@@ -128,7 +110,7 @@ Component({
       this._raycaster = new THREE.Raycaster();
       this._tapPoint = new THREE.Vector2();
       this._scenePreviewMode = !!this.data.sceneId;
-      if (!this._scenePreviewMode) { this.startGPSWatch(); this.fetchOrgStyle(); }
+      if (!this._scenePreviewMode) { this.startGPSWatch(); void this.loadMapConfig(); }
     },
     ready() {
       this.createSelectorQuery()
@@ -182,6 +164,9 @@ Component({
   pageLifetimes: {
     hide() {
       this._pageVisible = false;
+      this._mapConfigEpoch++;
+      this._mapConfigRequest = null;
+      this._mapConfigReady = false;
       this.pauseRetrieval();
       this._arReady = false;
       this._sessionActive = false;
@@ -193,11 +178,13 @@ Component({
     show() {
       this._pageVisible = true;
       if (this._scenePreviewMode) this._retrievalPaused = false;
+      else void this.loadMapConfig();
       if (this._runtime && !this._sessionActive) this.startAR();
     },
   },
   methods: {
     ...scenePreview,
+    ...mapConfig,
     ...gps,
     ...matching,
     ...assetsMethods,
@@ -219,7 +206,7 @@ Component({
         ["tracking", "locked"].includes(this._osdPhase) ? "slam" : "osd";
     },
     _ensureARMode(mode, { restart = false } = {}) {
-      if (this._disposed || this._pageVisible === false || !this._runtime || this._contextLost) return false;
+      if (this._disposed || this._pageVisible === false || !this._runtime || this._contextLost || (!this._scenePreviewMode && !this._mapConfigReady)) return false;
       if (!restart && this._sessionActive && this._runtime.session.mode === mode) return this._arReady;
       clearTimeout(this._firstFetchTimer);
       this._firstFetchStarted = false;
@@ -396,71 +383,8 @@ Component({
     },
     retryAR() {
       if (this._contextLost) return;
-      this.startAR();
-    },
-    async fetchOrgStyle() {
-      const orgId = CONFIG.organizationId || "";
-      if (!orgId) return;
-      const styleKey = `config:org:${orgId}:textStyle:v1`;
-      const confettiKey = `config:org:${orgId}:confetti:v1`;
-      try {
-        // 接口只返回小程序会用到的 config 键（见 docs/miniapp-api.md）。
-        const { statusCode, data } = await fetchOrganizations([orgId]);
-        if (this._disposed) return;
-        if (statusCode === 200 && Array.isArray(data) && data.length > 0) {
-          const row = data[0];
-          const cfg =
-            row.config && typeof row.config === "object" ? row.config : {};
-          this._orgConfig = cfg;
-
-          // 文本样式：优先读 config.text_asset_miniapp_style，
-          // 回退到历史顶层列 text_asset_miniapp_style（兼容旧数据）。
-          const style =
-            (typeof cfg.text_asset_miniapp_style === "string" &&
-              cfg.text_asset_miniapp_style) ||
-            (typeof row.text_asset_miniapp_style === "string" &&
-              row.text_asset_miniapp_style) ||
-            "";
-          if (style) {
-            this._textAssetStyle = style;
-            try {
-              wx.setStorageSync(styleKey, style);
-            } catch (e) {
-              console.error("[orgStyle] Storage write failed", e);
-            }
-          }
-
-          // 彩带开关：来自 config.confetti_enabled
-          const confettiEnabled = cfg.confetti_enabled === true;
-          this._confettiEnabled = confettiEnabled;
-          try {
-            wx.setStorageSync(confettiKey, confettiEnabled);
-          } catch (e) {
-            console.error("[orgConfig] Storage write failed", e);
-          }
-          if (confettiEnabled) {
-            this._maybeStartConfetti();
-          } else {
-            this.stopRandomConfetti();
-          }
-
-          // Activity entry points are supplied by the activity discovery endpoint.
-          this.triggerEvent("orgconfigload", {
-            footerEnabled: cfg.footer_enabled,
-          });
-        } else {
-          console.warn(
-            "[orgConfig] unexpected response orgId=",
-            orgId,
-            "statusCode=",
-            statusCode,
-            "data=",
-            JSON.stringify(data),
-          );
-        }
-      } catch (e) {
-        console.error("[orgStyle] fetch failed", e);
-      }
+      if (!this._scenePreviewMode && !this._mapConfigReady) void this.loadMapConfig();
+      else this.startAR();
     },
   },
 });

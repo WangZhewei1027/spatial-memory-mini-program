@@ -196,6 +196,35 @@ async function main() {
   assert.equal(offlinePage.data.subtitle, sceneName);
   assert.equal(offlinePage.data.history.find((e) => e.kind === "Scene").label, sceneName);
 
+  // Team-only QR requires explicit selection; even one available map is not selected silently.
+  const maps = [{ id: MAP, organization_id: ORG, name: "河岸", config: { footer_enabled: true } }];
+  const chooserApp = launch(new Map(), { request(options) {
+    const url = new URL(options.url);
+    options.success({ statusCode: 200, data: url.pathname.endsWith("/workspaces") ? maps : [{ id: ORG, name: "Team", config: { footer_enabled: false } }] });
+  } });
+  const chooser = chooserApp.page("index");
+  await chooser.onLoad({ organizationId: ORG });
+  assert.equal(chooser.data.needsMap, true);
+  assert.equal(chooser.data.mapChoices.length, 1);
+  chooser.goToAR();
+  assert.equal(chooserApp.calls.navigations.length, 0);
+  assert.equal(chooser.data.showFooter, false);
+  chooser.onChooseMap({ detail: { value: "0" } }); await flush();
+  assert.equal(chooser.data.needsMap, false);
+  assert.equal(chooser.data.subtitle, "河岸");
+  assert.equal(chooser.data.showFooter, true, "home uses map watermark, never team config");
+  chooser.goToAR();
+  assert.match(chooserApp.calls.navigations[0], new RegExp(`workspaceId=${MAP}`));
+  const offlineTeam = launch(new Map([[CURRENT, { organizationId: ORG }]]));
+  const offlineChooser = offlineTeam.page("index"); await offlineChooser.onLoad({});
+  assert.equal(offlineChooser.data.needsMap, true); assert.ok(offlineChooser.data.mapsError);
+  offlineChooser.goToAR(); assert.equal(offlineTeam.calls.navigations.length, 0);
+  const emptyTeam = launch(new Map(), { request(options) { options.success({ statusCode: 200, data: [] }); } });
+  const emptyChooser = emptyTeam.page("index"); await emptyChooser.onLoad({ organizationId: ORG });
+  assert.equal(emptyChooser.data.mapChoices.length, 0); assert.equal(emptyChooser.data.mapsError, "");
+  emptyTeam.page("ar").onLoad({});
+  assert.match(emptyTeam.calls.redirects[0], /pages\/index\/index\?select=1/);
+
   // Denied/full storage must not stop an explicit Scene preview.
   const broken = launch(new Map(), {
     getStorageSync() { throw new Error("unavailable"); },

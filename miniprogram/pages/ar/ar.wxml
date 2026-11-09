@@ -10,7 +10,7 @@
     width="{{renderWidth}}"
     height="{{renderHeight}}"
     style="width:{{width}}px;height:{{height}}px;"
-    bind:orgconfigload="onOrgConfigLoad"
+    bind:mapconfigload="onMapConfigLoad"
     bind:activitiesload="onActivitiesLoad"
     bind:recognitionstatus="onRecognitionStatus"
     bind:asseterror="onAssetError"
@@ -20,7 +20,7 @@
   <view class="bottom-area">
 
     <!-- 店铺打卡组件（导航覆层 + 打卡弹窗 + 店铺列表） -->
-    <block wx:if="{{shopCheckinEnabled}}">
+    <block wx:if="{{mapConfigReady && shopCheckinEnabled}}">
       <shop-checkin
         id="shop-checkin"
         activities="{{shopActivities}}"
@@ -31,29 +31,24 @@
       />
     </block>
 
-    <view class="retrieval-panel">
-      <view class="retrieval-switch">
-        <button class="retrieval-option {{retrievalMode === 'gps' ? 'is-active' : ''}}" data-mode="gps" bindtap="onRetrievalModeChange" aria-label="GPS 直接过滤">GPS 直接过滤</button>
-        <button class="retrieval-option {{retrievalMode === 'anchor' ? 'is-active' : ''}}" data-mode="anchor" bindtap="onRetrievalModeChange" aria-label="匹配点识别">匹配点识别</button>
-      </view>
-      <text class="retrieval-status">{{retrievalMode === 'gps' ? '根据附近位置直接显示素材' : recognitionStatus}}</text>
-      <button wx:if="{{retrievalMode === 'anchor'}}" class="recognition-rescan-button" bindtap="onRescan" aria-label="重新扫描识别目标">重新扫描</button>
+    <view wx:if="{{(mapConfigReady && retrievalMode === 'anchor') || activitiesLoading || activitiesError}}" class="retrieval-panel">
+      <text wx:if="{{mapConfigReady && retrievalMode === 'anchor'}}" class="retrieval-status">{{recognitionStatus}}</text>
+      <button wx:if="{{mapConfigReady && retrievalMode === 'anchor'}}" class="recognition-rescan-button" bindtap="onRescan" aria-label="重新扫描识别目标">重新扫描</button>
       <text wx:if="{{activitiesLoading}}" class="activity-status">活动加载中…</text>
       <button wx:if="{{activitiesError}}" class="activity-retry" bindtap="refreshActivities">{{activitiesError}}</button>
     </view>
 
-    <view wx:if="{{activeDanmaku}}" class="activity-heading">
+    <view wx:if="{{mapConfigReady && retrievalMode === 'gps' && activeDanmaku}}" class="activity-heading">
       <picker wx:if="{{danmakuActivities.length > 1}}" range="{{danmakuActivities}}" range-key="display_name" value="{{selectedDanmakuIdx}}" disabled="{{isSubmitting}}" bindchange="onDanmakuActivityChange" aria-label="选择留言活动">
         <view class="activity-picker">{{activeDanmaku.display_name}} · 切换活动</view>
       </picker>
       <text wx:else>{{activeDanmaku.display_name}}</text>
-      <text wx:if="{{retrievalMode !== 'gps'}}" class="activity-status">切换到 GPS 模式后可留言</text>
-      <text wx:elif="{{!location}}" class="activity-status">等待定位后可留言</text>
+      <text wx:if="{{!location}}" class="activity-status">等待定位后可留言</text>
       <text wx:elif="{{!danmakuInRange}}" class="activity-status">进入活动范围后可留言</text>
     </view>
 
     <!-- 入口来自当前地图启用的活动投放。 -->
-    <view wx:if="{{activeDanmaku || shopCheckinEnabled}}" class="danmaku-bar">
+    <view wx:if="{{mapConfigReady && ((retrievalMode === 'gps' && activeDanmaku) || shopCheckinEnabled)}}" class="danmaku-bar">
 
       <!-- GPS 调试小窗（点灯泡开关） -->
       <view wx:if="{{showGpsDebug}}" class="gps-debug-pop">
@@ -70,7 +65,7 @@
         <view class="gps-dot {{location ? 'gps-ok' : 'gps-fail'}}"></view>
       </view>
       <input
-        wx:if="{{activeDanmaku}}"
+        wx:if="{{retrievalMode === 'gps' && activeDanmaku}}"
         class="danmaku-input"
         placeholder="发个弹幕到AR世界~"
         value="{{textContent}}"
@@ -81,7 +76,7 @@
         bindconfirm="submitText"
       />
       <view
-        wx:if="{{activeDanmaku}}"
+        wx:if="{{retrievalMode === 'gps' && activeDanmaku}}"
         class="danmaku-send {{canSubmit ? 'active' : ''}}"
         bindtap="submitText"
         aria-role="button"
@@ -90,8 +85,8 @@
       >
         <image class="send-icon" src="/assets/send.svg" mode="aspectFit" />
       </view>
-      <view wx:if="{{activeDanmaku && shopCheckinEnabled}}" class="bar-divider"></view>
-      <text wx:if="{{!activeDanmaku && shopCheckinEnabled}}" class="shop-activity-label">店铺打卡活动</text>
+      <view wx:if="{{retrievalMode === 'gps' && activeDanmaku && shopCheckinEnabled}}" class="bar-divider"></view>
+      <text wx:if="{{(retrievalMode !== 'gps' || !activeDanmaku) && shopCheckinEnabled}}" class="shop-activity-label">店铺打卡活动</text>
       <view wx:if="{{shopCheckinEnabled}}" class="shop-toggle {{showShopPanel ? 'shop-toggle-on' : ''}}" bindtap="toggleShopPanel" aria-role="button" aria-label="{{showShopPanel ? '收起打卡活动' : '打开打卡活动'}}">
         <image class="shop-toggle-icon" src="/assets/circle-check-big.svg" mode="aspectFit" />
       </view>

@@ -5,7 +5,7 @@
 ## 架构
 
 ```text
-pages/ar/ar（模式切换、状态、重新扫描）
+pages/ar/ar（地图配置就绪、识别状态、重新扫描）
   └─ components/xr-start（保留组件路径与业务队列）
        ├─ GPS / OSD / 素材容量与清场
        └─ lib/three-runtime/ARRuntime
@@ -27,7 +27,7 @@ pages/ar/ar（模式切换、状态、重新扫描）
 
 | 内容 | 实现 |
 | --- | --- |
-| 文字、气泡、头像 | 原生 Canvas 字形 RGBA、DataTexture 与程序化几何；中文、换行和 emoji 布局，保留组织样式 |
+| 文字、气泡、头像 | 原生 Canvas 字形 RGBA、DataTexture 与程序化几何；中文、换行和 emoji 布局，使用当前地图样式 |
 | 图片 | 原生下载与 Canvas.createImage 解码，按原比例展示 |
 | 模型 | GLTFLoader、SkeletonUtils 克隆、AnimationMixer；普通模型归一化，Scene 保留保存的局部变换 |
 | 音频 | 原生渐进播放与耳机模型；按 SLAM 相机位置计算距离衰减与近距离聚焦 |
@@ -39,6 +39,8 @@ pages/ar/ar（模式切换、状态、重新扫描）
 普通素材继续使用串行放置、分批揭示、容量桶与去重，按相机前向散布；识别模式停止斥力，保留内容世界位置。GPS 模式定期刷新内容，巨大模型仍使用 GPS/罗盘估算。
 
 ## 生命周期与兼容边界
+
+- 地图进入或从后台返回时先从 `/api/miniapp/workspaces?ids=…&organization_id=…` 加载完整配置，校验成功后才启动指定的 OSD/SLAM；慢响应、失败或无效配置都不能先启动默认 GPS。配置不读写本地 Storage，也不继承团队配置。独立 Scene 保持原有 SLAM 启动路径。
 
 - 隐藏/退出停止原生会话，取消识别，释放参考图、动态内容、媒体与迟到加载；显示页面建立新会话。
 - `ModelCache` 引用计数与 LRU 管理共享模板；实例只释放自己的 handle，模板由缓存物理释放。
