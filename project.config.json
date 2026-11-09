@@ -66,6 +66,18 @@
     ],
     "include": [
       {
+        "value": "labs/image-match/vendor/MEDIAPIPE-LICENSE.txt",
+        "type": "file"
+      },
+      {
+        "value": "labs/image-match/vendor/TEXT-ENCODING-LICENSE.txt",
+        "type": "file"
+      },
+      {
+        "value": "labs/image-match-wasm/vision.wasm.br",
+        "type": "file"
+      },
+      {
         "value": "assets/ar-plane-marker.glb",
         "type": "file"
       }

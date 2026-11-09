@@ -1,0 +1,36 @@
+<view class="page">
+  <text class="status">{{status}}</text>
+  <text wx:if="{{error}}" class="error" user-select>{{error}}</text>
+  <block wx:if="{{enabled}}">
+    <canvas id="inference-canvas" type="webgl2" class="inference" />
+    <button wx:if="{{!ready}}" size="mini" bindtap="initialize">重试加载</button>
+    <view class="camera" style="width:{{viewWidth}}px;height:{{viewHeight}}px">
+      <canvas id="camera-canvas" type="webgl2" style="width:{{viewWidth}}px;height:{{viewHeight}}px" />
+      <text wx:if="{{!cameraRunning}}" class="placeholder">相机未启动</text>
+    </view>
+    <view class="actions">
+      <button size="mini" disabled="{{!ready || busy || scanning}}" bindtap="chooseReferences">选择参考图</button>
+      <button size="mini" disabled="{{!ready || busy || scanning}}" bindtap="loadMapReferences">当前地图目标</button>
+    </view>
+    <text class="reference" wx:for="{{references}}" wx:key="id">{{item.name}}</text>
+    <view class="actions">
+      <button wx:if="{{!cameraRunning}}" size="mini" disabled="{{!ready || busy}}" bindtap="startCamera">启动相机</button>
+      <button wx:else size="mini" disabled="{{busy || scanning}}" bindtap="stopCamera">停止相机</button>
+      <button size="mini" type="primary" disabled="{{!cameraRunning || !references.length || busy}}" bindtap="toggleScan">{{scanning ? '停止匹配' : '开始匹配'}}</button>
+    </view>
+    <view wx:for="{{ranking}}" wx:key="id" class="rank"><text>{{item.name}}</text><text>{{item.scoreText}}</text></view>
+    <text class="hint">分数表示图像相似度，不代表识别概率。</text>
+    <view class="actions">
+      <button size="mini" disabled="{{!ready || busy || scanning || !cameraRunning}}" bindtap="benchmarkCamera">相机耗时对照</button>
+      <button size="mini" disabled="{{!ready || busy || scanning}}" bindtap="benchmarkFixture">合成图片自检</button>
+    </view>
+    <text class="hint">{{source}} {{progress}}</text>
+    <view class="result" wx:for="{{summary}}" wx:key="mode">
+      <text class="label">{{item.label}}</text>
+      <text>P50 {{item.p50}} ms · P95 {{item.p95}} ms</text>
+      <text>推理 {{item.infer}} ms · 预处理/编解码 {{item.prepare}} ms</text>
+      <text>与原图特征相似度 {{item.similarity}}</text>
+    </view>
+    <button wx:if="{{report}}" size="mini" bindtap="copyReport">复制完整报告</button>
+  </block>
+</view>

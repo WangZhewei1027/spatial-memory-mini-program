@@ -1,0 +1,1887 @@
+{
+  "schema": 1,
+  "source": "fixture",
+  "environment": {
+    "platform": "devtools",
+    "system": "iOS 10.0.1",
+    "model": "iPhone 12/13 (Pro)",
+    "SDKVersion": "3.17.4",
+    "version": "8.0.5"
+  },
+  "engine": {
+    "version": "0.10.21",
+    "simd": false,
+    "wasmBytes": 9448649,
+    "brotliBytes": 2029605,
+    "upstreamWasmSha256": "3821ea9b1f7fb8c549ef2a064ef5c85750bf375c545a49fd6eea0df44a95f1f4",
+    "wasmAdapter": "WASM memory.copy replaces Emscripten JS memcpy",
+    "adapterSha256": "13e4de1bae6abe8a29b0b3a705da005e12997cd43c265bbf6d9e085ee55f25a8",
+    "wasmSha256": "e4786dc239e7801d48db24d8aa1f17a5abe307541943685f33e8526de2fa6f0b",
+    "textCodec": "text-encoding@0.7.0 (scoped UTF-8 / UTF-16LE compatibility)",
+    "adapter": "scoped WXWebAssembly loader; original MediaPipe graph/model/inference",
+    "source": "https://github.com/google-ai-edge/mediapipe",
+    "license": "Apache-2.0"
+  },
+  "initializationMs": 534.06201171875,
+  "inputCheck": {
+    "distinctImageCosine": 0.2857501633136426,
+    "pixelStats": [
+      {
+        "min": 36,
+        "max": 228,
+        "mean": 131.63932291666666,
+        "stddev": 63.85232384964461,
+        "alphaMin": 255,
+        "samples": 1024
+      },
+      {
+        "min": 0,
+        "max": 255,
+        "mean": 127.5,
+        "stddev": 127.5,
+        "alphaMin": 255,
+        "samples": 1024
+      }
+    ]
+  },
+  "firstFramePixels": {
+    "min": 39,
+    "max": 228,
+    "mean": 133.99576822916666,
+    "stddev": 61.03662596060351,
+    "alphaMin": 255,
+    "samples": 1024
+  },
+  "clock": "cached wx.getPerformance, monotonic clamp for sub-ms devtools jitter",
+  "model": "mobilenet_v3_small/float32/1",
+  "rawSize": [
+    720,
+    1280
+  ],
+  "smallMaxEdge": 640,
+  "jpegQuality": 80,
+  "warmupPairs": 3,
+  "measuredPairs": 18,
+  "referenceCount": 1,
+  "firstFrameReference": true,
+  "note": "Total includes capture/copy, preprocessing, codec, synchronous inference and ranking; excludes frame wait and one-off model/reference loading. Scores are similarities, not probabilities. Fixture timings do not measure native camera calls.",
+  "summary": [
+    {
+      "mode": "rgba-full",
+      "samples": 18,
+      "captureMs": {
+        "p50": 4.005859375,
+        "p95": 10.862060546875
+      },
+      "prepareMs": {
+        "p50": 0.93115234375,
+        "p95": 1.053955078125
+      },
+      "encodeMs": {
+        "p50": 0,
+        "p95": 0
+      },
+      "decodeMs": {
+        "p50": 0,
+        "p95": 0
+      },
+      "preprocessMs": {
+        "p50": 0.93115234375,
+        "p95": 1.053955078125
+      },
+      "inferMs": {
+        "p50": 35.877197265625,
+        "p95": 45.851806640625
+      },
+      "rankMs": {
+        "p50": 0,
+        "p95": 1.090087890625
+      },
+      "totalMs": {
+        "p50": 40.935302734375,
+        "p95": 50.858642578125
+      },
+      "agreement": 1,
+      "embeddingCosineP50": 1
+    },
+    {
+      "mode": "rgba-small",
+      "samples": 18,
+      "captureMs": {
+        "p50": 2.947998046875,
+        "p95": 8.968017578125
+      },
+      "prepareMs": {
+        "p50": 0,
+        "p95": 1.06103515625
+      },
+      "encodeMs": {
+        "p50": 0,
+        "p95": 0
+      },
+      "decodeMs": {
+        "p50": 0,
+        "p95": 0
+      },
+      "preprocessMs": {
+        "p50": 0,
+        "p95": 1.06103515625
+      },
+      "inferMs": {
+        "p50": 30.826171875,
+        "p95": 35.909912109375
+      },
+      "rankMs": {
+        "p50": 0,
+        "p95": 0.083984375
+      },
+      "totalMs": {
+        "p50": 34.015625,
+        "p95": 37.853759765625
+      },
+      "agreement": 1,
+      "embeddingCosineP50": 0.9955467491756034
+    },
+    {
+      "mode": "jpeg-small",
+      "samples": 18,
+      "captureMs": {
+        "p50": 2.028076171875,
+        "p95": 7.8671875
+      },
+      "prepareMs": {
+        "p50": 0.014892578125,
+        "p95": 1
+      },
+      "encodeMs": {
+        "p50": 6.98291015625,
+        "p95": 10.906005859375
+      },
+      "decodeMs": {
+        "p50": 3.81591796875,
+        "p95": 4.109130859375
+      },
+      "preprocessMs": {
+        "p50": 10.845947265625,
+        "p95": 13.878662109375
+      },
+      "inferMs": {
+        "p50": 28.9169921875,
+        "p95": 42.007080078125
+      },
+      "rankMs": {
+        "p50": 0,
+        "p95": 0.87109375
+      },
+      "totalMs": {
+        "p50": 42.572998046875,
+        "p95": 56.904052734375
+      },
+      "agreement": 1,
+      "embeddingCosineP50": 0.9952495104840542
+    }
+  ],
+  "rows": [
+    {
+      "pair": 0,
+      "frameWaitMs": 0,
+      "mode": "rgba-full",
+      "warmup": true,
+      "width": 720,
+      "height": 1280,
+      "bytes": 3686400,
+      "converter": "visionkit-rgba",
+      "captureMs": 5.003173828125,
+      "prepareMs": 0.99609375,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 36.01708984375,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 1
+        }
+      ],
+      "preprocessMs": 0.99609375,
+      "totalMs": 42.016357421875,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 1
+    },
+    {
+      "pair": 0,
+      "frameWaitMs": 0,
+      "mode": "rgba-small",
+      "warmup": true,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba",
+      "captureMs": 15.02099609375,
+      "prepareMs": 0.970947265625,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 30.833984375,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9955467491756034
+        }
+      ],
+      "preprocessMs": 0.970947265625,
+      "totalMs": 46.825927734375,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9955467491756034
+    },
+    {
+      "pair": 0,
+      "frameWaitMs": 0,
+      "mode": "jpeg-small",
+      "warmup": true,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba-canvas-jpeg",
+      "captureMs": 2.886962890625,
+      "prepareMs": 0,
+      "encodeMs": 15.951171875,
+      "decodeMs": 4.890869140625,
+      "inferMs": 27.885986328125,
+      "rankMs": 0.005859375,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9952495104840542
+        }
+      ],
+      "preprocessMs": 20.842041015625,
+      "totalMs": 51.620849609375,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9952495104840542
+    },
+    {
+      "pair": 1,
+      "frameWaitMs": 0,
+      "mode": "rgba-small",
+      "warmup": true,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba",
+      "captureMs": 1.939208984375,
+      "prepareMs": 0,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 28.008056640625,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9955467491756034
+        }
+      ],
+      "preprocessMs": 0,
+      "totalMs": 29.947265625,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9955467491756034
+    },
+    {
+      "pair": 1,
+      "frameWaitMs": 0,
+      "mode": "jpeg-small",
+      "warmup": true,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba-canvas-jpeg",
+      "captureMs": 1.953125,
+      "prepareMs": 0.926025390625,
+      "encodeMs": 9.011962890625,
+      "decodeMs": 2.958984375,
+      "inferMs": 28.0908203125,
+      "rankMs": 0.004150390625,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9952495104840542
+        }
+      ],
+      "preprocessMs": 12.89697265625,
+      "totalMs": 42.945068359375,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9952495104840542
+    },
+    {
+      "pair": 1,
+      "frameWaitMs": 0,
+      "mode": "rgba-full",
+      "warmup": true,
+      "width": 720,
+      "height": 1280,
+      "bytes": 3686400,
+      "converter": "visionkit-rgba",
+      "captureMs": 3.826904296875,
+      "prepareMs": 1.0048828125,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 40.875,
+      "rankMs": 0.043212890625,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 1
+        }
+      ],
+      "preprocessMs": 1.0048828125,
+      "totalMs": 45.75,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 1
+    },
+    {
+      "pair": 2,
+      "frameWaitMs": 0,
+      "mode": "jpeg-small",
+      "warmup": true,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba-canvas-jpeg",
+      "captureMs": 1.97802734375,
+      "prepareMs": 0,
+      "encodeMs": 13.925048828125,
+      "decodeMs": 4.908935546875,
+      "inferMs": 31.009033203125,
+      "rankMs": 0.0810546875,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9952495104840542
+        }
+      ],
+      "preprocessMs": 18.833984375,
+      "totalMs": 51.902099609375,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9952495104840542
+    },
+    {
+      "pair": 2,
+      "frameWaitMs": 0,
+      "mode": "rgba-full",
+      "warmup": true,
+      "width": 720,
+      "height": 1280,
+      "bytes": 3686400,
+      "converter": "visionkit-rgba",
+      "captureMs": 2.893798828125,
+      "prepareMs": 0.965087890625,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 36.931884765625,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 1
+        }
+      ],
+      "preprocessMs": 0.965087890625,
+      "totalMs": 40.790771484375,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 1
+    },
+    {
+      "pair": 2,
+      "frameWaitMs": 0,
+      "mode": "rgba-small",
+      "warmup": true,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba",
+      "captureMs": 2.151123046875,
+      "prepareMs": 0.9169921875,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 30.9560546875,
+      "rankMs": 0.01904296875,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9955467491756034
+        }
+      ],
+      "preprocessMs": 0.9169921875,
+      "totalMs": 34.043212890625,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9955467491756034
+    },
+    {
+      "pair": 3,
+      "frameWaitMs": 0,
+      "mode": "rgba-full",
+      "warmup": false,
+      "width": 720,
+      "height": 1280,
+      "bytes": 3686400,
+      "converter": "visionkit-rgba",
+      "captureMs": 5.97607421875,
+      "prepareMs": 0.968994140625,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 35.994140625,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 1
+        }
+      ],
+      "preprocessMs": 0.968994140625,
+      "totalMs": 42.939208984375,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 1
+    },
+    {
+      "pair": 3,
+      "frameWaitMs": 0,
+      "mode": "rgba-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba",
+      "captureMs": 1.9111328125,
+      "prepareMs": 0.02197265625,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 32.923095703125,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9955467491756034
+        }
+      ],
+      "preprocessMs": 0.02197265625,
+      "totalMs": 34.856201171875,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9955467491756034
+    },
+    {
+      "pair": 3,
+      "frameWaitMs": 0,
+      "mode": "jpeg-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba-canvas-jpeg",
+      "captureMs": 2.044921875,
+      "prepareMs": 0.02685546875,
+      "encodeMs": 10.906005859375,
+      "decodeMs": 2.94580078125,
+      "inferMs": 27.0791015625,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9952495104840542
+        }
+      ],
+      "preprocessMs": 13.878662109375,
+      "totalMs": 43.002685546875,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9952495104840542
+    },
+    {
+      "pair": 4,
+      "frameWaitMs": 0,
+      "mode": "rgba-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba",
+      "captureMs": 3.010009765625,
+      "prepareMs": 0,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 27.986083984375,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9955467491756034
+        }
+      ],
+      "preprocessMs": 0,
+      "totalMs": 30.99609375,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9955467491756034
+    },
+    {
+      "pair": 4,
+      "frameWaitMs": 0,
+      "mode": "jpeg-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba-canvas-jpeg",
+      "captureMs": 0.8740234375,
+      "prepareMs": 0.060791015625,
+      "encodeMs": 6.878173828125,
+      "decodeMs": 2.970947265625,
+      "inferMs": 27.093994140625,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9952495104840542
+        }
+      ],
+      "preprocessMs": 9.909912109375,
+      "totalMs": 37.8779296875,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9952495104840542
+    },
+    {
+      "pair": 4,
+      "frameWaitMs": 0,
+      "mode": "rgba-full",
+      "warmup": false,
+      "width": 720,
+      "height": 1280,
+      "bytes": 3686400,
+      "converter": "visionkit-rgba",
+      "captureMs": 4.98388671875,
+      "prepareMs": 1.02587890625,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 34.008056640625,
+      "rankMs": 0.908935546875,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 1
+        }
+      ],
+      "preprocessMs": 1.02587890625,
+      "totalMs": 40.9267578125,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 1
+    },
+    {
+      "pair": 5,
+      "frameWaitMs": 0,
+      "mode": "jpeg-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba-canvas-jpeg",
+      "captureMs": 2.89599609375,
+      "prepareMs": 0.06005859375,
+      "encodeMs": 6.919921875,
+      "decodeMs": 2.89794921875,
+      "inferMs": 30.00390625,
+      "rankMs": 0.06005859375,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9952495104840542
+        }
+      ],
+      "preprocessMs": 9.8779296875,
+      "totalMs": 42.837890625,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9952495104840542
+    },
+    {
+      "pair": 5,
+      "frameWaitMs": 0,
+      "mode": "rgba-full",
+      "warmup": false,
+      "width": 720,
+      "height": 1280,
+      "bytes": 3686400,
+      "converter": "visionkit-rgba",
+      "captureMs": 3.906982421875,
+      "prepareMs": 0.09521484375,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 34.9189453125,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 1
+        }
+      ],
+      "preprocessMs": 0.09521484375,
+      "totalMs": 38.921142578125,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 1
+    },
+    {
+      "pair": 5,
+      "frameWaitMs": 0,
+      "mode": "rgba-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba",
+      "captureMs": 1.906982421875,
+      "prepareMs": 0,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 31.91796875,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9955467491756034
+        }
+      ],
+      "preprocessMs": 0,
+      "totalMs": 33.824951171875,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9955467491756034
+    },
+    {
+      "pair": 6,
+      "frameWaitMs": 0,
+      "mode": "rgba-full",
+      "warmup": false,
+      "width": 720,
+      "height": 1280,
+      "bytes": 3686400,
+      "converter": "visionkit-rgba",
+      "captureMs": 5.032958984375,
+      "prepareMs": 0,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 35.10107421875,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 1
+        }
+      ],
+      "preprocessMs": 0,
+      "totalMs": 40.134033203125,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 1
+    },
+    {
+      "pair": 6,
+      "frameWaitMs": 0,
+      "mode": "rgba-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba",
+      "captureMs": 1.93896484375,
+      "prepareMs": 0.919921875,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 33.031005859375,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9955467491756034
+        }
+      ],
+      "preprocessMs": 0.919921875,
+      "totalMs": 35.889892578125,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9955467491756034
+    },
+    {
+      "pair": 6,
+      "frameWaitMs": 0,
+      "mode": "jpeg-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba-canvas-jpeg",
+      "captureMs": 1.93896484375,
+      "prepareMs": 0.9150390625,
+      "encodeMs": 7.875,
+      "decodeMs": 4.109130859375,
+      "inferMs": 27.078857421875,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9952495104840542
+        }
+      ],
+      "preprocessMs": 12.899169921875,
+      "totalMs": 41.9169921875,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9952495104840542
+    },
+    {
+      "pair": 7,
+      "frameWaitMs": 0,
+      "mode": "rgba-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba",
+      "captureMs": 3.010009765625,
+      "prepareMs": 0.073974609375,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 27.916015625,
+      "rankMs": 0.0830078125,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9955467491756034
+        }
+      ],
+      "preprocessMs": 0.073974609375,
+      "totalMs": 31.0830078125,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9955467491756034
+    },
+    {
+      "pair": 7,
+      "frameWaitMs": 0,
+      "mode": "jpeg-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba-canvas-jpeg",
+      "captureMs": 1.85009765625,
+      "prepareMs": 0,
+      "encodeMs": 6.89990234375,
+      "decodeMs": 3.89794921875,
+      "inferMs": 28.912109375,
+      "rankMs": 0.135986328125,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9952495104840542
+        }
+      ],
+      "preprocessMs": 10.7978515625,
+      "totalMs": 41.696044921875,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9952495104840542
+    },
+    {
+      "pair": 7,
+      "frameWaitMs": 0,
+      "mode": "rgba-full",
+      "warmup": false,
+      "width": 720,
+      "height": 1280,
+      "bytes": 3686400,
+      "converter": "visionkit-rgba",
+      "captureMs": 3.109130859375,
+      "prepareMs": 0.93115234375,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 38.89990234375,
+      "rankMs": 0.048095703125,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 1
+        }
+      ],
+      "preprocessMs": 0.93115234375,
+      "totalMs": 42.98828125,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 1
+    },
+    {
+      "pair": 8,
+      "frameWaitMs": 0,
+      "mode": "jpeg-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba-canvas-jpeg",
+      "captureMs": 4.991943359375,
+      "prepareMs": 0,
+      "encodeMs": 6.9150390625,
+      "decodeMs": 2.969970703125,
+      "inferMs": 30.09912109375,
+      "rankMs": 0.0419921875,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9952495104840542
+        }
+      ],
+      "preprocessMs": 9.885009765625,
+      "totalMs": 45.01806640625,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9952495104840542
+    },
+    {
+      "pair": 8,
+      "frameWaitMs": 0,
+      "mode": "rgba-full",
+      "warmup": false,
+      "width": 720,
+      "height": 1280,
+      "bytes": 3686400,
+      "converter": "visionkit-rgba",
+      "captureMs": 4.005859375,
+      "prepareMs": 0.87890625,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 33.001953125,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 1
+        }
+      ],
+      "preprocessMs": 0.87890625,
+      "totalMs": 37.88671875,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 1
+    },
+    {
+      "pair": 8,
+      "frameWaitMs": 0,
+      "mode": "rgba-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba",
+      "captureMs": 2.024169921875,
+      "prepareMs": 0,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 30.998046875,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9955467491756034
+        }
+      ],
+      "preprocessMs": 0,
+      "totalMs": 33.022216796875,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9955467491756034
+    },
+    {
+      "pair": 9,
+      "frameWaitMs": 0,
+      "mode": "rgba-full",
+      "warmup": false,
+      "width": 720,
+      "height": 1280,
+      "bytes": 3686400,
+      "converter": "visionkit-rgba",
+      "captureMs": 5.12890625,
+      "prepareMs": 1.025146484375,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 33.905029296875,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 1
+        }
+      ],
+      "preprocessMs": 1.025146484375,
+      "totalMs": 40.05908203125,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 1
+    },
+    {
+      "pair": 9,
+      "frameWaitMs": 0,
+      "mode": "rgba-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba",
+      "captureMs": 2.951904296875,
+      "prepareMs": 1.06103515625,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 30.032958984375,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9955467491756034
+        }
+      ],
+      "preprocessMs": 1.06103515625,
+      "totalMs": 34.0458984375,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9955467491756034
+    },
+    {
+      "pair": 9,
+      "frameWaitMs": 0,
+      "mode": "jpeg-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba-canvas-jpeg",
+      "captureMs": 2.85107421875,
+      "prepareMs": 0.846923828125,
+      "encodeMs": 5.962890625,
+      "decodeMs": 3.107177734375,
+      "inferMs": 26.9541015625,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9952495104840542
+        }
+      ],
+      "preprocessMs": 9.9169921875,
+      "totalMs": 39.72216796875,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9952495104840542
+    },
+    {
+      "pair": 10,
+      "frameWaitMs": 0,
+      "mode": "rgba-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba",
+      "captureMs": 8.968017578125,
+      "prepareMs": 0,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 27.97705078125,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9955467491756034
+        }
+      ],
+      "preprocessMs": 0,
+      "totalMs": 36.945068359375,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9955467491756034
+    },
+    {
+      "pair": 10,
+      "frameWaitMs": 0,
+      "mode": "jpeg-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba-canvas-jpeg",
+      "captureMs": 1.928955078125,
+      "prepareMs": 0.014892578125,
+      "encodeMs": 9.028076171875,
+      "decodeMs": 4.010986328125,
+      "inferMs": 31.93408203125,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9952495104840542
+        }
+      ],
+      "preprocessMs": 13.053955078125,
+      "totalMs": 46.9169921875,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9952495104840542
+    },
+    {
+      "pair": 10,
+      "frameWaitMs": 0,
+      "mode": "rgba-full",
+      "warmup": false,
+      "width": 720,
+      "height": 1280,
+      "bytes": 3686400,
+      "converter": "visionkit-rgba",
+      "captureMs": 3.8759765625,
+      "prepareMs": 1.053955078125,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 37.93505859375,
+      "rankMs": 0.889892578125,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 1
+        }
+      ],
+      "preprocessMs": 1.053955078125,
+      "totalMs": 43.7548828125,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 1
+    },
+    {
+      "pair": 11,
+      "frameWaitMs": 0,
+      "mode": "jpeg-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba-canvas-jpeg",
+      "captureMs": 1.842041015625,
+      "prepareMs": 0.132080078125,
+      "encodeMs": 6.98291015625,
+      "decodeMs": 2.873046875,
+      "inferMs": 30.050048828125,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9952495104840542
+        }
+      ],
+      "preprocessMs": 9.988037109375,
+      "totalMs": 41.880126953125,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9952495104840542
+    },
+    {
+      "pair": 11,
+      "frameWaitMs": 0,
+      "mode": "rgba-full",
+      "warmup": false,
+      "width": 720,
+      "height": 1280,
+      "bytes": 3686400,
+      "converter": "visionkit-rgba",
+      "captureMs": 4.047119140625,
+      "prepareMs": 1.010986328125,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 35.877197265625,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 1
+        }
+      ],
+      "preprocessMs": 1.010986328125,
+      "totalMs": 40.935302734375,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 1
+    },
+    {
+      "pair": 11,
+      "frameWaitMs": 0,
+      "mode": "rgba-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba",
+      "captureMs": 1.826904296875,
+      "prepareMs": 0,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 30.833984375,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9955467491756034
+        }
+      ],
+      "preprocessMs": 0,
+      "totalMs": 32.660888671875,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9955467491756034
+    },
+    {
+      "pair": 12,
+      "frameWaitMs": 0,
+      "mode": "rgba-full",
+      "warmup": false,
+      "width": 720,
+      "height": 1280,
+      "bytes": 3686400,
+      "converter": "visionkit-rgba",
+      "captureMs": 3.9189453125,
+      "prepareMs": 0.83984375,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 35.845947265625,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 1
+        }
+      ],
+      "preprocessMs": 0.83984375,
+      "totalMs": 40.604736328125,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 1
+    },
+    {
+      "pair": 12,
+      "frameWaitMs": 0,
+      "mode": "rgba-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba",
+      "captureMs": 1.87890625,
+      "prepareMs": 0,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 35.909912109375,
+      "rankMs": 0.06494140625,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9955467491756034
+        }
+      ],
+      "preprocessMs": 0,
+      "totalMs": 37.853759765625,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9955467491756034
+    },
+    {
+      "pair": 12,
+      "frameWaitMs": 0,
+      "mode": "jpeg-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba-canvas-jpeg",
+      "captureMs": 2.01318359375,
+      "prepareMs": 0,
+      "encodeMs": 6.97705078125,
+      "decodeMs": 4.011962890625,
+      "inferMs": 29.052978515625,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9952495104840542
+        }
+      ],
+      "preprocessMs": 10.989013671875,
+      "totalMs": 42.05517578125,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9952495104840542
+    },
+    {
+      "pair": 13,
+      "frameWaitMs": 0,
+      "mode": "rgba-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba",
+      "captureMs": 2.0400390625,
+      "prepareMs": 0.031005859375,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 29.85693359375,
+      "rankMs": 0.02587890625,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9955467491756034
+        }
+      ],
+      "preprocessMs": 0.031005859375,
+      "totalMs": 31.953857421875,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9955467491756034
+    },
+    {
+      "pair": 13,
+      "frameWaitMs": 0,
+      "mode": "jpeg-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba-canvas-jpeg",
+      "captureMs": 1.8330078125,
+      "prepareMs": 0,
+      "encodeMs": 8.823974609375,
+      "decodeMs": 4.053955078125,
+      "inferMs": 26.990966796875,
+      "rankMs": 0.87109375,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9952495104840542
+        }
+      ],
+      "preprocessMs": 12.8779296875,
+      "totalMs": 42.572998046875,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9952495104840542
+    },
+    {
+      "pair": 13,
+      "frameWaitMs": 0,
+      "mode": "rgba-full",
+      "warmup": false,
+      "width": 720,
+      "height": 1280,
+      "bytes": 3686400,
+      "converter": "visionkit-rgba",
+      "captureMs": 3.963134765625,
+      "prepareMs": 0,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 40.997802734375,
+      "rankMs": 1.068115234375,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 1
+        }
+      ],
+      "preprocessMs": 0,
+      "totalMs": 46.029052734375,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 1
+    },
+    {
+      "pair": 14,
+      "frameWaitMs": 0,
+      "mode": "jpeg-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba-canvas-jpeg",
+      "captureMs": 2.9189453125,
+      "prepareMs": 0,
+      "encodeMs": 7.923095703125,
+      "decodeMs": 4.053955078125,
+      "inferMs": 42.007080078125,
+      "rankMs": 0.0009765625,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9952495104840542
+        }
+      ],
+      "preprocessMs": 11.97705078125,
+      "totalMs": 56.904052734375,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9952495104840542
+    },
+    {
+      "pair": 14,
+      "frameWaitMs": 0,
+      "mode": "rgba-full",
+      "warmup": false,
+      "width": 720,
+      "height": 1280,
+      "bytes": 3686400,
+      "converter": "visionkit-rgba",
+      "captureMs": 4.0048828125,
+      "prepareMs": 1.001953125,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 45.851806640625,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 1
+        }
+      ],
+      "preprocessMs": 1.001953125,
+      "totalMs": 50.858642578125,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 1
+    },
+    {
+      "pair": 14,
+      "frameWaitMs": 0,
+      "mode": "rgba-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba",
+      "captureMs": 2.947998046875,
+      "prepareMs": 0,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 32.898193359375,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9955467491756034
+        }
+      ],
+      "preprocessMs": 0,
+      "totalMs": 35.84619140625,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9955467491756034
+    },
+    {
+      "pair": 15,
+      "frameWaitMs": 0,
+      "mode": "rgba-full",
+      "warmup": false,
+      "width": 720,
+      "height": 1280,
+      "bytes": 3686400,
+      "converter": "visionkit-rgba",
+      "captureMs": 3.927978515625,
+      "prepareMs": 0.946044921875,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 34.89306640625,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 1
+        }
+      ],
+      "preprocessMs": 0.946044921875,
+      "totalMs": 39.76708984375,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 1
+    },
+    {
+      "pair": 15,
+      "frameWaitMs": 0,
+      "mode": "rgba-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba",
+      "captureMs": 4.04296875,
+      "prepareMs": 0,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 30.826171875,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9955467491756034
+        }
+      ],
+      "preprocessMs": 0,
+      "totalMs": 34.869140625,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9955467491756034
+    },
+    {
+      "pair": 15,
+      "frameWaitMs": 0,
+      "mode": "jpeg-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba-canvas-jpeg",
+      "captureMs": 7.8671875,
+      "prepareMs": 0.0478515625,
+      "encodeMs": 9.8681640625,
+      "decodeMs": 3.0849609375,
+      "inferMs": 28.9169921875,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9952495104840542
+        }
+      ],
+      "preprocessMs": 13.0009765625,
+      "totalMs": 49.78515625,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9952495104840542
+    },
+    {
+      "pair": 16,
+      "frameWaitMs": 0,
+      "mode": "rgba-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba",
+      "captureMs": 5.94091796875,
+      "prepareMs": 0.05908203125,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 27.996826171875,
+      "rankMs": 0.018798828125,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9955467491756034
+        }
+      ],
+      "preprocessMs": 0.05908203125,
+      "totalMs": 34.015625,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9955467491756034
+    },
+    {
+      "pair": 16,
+      "frameWaitMs": 0,
+      "mode": "jpeg-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba-canvas-jpeg",
+      "captureMs": 2.028076171875,
+      "prepareMs": 1,
+      "encodeMs": 6.022216796875,
+      "decodeMs": 3.81591796875,
+      "inferMs": 26.990966796875,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9952495104840542
+        }
+      ],
+      "preprocessMs": 10.838134765625,
+      "totalMs": 39.857177734375,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9952495104840542
+    },
+    {
+      "pair": 16,
+      "frameWaitMs": 0,
+      "mode": "rgba-full",
+      "warmup": false,
+      "width": 720,
+      "height": 1280,
+      "bytes": 3686400,
+      "converter": "visionkit-rgba",
+      "captureMs": 10.862060546875,
+      "prepareMs": 0.9580078125,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 36.903076171875,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 1
+        }
+      ],
+      "preprocessMs": 0.9580078125,
+      "totalMs": 48.72314453125,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 1
+    },
+    {
+      "pair": 17,
+      "frameWaitMs": 0,
+      "mode": "jpeg-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba-canvas-jpeg",
+      "captureMs": 1.958984375,
+      "prepareMs": 0,
+      "encodeMs": 6.989013671875,
+      "decodeMs": 3.0029296875,
+      "inferMs": 34.015869140625,
+      "rankMs": 0.01904296875,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9952495104840542
+        }
+      ],
+      "preprocessMs": 9.991943359375,
+      "totalMs": 45.98583984375,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9952495104840542
+    },
+    {
+      "pair": 17,
+      "frameWaitMs": 0,
+      "mode": "rgba-full",
+      "warmup": false,
+      "width": 720,
+      "height": 1280,
+      "bytes": 3686400,
+      "converter": "visionkit-rgba",
+      "captureMs": 4.0439453125,
+      "prepareMs": 0,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 38.06884765625,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 1
+        }
+      ],
+      "preprocessMs": 0,
+      "totalMs": 42.11279296875,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 1
+    },
+    {
+      "pair": 17,
+      "frameWaitMs": 0,
+      "mode": "rgba-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba",
+      "captureMs": 3.822998046875,
+      "prepareMs": 0,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 30.9169921875,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9955467491756034
+        }
+      ],
+      "preprocessMs": 0,
+      "totalMs": 34.739990234375,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9955467491756034
+    },
+    {
+      "pair": 18,
+      "frameWaitMs": 0,
+      "mode": "rgba-full",
+      "warmup": false,
+      "width": 720,
+      "height": 1280,
+      "bytes": 3686400,
+      "converter": "visionkit-rgba",
+      "captureMs": 6.031982421875,
+      "prepareMs": 0.97509765625,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 35.947998046875,
+      "rankMs": 0.052001953125,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 1
+        }
+      ],
+      "preprocessMs": 0.97509765625,
+      "totalMs": 43.007080078125,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 1
+    },
+    {
+      "pair": 18,
+      "frameWaitMs": 0,
+      "mode": "rgba-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba",
+      "captureMs": 1.966064453125,
+      "prepareMs": 0,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 28.909912109375,
+      "rankMs": 0.083984375,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9955467491756034
+        }
+      ],
+      "preprocessMs": 0,
+      "totalMs": 30.9599609375,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9955467491756034
+    },
+    {
+      "pair": 18,
+      "frameWaitMs": 0,
+      "mode": "jpeg-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba-canvas-jpeg",
+      "captureMs": 5.927001953125,
+      "prepareMs": 0.955078125,
+      "encodeMs": 7.06494140625,
+      "decodeMs": 4.026123046875,
+      "inferMs": 27.1162109375,
+      "rankMs": 0.02685546875,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9952495104840542
+        }
+      ],
+      "preprocessMs": 12.046142578125,
+      "totalMs": 45.1162109375,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9952495104840542
+    },
+    {
+      "pair": 19,
+      "frameWaitMs": 0,
+      "mode": "rgba-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba",
+      "captureMs": 5.880859375,
+      "prepareMs": 0.02001953125,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 26.85498046875,
+      "rankMs": 0.02392578125,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9955467491756034
+        }
+      ],
+      "preprocessMs": 0.02001953125,
+      "totalMs": 32.77978515625,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9955467491756034
+    },
+    {
+      "pair": 19,
+      "frameWaitMs": 0,
+      "mode": "jpeg-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba-canvas-jpeg",
+      "captureMs": 2.125,
+      "prepareMs": 0,
+      "encodeMs": 6.84912109375,
+      "decodeMs": 3.996826171875,
+      "inferMs": 29.010986328125,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9952495104840542
+        }
+      ],
+      "preprocessMs": 10.845947265625,
+      "totalMs": 41.98193359375,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9952495104840542
+    },
+    {
+      "pair": 19,
+      "frameWaitMs": 0,
+      "mode": "rgba-full",
+      "warmup": false,
+      "width": 720,
+      "height": 1280,
+      "bytes": 3686400,
+      "converter": "visionkit-rgba",
+      "captureMs": 4.87890625,
+      "prepareMs": 0.89794921875,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 35.8798828125,
+      "rankMs": 1.090087890625,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 1
+        }
+      ],
+      "preprocessMs": 0.89794921875,
+      "totalMs": 42.746826171875,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 1
+    },
+    {
+      "pair": 20,
+      "frameWaitMs": 0,
+      "mode": "jpeg-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba-canvas-jpeg",
+      "captureMs": 2.997802734375,
+      "prepareMs": 0,
+      "encodeMs": 8.90087890625,
+      "decodeMs": 4.072021484375,
+      "inferMs": 31.06689453125,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9952495104840542
+        }
+      ],
+      "preprocessMs": 12.972900390625,
+      "totalMs": 47.03759765625,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9952495104840542
+    },
+    {
+      "pair": 20,
+      "frameWaitMs": 0,
+      "mode": "rgba-full",
+      "warmup": false,
+      "width": 720,
+      "height": 1280,
+      "bytes": 3686400,
+      "converter": "visionkit-rgba",
+      "captureMs": 3.941162109375,
+      "prepareMs": 0,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 31.93896484375,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 1
+        }
+      ],
+      "preprocessMs": 0,
+      "totalMs": 35.880126953125,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 1
+    },
+    {
+      "pair": 20,
+      "frameWaitMs": 0,
+      "mode": "rgba-small",
+      "warmup": false,
+      "width": 352,
+      "height": 626,
+      "bytes": 881408,
+      "converter": "visionkit-rgba",
+      "captureMs": 4.01806640625,
+      "prepareMs": 0.009033203125,
+      "encodeMs": 0,
+      "decodeMs": 0,
+      "inferMs": 31.948974609375,
+      "rankMs": 0,
+      "top": [
+        {
+          "id": "first-frame",
+          "name": "首帧（仅耗时对照）",
+          "score": 0.9955467491756034
+        }
+      ],
+      "preprocessMs": 0.009033203125,
+      "totalMs": 35.97607421875,
+      "sameTopAsRaw": true,
+      "embeddingCosineToRaw": 0.9955467491756034
+    }
+  ]
+}

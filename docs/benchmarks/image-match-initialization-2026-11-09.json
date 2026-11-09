@@ -1,0 +1,418 @@
+{
+  "date": "2026-11-09",
+  "note": "Device elapsed times are in detail.ms, not server receive intervals. SIMD camera timings are invalid because its distinct-image check fails. These are observations of this device/runtime combination, not all iOS or SIMD implementations.",
+  "cases": [
+    {
+      "name": "upstream-simd",
+      "sourceFile": "events-1794194202234-cd8a04.jsonl",
+      "environment": {
+        "platform": "ios",
+        "system": "iOS 26.6.2",
+        "model": "iPhone 15 pro<iPhone16,1>",
+        "SDKVersion": "3.17.6",
+        "version": "8.0.80"
+      },
+      "events": [
+        {
+          "event": "wasm-package",
+          "detail": {
+            "ms": 18.0859375,
+            "version": "0.10.21",
+            "wasmBytes": 9574032,
+            "brotliBytes": 2037207,
+            "adapterSha256": "a68587b8584bc264383681ca857103c6713eebf8a23a439a7587a620eee56ce6",
+            "wasmSha256": "f00ec4731faa23b3e714d00e88d4d10e2df5c0a427d3a2b4ae6e3526fdd14ef7",
+            "textCodec": "text-encoding@0.7.0 (scoped UTF-8 / UTF-16LE compatibility)",
+            "adapter": "scoped WXWebAssembly loader; original MediaPipe graph/model/inference",
+            "source": "https://github.com/google-ai-edge/mediapipe",
+            "license": "Apache-2.0"
+          }
+        },
+        {
+          "event": "wasm-constructors-start",
+          "detail": {
+            "ms": 372.5439453125
+          }
+        },
+        {
+          "event": "wasm-constructors-end",
+          "detail": {
+            "ms": 79391.03491210938
+          }
+        },
+        {
+          "event": "engine-ready",
+          "detail": {
+            "ms": 136574.93896484375,
+            "runtime": "MediaPipe 0.10.21 / WXWebAssembly / CPU"
+          }
+        },
+        {
+          "event": "wasm-package",
+          "detail": {
+            "ms": 9.037841796875,
+            "version": "0.10.21",
+            "wasmBytes": 9574032,
+            "brotliBytes": 2037207,
+            "adapterSha256": "a68587b8584bc264383681ca857103c6713eebf8a23a439a7587a620eee56ce6",
+            "wasmSha256": "f00ec4731faa23b3e714d00e88d4d10e2df5c0a427d3a2b4ae6e3526fdd14ef7",
+            "textCodec": "text-encoding@0.7.0 (scoped UTF-8 / UTF-16LE compatibility)",
+            "adapter": "scoped WXWebAssembly loader; original MediaPipe graph/model/inference",
+            "source": "https://github.com/google-ai-edge/mediapipe",
+            "license": "Apache-2.0"
+          }
+        },
+        {
+          "event": "wasm-constructors-start",
+          "detail": {
+            "ms": 356.432861328125
+          }
+        },
+        {
+          "event": "wasm-constructors-end",
+          "detail": {
+            "ms": 85481.32983398438
+          }
+        },
+        {
+          "event": "engine-ready",
+          "detail": {
+            "ms": 143728.01684570312,
+            "runtime": "MediaPipe 0.10.21 / WXWebAssembly / CPU"
+          }
+        },
+        {
+          "event": "wasm-package",
+          "detail": {
+            "ms": 13.39990234375,
+            "version": "0.10.21",
+            "wasmBytes": 9574032,
+            "brotliBytes": 2037207,
+            "adapterSha256": "a68587b8584bc264383681ca857103c6713eebf8a23a439a7587a620eee56ce6",
+            "wasmSha256": "f00ec4731faa23b3e714d00e88d4d10e2df5c0a427d3a2b4ae6e3526fdd14ef7",
+            "textCodec": "text-encoding@0.7.0 (scoped UTF-8 / UTF-16LE compatibility)",
+            "adapter": "scoped WXWebAssembly loader; original MediaPipe graph/model/inference",
+            "source": "https://github.com/google-ai-edge/mediapipe",
+            "license": "Apache-2.0"
+          }
+        },
+        {
+          "event": "wasm-constructors-start",
+          "detail": {
+            "ms": 456.683837890625
+          }
+        },
+        {
+          "event": "wasm-constructors-end",
+          "detail": {
+            "ms": 79451.248046875
+          }
+        },
+        {
+          "event": "engine-ready",
+          "detail": {
+            "ms": 136990.85400390625,
+            "runtime": "MediaPipe 0.10.21 / WXWebAssembly / CPU"
+          }
+        },
+        {
+          "event": "wasm-package",
+          "detail": {
+            "ms": 15.315185546875,
+            "version": "0.10.21",
+            "wasmBytes": 9574032,
+            "brotliBytes": 2037207,
+            "adapterSha256": "a68587b8584bc264383681ca857103c6713eebf8a23a439a7587a620eee56ce6",
+            "wasmSha256": "f00ec4731faa23b3e714d00e88d4d10e2df5c0a427d3a2b4ae6e3526fdd14ef7",
+            "textCodec": "text-encoding@0.7.0 (scoped UTF-8 / UTF-16LE compatibility)",
+            "adapter": "scoped WXWebAssembly loader; original MediaPipe graph/model/inference",
+            "source": "https://github.com/google-ai-edge/mediapipe",
+            "license": "Apache-2.0"
+          }
+        },
+        {
+          "event": "wasm-constructors-start",
+          "detail": {
+            "ms": 269.226806640625
+          }
+        },
+        {
+          "event": "wasm-constructors-end",
+          "detail": {
+            "ms": 95705.7109375
+          }
+        },
+        {
+          "event": "engine-ready",
+          "detail": {
+            "ms": 176161.30908203125,
+            "runtime": "MediaPipe 0.10.21 / WXWebAssembly / CPU"
+          }
+        }
+      ]
+    },
+    {
+      "name": "memory-copy-simd",
+      "sourceFile": "events-1794195096765-35fce6.jsonl",
+      "environment": {
+        "platform": "ios",
+        "system": "iOS 26.6.2",
+        "model": "iPhone 15 pro<iPhone16,1>",
+        "SDKVersion": "3.17.6",
+        "version": "8.0.80"
+      },
+      "events": [
+        {
+          "event": "wasm-package",
+          "detail": {
+            "ms": 1183.114990234375,
+            "version": "0.10.21",
+            "wasmBytes": 9574043,
+            "brotliBytes": 2037227,
+            "upstreamWasmSha256": "f00ec4731faa23b3e714d00e88d4d10e2df5c0a427d3a2b4ae6e3526fdd14ef7",
+            "wasmAdapter": "WASM memory.copy replaces Emscripten JS memcpy",
+            "adapterSha256": "a68587b8584bc264383681ca857103c6713eebf8a23a439a7587a620eee56ce6",
+            "wasmSha256": "31c47b52805842c5204f20ff4dcf111d3b65b4faa69158351759f54112506547",
+            "textCodec": "text-encoding@0.7.0 (scoped UTF-8 / UTF-16LE compatibility)",
+            "adapter": "scoped WXWebAssembly loader; original MediaPipe graph/model/inference",
+            "source": "https://github.com/google-ai-edge/mediapipe",
+            "license": "Apache-2.0"
+          }
+        },
+        {
+          "event": "engine-ready",
+          "detail": {
+            "ms": 1532.39404296875,
+            "runtime": "MediaPipe 0.10.21 / WXWebAssembly / CPU"
+          }
+        },
+        {
+          "event": "wasm-constructors-start",
+          "detail": {
+            "ms": 1421.511962890625
+          }
+        },
+        {
+          "event": "wasm-constructors-end",
+          "detail": {
+            "ms": 1487.373046875
+          }
+        }
+      ]
+    },
+    {
+      "name": "memory-copy-simd-input-check",
+      "sourceFile": "events-1794195519462-33cad8.jsonl",
+      "environment": {
+        "platform": "ios",
+        "system": "iOS 26.6.2",
+        "model": "iPhone 15 pro<iPhone16,1>",
+        "SDKVersion": "3.17.6",
+        "version": "8.0.80"
+      },
+      "events": [
+        {
+          "event": "wasm-package",
+          "detail": {
+            "ms": 20.0419921875,
+            "version": "0.10.21",
+            "wasmBytes": 9574043,
+            "brotliBytes": 2037227,
+            "upstreamWasmSha256": "f00ec4731faa23b3e714d00e88d4d10e2df5c0a427d3a2b4ae6e3526fdd14ef7",
+            "wasmAdapter": "WASM memory.copy replaces Emscripten JS memcpy",
+            "adapterSha256": "a68587b8584bc264383681ca857103c6713eebf8a23a439a7587a620eee56ce6",
+            "wasmSha256": "31c47b52805842c5204f20ff4dcf111d3b65b4faa69158351759f54112506547",
+            "textCodec": "text-encoding@0.7.0 (scoped UTF-8 / UTF-16LE compatibility)",
+            "adapter": "scoped WXWebAssembly loader; original MediaPipe graph/model/inference",
+            "source": "https://github.com/google-ai-edge/mediapipe",
+            "license": "Apache-2.0"
+          }
+        },
+        {
+          "event": "wasm-constructors-start",
+          "detail": {
+            "ms": 465.031982421875
+          }
+        },
+        {
+          "event": "wasm-constructors-end",
+          "detail": {
+            "ms": 535.8408203125
+          }
+        },
+        {
+          "event": "engine-ready",
+          "detail": {
+            "ms": 583.448974609375,
+            "runtime": "MediaPipe 0.10.21 / WXWebAssembly / CPU"
+          }
+        },
+        {
+          "event": "input-check",
+          "detail": {
+            "distinctImageCosine": 0.9999996624751116,
+            "pixelStats": [
+              {
+                "min": 36,
+                "max": 228,
+                "mean": 131.63932291666666,
+                "stddev": 63.85232384964461,
+                "alphaMin": 255,
+                "samples": 1024
+              },
+              {
+                "min": 0,
+                "max": 255,
+                "mean": 127.5,
+                "stddev": 127.5,
+                "alphaMin": 255,
+                "samples": 1024
+              }
+            ]
+          }
+        },
+        {
+          "event": "error",
+          "detail": {
+            "message": "两张不同测试图的特征过于接近，图像输入验证未通过"
+          }
+        }
+      ]
+    },
+    {
+      "name": "memory-copy-nosimd",
+      "sourceFile": "events-1794195724070-2c18ab.jsonl",
+      "environment": {
+        "platform": "ios",
+        "system": "iOS 26.6.2",
+        "model": "iPhone 15 pro<iPhone16,1>",
+        "SDKVersion": "3.17.6",
+        "version": "8.0.80"
+      },
+      "events": [
+        {
+          "event": "wasm-package",
+          "detail": {
+            "ms": 1116.0849609375,
+            "version": "0.10.21",
+            "simd": false,
+            "wasmBytes": 9448649,
+            "brotliBytes": 2029605,
+            "upstreamWasmSha256": "3821ea9b1f7fb8c549ef2a064ef5c85750bf375c545a49fd6eea0df44a95f1f4",
+            "wasmAdapter": "WASM memory.copy replaces Emscripten JS memcpy",
+            "adapterSha256": "13e4de1bae6abe8a29b0b3a705da005e12997cd43c265bbf6d9e085ee55f25a8",
+            "wasmSha256": "e4786dc239e7801d48db24d8aa1f17a5abe307541943685f33e8526de2fa6f0b",
+            "textCodec": "text-encoding@0.7.0 (scoped UTF-8 / UTF-16LE compatibility)",
+            "adapter": "scoped WXWebAssembly loader; original MediaPipe graph/model/inference",
+            "source": "https://github.com/google-ai-edge/mediapipe",
+            "license": "Apache-2.0"
+          }
+        },
+        {
+          "event": "wasm-constructors-start",
+          "detail": {
+            "ms": 1533.862060546875
+          }
+        },
+        {
+          "event": "wasm-constructors-end",
+          "detail": {
+            "ms": 1599.578857421875
+          }
+        },
+        {
+          "event": "engine-ready",
+          "detail": {
+            "ms": 1643.287841796875,
+            "runtime": "MediaPipe 0.10.21 / WXWebAssembly / CPU"
+          }
+        },
+        {
+          "event": "input-check",
+          "detail": {
+            "distinctImageCosine": 0.285721667489781,
+            "pixelStats": [
+              {
+                "min": 36,
+                "max": 228,
+                "mean": 131.63932291666666,
+                "stddev": 63.85232384964461,
+                "alphaMin": 255,
+                "samples": 1024
+              },
+              {
+                "min": 0,
+                "max": 255,
+                "mean": 127.5,
+                "stddev": 127.5,
+                "alphaMin": 255,
+                "samples": 1024
+              }
+            ]
+          }
+        },
+        {
+          "event": "wasm-package",
+          "detail": {
+            "ms": 17.633056640625,
+            "version": "0.10.21",
+            "simd": false,
+            "wasmBytes": 9448649,
+            "brotliBytes": 2029605,
+            "upstreamWasmSha256": "3821ea9b1f7fb8c549ef2a064ef5c85750bf375c545a49fd6eea0df44a95f1f4",
+            "wasmAdapter": "WASM memory.copy replaces Emscripten JS memcpy",
+            "adapterSha256": "13e4de1bae6abe8a29b0b3a705da005e12997cd43c265bbf6d9e085ee55f25a8",
+            "wasmSha256": "e4786dc239e7801d48db24d8aa1f17a5abe307541943685f33e8526de2fa6f0b",
+            "textCodec": "text-encoding@0.7.0 (scoped UTF-8 / UTF-16LE compatibility)",
+            "adapter": "scoped WXWebAssembly loader; original MediaPipe graph/model/inference",
+            "source": "https://github.com/google-ai-edge/mediapipe",
+            "license": "Apache-2.0"
+          }
+        },
+        {
+          "event": "wasm-constructors-start",
+          "detail": {
+            "ms": 419.968994140625
+          }
+        },
+        {
+          "event": "wasm-constructors-end",
+          "detail": {
+            "ms": 490.1982421875
+          }
+        },
+        {
+          "event": "engine-ready",
+          "detail": {
+            "ms": 527.569091796875,
+            "runtime": "MediaPipe 0.10.21 / WXWebAssembly / CPU"
+          }
+        },
+        {
+          "event": "input-check",
+          "detail": {
+            "distinctImageCosine": 0.285721667489781,
+            "pixelStats": [
+              {
+                "min": 36,
+                "max": 228,
+                "mean": 131.63932291666666,
+                "stddev": 63.85232384964461,
+                "alphaMin": 255,
+                "samples": 1024
+              },
+              {
+                "min": 0,
+                "max": 255,
+                "mean": 127.5,
+                "stddev": 127.5,
+                "alphaMin": 255,
+                "samples": 1024
+              }
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

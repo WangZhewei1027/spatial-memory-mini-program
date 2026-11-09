@@ -25,6 +25,7 @@
 
 ## 实验与历史参考
 
+- [MediaPipe 图像相似度实验](image-match-lab.md)：客户端匹配、SAGE 取帧复用与原图/缩小/JPEG 耗时对照。
 - [VisionKit / xr-frame 调研](xr-frame-threejs-research.md)：实验页与早期方案记录。
 - [XR-Frame 坐标](xr-frame-coordinates.md)、[交互示例](xr-3d-interaction-summary.md)：仅适用于 xr-frame 实验页和上游 demo。
 
