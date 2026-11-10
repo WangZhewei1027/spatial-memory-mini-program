@@ -176,15 +176,20 @@ module.exports = {
           let cached = cache.lookup(candidate.id, candidate.reference_version);
           const cacheHit = !!cached;
           if (!cacheHit) {
-            const pixels = await loadReferencePixels(candidate.image_url, current);
-            if (!current()) return;
-            const { vector } = await this._imageMatcher.embed(pixels);
-            if (!current()) return;
-            cached = { version: candidate.reference_version, vector };
+            // Every reference image of the target; one unusable image fails the target.
+            const vectors = [];
+            for (const url of candidate.image_urls) {
+              const pixels = await loadReferencePixels(url, current);
+              if (!current()) return;
+              const { vector } = await this._imageMatcher.embed(pixels);
+              if (!current()) return;
+              vectors.push(vector);
+            }
+            cached = { version: candidate.reference_version, vectors };
           } else cacheHits++;
           cache.remember(candidate.id, cached);
-          references.push({ ...candidate, vector: cached.vector });
-          this._matchLog('参考图就绪', { anchorId: candidate.id, cacheHit, elapsedMs: Date.now() - startedAt });
+          references.push({ ...candidate, vectors: cached.vectors });
+          this._matchLog('参考图就绪', { anchorId: candidate.id, images: cached.vectors.length, cacheHit, elapsedMs: Date.now() - startedAt });
         } catch (error) {
           if (!current()) return;
           if (this._imageMatcher?.closed) throw error;

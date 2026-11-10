@@ -395,3 +395,30 @@ test('steady weak results update summary without spamming logs or UI, and dark f
   assert.match(f.progress.at(-1).text, /跳过：画面过暗/);
   f.host.pauseRetrieval(); assert.equal(f.diagnosticTimers.size, 0);
 });
+test('candidate image lists accept one to five http images and fall back to image_url for older servers', () => {
+  const { candidatesFrom } = require(path.join(base, 'components/xr-start/matching/candidates'));
+  const urls = n => Array.from({ length: n }, (_, i) => `https://media.test/a-${i}.png`);
+  assert.deepEqual(candidatesFrom({ candidates: [target()] })[0].image_urls, ['https://media.test/a.png']);
+  assert.deepEqual(candidatesFrom({ candidates: [{ ...target(), image_urls: urls(5) }] })[0].image_urls, urls(5));
+  for (const image_urls of [[], urls(6), ['ftp://media.test/a.png'], 'https://media.test/a.png'])
+    assert.throws(() => candidatesFrom({ candidates: [{ ...target(), image_urls }] }), /识别目标数据无效/);
+});
+test('a target with several reference images embeds each one and is scored by its best image', async () => {
+  const front = { id: 'a', vectors: [[0, 1], [1, 0]] }, other = { id: 'b', vectors: [[.6, .8]] };
+  const result = policy.evaluateMatch([1, 0], [front, other], config);
+  assert.equal(result.match.reference.id, 'a'); assert.equal(result.best.score, 1); assert.equal(result.second, .6);
+  // Two near-identical photos of one target are not competitors.
+  assert.equal(policy.evaluateMatch([1, 0], [{ id: 't', vectors: [[1, 0], [.99, .141]] }], config).match.reference.id, 't');
+  assert.equal(policy.referenceScore([1, 0], { vector: [1, 0] }), 1, 'single-vector references still score');
+  const loaded = [], image_urls = ['https://media.test/a.png', 'https://media.test/a-side.png'];
+  const f = fixture({
+    async fetchAnchorCandidates() { return { statusCode: 200, data: { candidates: [{ ...target(), image_urls }] } }; },
+    loadReference(url) { loaded.push(url); return new ArrayBuffer(4); },
+  });
+  await f.host.recognizeAnchor();
+  assert.equal(f.host._matchPhase, 'scanning'); assert.deepEqual(loaded, image_urls);
+  assert.equal(f.host._matchReferences[0].vectors.length, 2); assert.equal(f.counts().embedded, 2);
+  f.host.rescan(); await settle();
+  assert.deepEqual(loaded, image_urls, 'an unchanged version reuses every cached image embedding');
+  f.host.pauseRetrieval();
+});

@@ -33,9 +33,10 @@
 - 默认每秒取一帧；依据上一帧端到端耗时自动延长至 1–3 秒。整个客户端只允许一项 Worker 请求在途，忙时跳过相机帧，不排队。
 - `VKFrame.getCameraBuffer(边长, 边长)`（边长来自 `spec.INPUT_EDGE`，当前 224）和自有 RGBA 副本在原生帧回调中同步完成；帧回调结束后再发送约 196 KiB 的像素给 Worker。预处理归一化和模型推理在 Worker 内；主线程用同一份相机特征计算全部候选的向量内积，每张相机画面只运行一次模型。
 - 黑暗/空白画面不参与确认；超过 2.5 秒返回的帧结果丢弃。余弦分数至少 0.4，领先第二候选至少 0.08，同一目标连续 3 次、跨度至少 1.8 秒，相邻观察不超过 4.5 秒后确认。**0.4（2026-11-10 由 0.5 下调）是用于验证命中后空间内容显示的试验阈值，真实建筑的误匹配率和阈值仍需实景校准；通用特征相似不等于精确建筑定位。**
+- 一个目标可有 1–5 张识别图（不同角度或光线）。每张图都计算特征，目标得分取其中最高的一张；同一目标的多张图不互相计算领先差，只与其他目标比较。任意一张图无法准备时，该目标视为未就绪。
 - 沿用旧 SAGE 的全候选比较思路：一次获取当前范围内全部目标，逐张准备特征后，每次相机推理与全部参考特征比较，不分批轮换。任何竞争参考图未就绪时暂不接受匹配，避免遗漏第二名造成误命中；重扫时只重试尚未缓存的参考特征。
 - 每 5 秒检查 GPS，优先读取已有持续定位流；相对上次候选查询位置的距离达到 `max(20 米, 两次定位 accuracy 之和)` 才刷新附近目标。定位检查、单次定位等待不暂停正在进行的图像匹配。位置稳定时不重复拉取候选，空候选也保持到移动或手动重扫；后台修改的目标可通过重扫刷新。
-- 参考特征按团队/地图作用域、目标 ID 与 `reference_version` 缓存在内存，采用最多 200 项的 LRU（约 0.8 MiB 特征数据）。移动、命中和手动重扫保留缓存；新目标或版本变化才下载并计算。新区域之外的旧向量保留至 LRU 淘汰，走回时可以复用；不把相机每帧结果作为可复用参考特征。
+- 参考特征按团队/地图作用域、目标 ID 与 `reference_version` 缓存在内存，采用最多 200 个目标的 LRU（每张图约 4 KiB 特征，单个目标最多 5 张）。`reference_version` 覆盖全部识别图及顺序，增删任意一张都会让该目标整体重新计算。移动、命中和手动重扫保留缓存；新目标或版本变化才下载并计算。新区域之外的旧向量保留至 LRU 淘汰，走回时可以复用；不把相机每帧结果作为可复用参考特征。
 - 每次位置明显变化会取消旧推理和内容请求、重置连续确认并刷新候选；已锁定的内容也会清理，开始新区域的识别，SLAM 会话继续复用。参考图准备与相机推理串行，不抢同一个 Worker。
 - 初始化总时限 30 秒，单次推理 10 秒；超时或 Worker 被系统终止会关闭进程并给出重新扫描入口，不回退主线程同步推理。
 - 命中后立即停止 Worker。内容读取完成且当前 SLAM 位姿有效时才放置；内容在世界坐标中锁定，目标离开镜头不清场。特征不提供三维位姿，因此不会自动贴合建筑表面。
@@ -48,7 +49,7 @@
 
 | 接口 | 用途 |
 | --- | --- |
-| POST `/api/miniapp/anchors/candidates` | workspace_id、latitude、longitude、accuracy、gps_timestamp、coordinate_system=wgs84；返回 id、name、image_url、reference_version、distance_meters |
+| POST `/api/miniapp/anchors/candidates` | workspace_id、latitude、longitude、accuracy、gps_timestamp、coordinate_system=wgs84；返回 id、name、image_urls（全部识别图，1–5 张）、image_url（第一张，兼容旧客户端；缺少 image_urls 时客户端只用它）、reference_version、distance_meters |
 | POST `/api/miniapp/anchors/content` | 同样 GPS 字段，加 anchor_id、reference_version；返回 anchor 与 assets |
 | POST `/api/miniapp/anchors/recognize` | 旧图片上传入口返回 410，本客户端不调用 |
 

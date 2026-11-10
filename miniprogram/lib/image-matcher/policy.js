@@ -5,10 +5,20 @@ function similarity(a, b) {
   for (let i = 0; i < a.length; i++) score += a[i] * b[i];
   return Number.isFinite(score) ? Math.max(-1, Math.min(1, score)) : null;
 }
+// A target may have several reference images; its score is the best one, so
+// photos of the same target never compete with each other for the margin.
+function referenceScore(vector, reference) {
+  let best = null;
+  for (const item of reference.vectors || [reference.vector]) {
+    const score = similarity(vector, item);
+    if (score != null && (best == null || score > best)) best = score;
+  }
+  return best;
+}
 function evaluateMatch(vector, references, { minimumScore, minimumMargin }) {
   let best = null, second = null;
   for (const reference of references) {
-    const score = similarity(vector, reference.vector);
+    const score = referenceScore(vector, reference);
     if (score == null) continue;
     if (!best || score > best.score) { second = best ? best.score : second; best = { reference, score }; }
     else second = second == null ? score : Math.max(second, score);
@@ -54,4 +64,4 @@ function candidateMovement(from, to, minimumMeters) {
   const thresholdMeters = Math.max(minimumMeters, from.accuracy + to.accuracy);
   return distanceMeters >= thresholdMeters ? { distanceMeters, thresholdMeters } : null;
 }
-module.exports = { similarity, evaluateMatch, observe, intervalFor, inspectPixels, candidateMovement };
+module.exports = { similarity, referenceScore, evaluateMatch, observe, intervalFor, inspectPixels, candidateMovement };

@@ -13,17 +13,24 @@ function checked(response) {
   if (response.statusCode !== 200) throw new Error(response.data?.error || '请求失败，请重新扫描');
   return response.data;
 }
+const MAX_REFERENCE_IMAGES = 5; // Per target; matches the server's limit.
+const isHttpUrl = value => typeof value === 'string' && /^https?:\/\//.test(value);
+// `image_urls` lists every reference image of a target; servers before
+// multi-image support send only `image_url`, which is also the first entry.
 function candidatesFrom(data) {
   if (!Array.isArray(data?.candidates) || data.candidates.length > MAX_CANDIDATES) throw new Error('识别目标数据无效');
   const ids = new Set();
-  for (const item of data.candidates) {
+  return data.candidates.map(item => {
     if (!item || typeof item.id !== 'string' || !item.id || ids.has(item.id) ||
-        typeof item.name !== 'string' || typeof item.image_url !== 'string' || !/^https?:\/\//.test(item.image_url) ||
+        typeof item.name !== 'string' || !isHttpUrl(item.image_url) ||
         typeof item.reference_version !== 'string' || !item.reference_version)
       throw new Error('识别目标数据无效');
+    const urls = item.image_urls === undefined ? [item.image_url] : item.image_urls;
+    if (!Array.isArray(urls) || !urls.length || urls.length > MAX_REFERENCE_IMAGES || !urls.every(isHttpUrl))
+      throw new Error('识别目标数据无效');
     ids.add(item.id);
-  }
-  return data.candidates;
+    return { ...item, image_urls: urls };
+  });
 }
 const CONTENT_TYPES = ['text', 'image', 'model', 'audio', 'video', 'scene'];
 function contentFrom(data, anchorId) {
