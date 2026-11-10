@@ -13,6 +13,7 @@
     bind:mapconfigload="onMapConfigLoad"
     bind:activitiesload="onActivitiesLoad"
     bind:recognitionstatus="onRecognitionStatus"
+    bind:matchprogress="onMatchProgress"
     bind:asseterror="onAssetError"
   />
 
@@ -33,6 +34,7 @@
 
     <view wx:if="{{(mapConfigReady && retrievalMode === 'anchor') || activitiesLoading || activitiesError}}" class="retrieval-panel">
       <text wx:if="{{mapConfigReady && retrievalMode === 'anchor'}}" class="retrieval-status">{{recognitionStatus}}</text>
+      <text wx:if="{{mapConfigReady && retrievalMode === 'anchor' && matchProgress}}" class="match-progress">{{matchProgress}}</text>
       <button wx:if="{{mapConfigReady && retrievalMode === 'anchor'}}" class="recognition-rescan-button" bindtap="onRescan" aria-label="重新扫描识别目标">重新扫描</button>
       <text wx:if="{{activitiesLoading}}" class="activity-status">活动加载中…</text>
       <button wx:if="{{activitiesError}}" class="activity-retry" bindtap="refreshActivities">{{activitiesError}}</button>

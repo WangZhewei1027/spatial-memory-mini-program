@@ -45,6 +45,8 @@ function scanState() {
     _nextMatchFrameAt: 0,
     _recognitionGPS: null,
     _recognitionGPSRequest: null,
+    _matchFrameCount: 0,
+    _lastMatchScores: null,
   };
 }
 // Fields that live for the component instance (survive rescans).
@@ -57,6 +59,7 @@ function initialRecognitionState() {
     _matchDiagnostics: null,
     _matchDiagnosticTimer: null,
     _lastRecognitionStatus: null,
+    _lastMatchProgress: null,
     _scanStatusMessage: '',
   };
 }

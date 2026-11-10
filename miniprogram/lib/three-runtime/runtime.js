@@ -61,4 +61,17 @@ function createCanvasFacade(canvas, gl, width, height) {
   };
 }
 
-module.exports = { THREE, probeWebGL2, createCanvasFacade };
+// Three 构造 WebGLRenderer 时只在存在全局 self 时设置内部动画循环的上下文。小程序没有
+// self，dispose() 最后一步 animation.stop() 会读取 null.cancelAnimationFrame。本项目的
+// 帧由 VisionKit 或 Canvas rAF 驱动，不使用 renderer.setAnimationLoop；该步之前的 GPU
+// 资源释放已经完成，因此只忽略这一处异常，其余错误照常抛出。
+function disposeRenderer(renderer) {
+  if (!renderer) return;
+  try {
+    renderer.dispose();
+  } catch (error) {
+    if (!(error instanceof TypeError && /cancelAnimationFrame/.test(error.message)))
+      throw error;
+  }
+}
+module.exports = { THREE, probeWebGL2, createCanvasFacade, disposeRenderer };

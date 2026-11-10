@@ -1,4 +1,4 @@
-const { THREE, createAnimationRig, probeWebGL2, createCanvasFacade, flipRows, createFixtureGLB } = require('./runtime');
+const { THREE, createAnimationRig, probeWebGL2, createCanvasFacade, disposeRenderer, flipRows, createFixtureGLB } = require('./runtime');
 const build = require('./vendor/build-info');
 const SIZE = 256;
 
@@ -215,7 +215,7 @@ Page({
     clearTimeout(this._xrTimer);
     this._xrView?.disposeBridge(); this._rig?.dispose();
     this._gltfMixer?.stopAllAction(); if (this._gltf) this._gltfMixer?.uncacheRoot(this._gltf.scene);
-    this.disposeObject(this._threeScene); this._imageTexture?.dispose(); this._renderer?.dispose();
+    this.disposeObject(this._threeScene); this._imageTexture?.dispose(); disposeRenderer(this._renderer);
     this._pixels = this._flipped = this._canvas = this._xrView = null;
   },
 });

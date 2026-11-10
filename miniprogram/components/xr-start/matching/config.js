@@ -11,7 +11,7 @@ module.exports = {
   maxFrameIntervalMs: 3000,
   maxResultAgeMs: 2500,
   // Trial threshold for validating matched content placement; field calibration is pending.
-  minimumScore: 0.5,
+  minimumScore: 0.4,
   minimumMargin: 0.08,
   gpsCacheMs: 5000,
   gpsWatchMaxAgeMs: 10000,

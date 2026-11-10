@@ -1,4 +1,4 @@
-const { THREE, probeWebGL2, createCanvasFacade } = require("./runtime");
+const { THREE, probeWebGL2, createCanvasFacade, disposeRenderer } = require("./runtime");
 const { VKSessionController } = require("./vk-session");
 const { sceneFarPlane } = require("./camera-clipping");
 const {
@@ -66,7 +66,7 @@ class ARRuntime {
       this.lighting?.dispose();
       disposeTree(this.scene);
       this.background?.dispose();
-      this.renderer?.dispose();
+      disposeRenderer(this.renderer);
       throw error;
     }
   }
@@ -194,7 +194,7 @@ class ARRuntime {
     this.lighting.dispose();
     disposeTree(this.scene);
     this.background.dispose();
-    this.renderer.dispose();
+    disposeRenderer(this.renderer);
   }
 }
 module.exports = { ARRuntime };

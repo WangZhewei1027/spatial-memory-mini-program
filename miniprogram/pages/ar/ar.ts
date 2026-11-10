@@ -40,6 +40,7 @@ Page({
     retrievalMode: "gps",
     mapConfigReady: false,
     recognitionStatus: "等待 AR 相机就绪",
+    matchProgress: "",
     recognitionLocked: false,
   },
 
@@ -54,6 +55,12 @@ Page({
   onRecognitionStatus(event: WechatMiniprogram.CustomEvent) {
     if (event.detail.mode === this.data.retrievalMode) {
       this.setData({ recognitionStatus: event.detail.message, recognitionLocked: event.detail.locked === true });
+    }
+  },
+
+  onMatchProgress(event: WechatMiniprogram.CustomEvent) {
+    if (event.detail.mode === this.data.retrievalMode && event.detail.text !== this.data.matchProgress) {
+      this.setData({ matchProgress: event.detail.text });
     }
   },
 

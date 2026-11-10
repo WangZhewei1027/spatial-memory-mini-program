@@ -1,4 +1,4 @@
-const { THREE, probeWebGL2, createCanvasFacade } = require("../../lib/three-runtime/runtime");
+const { THREE, probeWebGL2, createCanvasFacade, disposeRenderer } = require("../../lib/three-runtime/runtime");
 const { ModelCache, disposeTree } = require("../../lib/three-runtime/resources");
 const { createCompositionPlayer } = require("../../lib/scene-runtime/composition");
 const { fetchScenePreview } = require("../../utils/backend");
@@ -201,6 +201,6 @@ Page({
   },
   onUnload() {
     this._dead = true; this._active = false; this.stopFrames(); this.clearScene();
-    this._cache?.dispose(); disposeTree(this._scene); this._renderer?.dispose();
+    this._cache?.dispose(); disposeTree(this._scene); disposeRenderer(this._renderer);
   },
 });

@@ -1,4 +1,4 @@
-const { THREE, probeWebGL2, createCanvasFacade } = require('../../lib/three-runtime/runtime');
+const { THREE, probeWebGL2, createCanvasFacade, disposeRenderer } = require('../../lib/three-runtime/runtime');
 
 function createAnimationRig() {
   const root = new THREE.Group();
@@ -79,4 +79,4 @@ function createFixtureGLB() {
   return buffer;
 }
 
-module.exports = { THREE, createAnimationRig, applyToXR, probeWebGL2, createCanvasFacade, flipRows, createFixtureGLB };
+module.exports = { THREE, createAnimationRig, applyToXR, probeWebGL2, createCanvasFacade, disposeRenderer, flipRows, createFixtureGLB };

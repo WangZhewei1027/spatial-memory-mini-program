@@ -1,4 +1,4 @@
-const { THREE, createAnimationRig, probeWebGL2, createCanvasFacade, createFixtureGLB } = require('./runtime');
+const { THREE, createAnimationRig, probeWebGL2, createCanvasFacade, disposeRenderer, createFixtureGLB } = require('./runtime');
 const { VKSessionController } = require('./vk-session');
 const { syncVKCamera, applyHitMatrix, createCameraBackground } = require('./vk-renderer');
 const build = require('./vendor/build-info');
@@ -302,6 +302,6 @@ Page({
     this._rig?.dispose(); this._gltfMixer?.stopAllAction(); if (this._gltf) this._gltfMixer?.uncacheRoot(this._gltf.scene);
     this.disposeObject(this._scene); this._imageTexture?.dispose(); this._background?.dispose();
     for (const texture of this._testTextures || []) this._gl.deleteTexture(texture);
-    this._renderer?.dispose(); this._canvas = this._vk = this._synthetic = null;
+    disposeRenderer(this._renderer); this._canvas = this._vk = this._synthetic = null;
   },
 });

@@ -39,7 +39,7 @@ function loadTree(mocks, globals = {}) {
 function fixture(overrides = {}) {
   let now = 1000, closed = 0, embedded = 0, loaded = 0, captures = 0, candidateCalls = 0;
   let gps = { latitude: 31, longitude: 121, accuracy: 10 };
-  const calls = [], statuses = [], logs = [], diagnosticTimers = new Map();
+  const calls = [], statuses = [], progress = [], logs = [], diagnosticTimers = new Map();
   let diagnosticTimerId = 0;
   const clock = { Date: class extends Date { static now() { return now; } } };
   const diagnostics = load('components/xr-start/matching/diagnostics.js', { './config': config }, { ...clock,
@@ -66,7 +66,7 @@ function fixture(overrides = {}) {
   const host = { ...methods, ...loadModule(`${matching}/state`).initialRecognitionState(), retrievalMode: 'anchor', _arReady: true, _cameraReady: true, _sessionActive: true,
     _modeEpoch: 0, _contentEpoch: 0, _nextRecognitionAt: 0, _matchPhase: 'idle', _allowedAssetIds: new Set(),
     _seenAssets: new Map(), nodeList: [], displayed: [],
-    setData() {}, triggerEvent(_name, value) { statuses.push(value); },
+    setData() {}, triggerEvent(name, value) { (name === 'matchprogress' ? progress : statuses).push(value); },
     displayAssets(assets) { this.displayed.push(assets); }, _destroyNode() {}, fetchNearbyAssets() {}, fetchHugeAssets() {},
     // Asset-module boundary; its resource release is covered by test-ar-runtime.
     _clearRemoteAssets() { this._contentEpoch++; this._allowedAssetIds.clear(); this.nodeList = []; this._matchedAnchorId = null; },
@@ -76,7 +76,7 @@ function fixture(overrides = {}) {
   for (let i=0;i<pixels.length;i++) pixels[i] = Math.floor(i/4)%251;
   const frame = { getCameraBuffer(w,h) { captures++; assert.equal(w,224); assert.equal(h,224); return pixels.buffer; } };
   const sample = async () => { host.handleRecognitionFrame(frame); await new Promise(resolve => setTimeout(resolve, 5)); await settle(); };
-  return { host, api, calls, statuses, logs, pixels, frame, sample, diagnosticTimers,
+  return { host, api, calls, statuses, progress, logs, pixels, frame, sample, diagnosticTimers,
     heartbeat() { for (const [id, fn] of [...diagnosticTimers]) { diagnosticTimers.delete(id); fn(); } }, tick(ms=1000) { now += ms; }, now: () => now,
     move(meters, accuracy = 10) { gps = { latitude: 31 + meters / 6371000 * 180 / Math.PI, longitude: 121, accuracy }; host.currentGPS = { ...gps, sampledAt: now }; },
     counts: () => ({ closed, embedded, loaded, captures, candidateCalls }) };
@@ -379,6 +379,12 @@ test('steady weak results update summary without spamming logs or UI, and dark f
   for (let i = 0; i < 5; i++) { f.tick(); await f.sample(); }
   assert.equal(f.logs.filter(([event]) => event === '匹配结果').length, 1);
   assert.equal(f.statuses.length, statusCount, 'unchanged scan status must not trigger setData every sample');
+  // The progress line reports every sampled frame: in-flight first, then its scores.
+  const texts = f.progress.map(p => p.text);
+  assert.equal(texts.filter(t => t.startsWith('匹配中')).length, 5);
+  assert.equal(texts.filter(t => /相似度 0\.280 /.test(t)).length, 5);
+  assert.match(texts.at(-1), /^\d\d:\d\d:\d\d #5 相似度 0\.280 .*下次 \d+\.\ds 后$/);
+  assert.ok(texts.at(-1).includes(` 阈值 ${config.minimumScore} `));
   f.heartbeat(); const summary = f.logs.filter(([event]) => event === '扫描摘要').at(-1)[1];
   assert.equal(summary.inferred, 5); assert.equal(summary.lastResult.topScore, 0.28);
   assert.equal(summary.lastResult.minimumScore, config.minimumScore);
@@ -386,5 +392,6 @@ test('steady weak results update summary without spamming logs or UI, and dark f
   f.pixels.fill(0); f.tick(); await f.sample();
   assert.equal(f.logs.filter(([event]) => event === '匹配结果').at(-1)[1].reason, 'invalid_pixels');
   assert.match(f.statuses.at(-1).message, /画面过暗/);
+  assert.match(f.progress.at(-1).text, /跳过：画面过暗/);
   f.host.pauseRetrieval(); assert.equal(f.diagnosticTimers.size, 0);
 });

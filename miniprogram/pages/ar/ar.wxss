@@ -183,6 +183,16 @@ page {
   overflow-wrap: break-word;
 }
 
+.match-progress {
+  display: block;
+  margin-top: 6rpx;
+  font-size: 22rpx;
+  line-height: 32rpx;
+  color: #9fe0a8;
+  font-family: Menlo, monospace;
+  overflow-wrap: break-word;
+}
+
 .recognition-rescan-button {
   margin: 12rpx 0 0;
   min-height: 88rpx;

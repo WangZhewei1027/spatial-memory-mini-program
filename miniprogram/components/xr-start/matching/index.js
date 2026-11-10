@@ -14,6 +14,9 @@ const { PHASES, canTransition, scanState } = require("./state");
 // frames -> fetch content -> place it once SLAM has a valid pose.
 // Pure decisions live in lib/image-matcher/policy.js; per-scan fields in ./state.js.
 const errorFields = error => ({ code: error.code, message: error.message || error.errMsg });
+const pad = (value, width = 2) => String(value).padStart(width, '0');
+const clockTime = ms => { const t = new Date(ms); return `${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`; };
+const score = value => Number.isFinite(value) ? value.toFixed(3) : '—';
 
 module.exports = {
   ...diagnostics,
@@ -24,6 +27,8 @@ module.exports = {
     if (!canTransition(this._matchPhase, next))
       this._matchLog('非法识别状态切换', { from: this._matchPhase, to: next }, 'error');
     this._matchPhase = next;
+    // Keep the last scores visible after a confirmed match; errors replace them.
+    if (next === PHASES.ERROR) this._matchProgress('');
   },
   _matchLog(event, fields = {}, level = 'info') {
     matchLog(event, { run: this._modeEpoch, phase: this._matchPhase, ...fields }, level);
@@ -35,6 +40,13 @@ module.exports = {
     if (key === this._lastRecognitionStatus) return;
     this._lastRecognitionStatus = key;
     this.triggerEvent('recognitionstatus', { mode: this.retrievalMode, message, locked });
+  },
+  // Second status line: whether a frame is being matched, when, and the scores
+  // of every completed frame. Only emitted while scanning (at most ~2 per second).
+  _matchProgress(text) {
+    if (this._disposed || text === this._lastMatchProgress) return;
+    this._lastMatchProgress = text;
+    this.triggerEvent('matchprogress', { mode: this.retrievalMode, text });
   },
   _recognitionCurrent(epoch) {
     return this._modeEpoch === epoch && !this._disposed && !this._retrievalPaused &&
@@ -50,6 +62,7 @@ module.exports = {
     if (!['rescan', 'movement'].includes(reason) || this._referenceCache.scope !== referenceScope(CONFIG))
       this._referenceCache.clear();
     Object.assign(this, scanState());
+    this._matchProgress('');
     this.isFetchingAssets = false;
     this._isFetchingHuge = false;
   },
@@ -228,9 +241,12 @@ module.exports = {
         this._recordMatchDecision({ reason: 'invalid_pixels', pixelMin: +stats.min.toFixed(1),
           pixelMax: +stats.max.toFixed(1), pixelStddev: +stats.stddev.toFixed(1), captureMs });
         this._recognitionStatus('自动识别中 · 画面过暗或缺少细节');
+        this._matchProgress(`${clockTime(now)} 跳过：画面过暗或缺少细节 · 等待下一帧`);
         return;
       }
       if (d) { d.submittedAt = now; d.captureMs = captureMs; }
+      this._matchFrameCount = (this._matchFrameCount || 0) + 1;
+      this._matchProgress(`匹配中… #${this._matchFrameCount} · ${clockTime(now)} 取帧${this._lastMatchScores ? ` · 上次 ${this._lastMatchScores}` : ''}`);
       // Let the current rendering callback finish before copying pixels to Worker.
       this._matchSubmitTimer = setTimeout(() => {
         this._matchSubmitTimer = null;
@@ -251,6 +267,7 @@ module.exports = {
         if (d) d.staleResults++;
         this._matchEvidence = null;
         this._recordMatchDecision({ reason: 'stale_result', elapsedMs: elapsed, inferenceMs });
+        this._matchProgress(`${clockTime(now)} #${this._matchFrameCount} 结果过期（${elapsed}ms）已丢弃 · 等待下一帧`);
         return;
       }
       const evaluation = evaluateMatch(vector, this._matchReferences, config), match = evaluation.match;
@@ -262,6 +279,12 @@ module.exports = {
         minimumMargin: config.minimumMargin, observations: result.evidence?.count || 0,
         observationsRequired: config.minimumObservations, captureMs: d?.captureMs, inferenceMs, elapsedMs: elapsed,
         nextIntervalMs: this._nextMatchFrameAt - capturedAt });
+      const best = evaluation.best;
+      this._lastMatchScores = best
+        ? `${score(best.score)} ${best.reference.name || best.reference.id}` : '无可比参考图';
+      this._matchProgress(`${clockTime(now)} #${this._matchFrameCount} 相似度 ${this._lastMatchScores}` +
+        ` · 次高 ${score(evaluation.second)} · 阈值 ${config.minimumScore} · 差 ${score(evaluation.margin)}` +
+        ` · ${elapsed}ms · 下次 ${((this._nextMatchFrameAt - capturedAt) / 1000).toFixed(1)}s 后`);
       if (!result.confirmed) this._recognitionStatus(match
         ? `正在确认：${match.reference.name || '目标'}（${result.evidence.count}/${config.minimumObservations}）`
         : this._scanStatusMessage || '自动识别中 · 请对准目标');
