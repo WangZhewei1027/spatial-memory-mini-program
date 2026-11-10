@@ -300,9 +300,7 @@ module.exports = function (XR_CONFIG) {
       const fwd = this._runtime.camera.getWorldDirection(this._forwardScratch);
       // atan2(z, x) → 以 +X 轴为 0° 的朝向角，与 cos/sin 放置约定匹配
       const camYaw = Math.atan2(fwd.z, fwd.x);
-      const halfArc = this._runtime.session?.mode === "osd"
-        ? Math.atan(Math.tan(camTransform.fov * Math.PI / 360) * camTransform.aspect) * 0.5
-        : ((XR_CONFIG.placeForwardArcDeg || 120) * Math.PI) / 180;
+      const halfArc = ((XR_CONFIG.placeForwardArcDeg || 120) * Math.PI) / 180;
       const angle = camYaw + (Math.random() - 0.5) * 2 * halfArc;
       const { min: rMin, max: rMax } = (XR_CONFIG.placeRadius &&
         XR_CONFIG.placeRadius[type]) || { min: 1.0, max: 2.0 };
@@ -334,6 +332,41 @@ module.exports = function (XR_CONFIG) {
       else if (asset.file_type === "audio") await this._placeAudioAsset(asset);
       else if (asset.file_type === "video") await this._placeVideoAsset(asset);
       else if (asset.file_type === "scene") await this._placeSceneAsset(asset);
+    },
+
+    // Releases every remote node, pending queue and audio context, and advances
+    // the content epoch so late async placements discard themselves.
+    _clearRemoteAssets() {
+      this._recognitionTiming = null;
+      this._contentEpoch++;
+      for (const ctx of this._pendingAudioContexts || []) {
+        try {
+          ctx.stop();
+          ctx.destroy();
+        } catch (_) {}
+      }
+      this._pendingAudioContexts?.clear();
+      this._allowedAssetIds.clear();
+      this._placeQueue = [];
+      this._pendingDisplayAssets = [];
+      const clearedNodeCount = this.nodeList.length;
+      for (const entry of this.nodeList) this._destroyNode(entry);
+      this.nodeList = [];
+      this.flyingDanmakus = [];
+      this.stopRandomConfetti?.();
+      if (clearedNodeCount || this._hugeNodeList?.length)
+        matchLog("清空场景素材", { run: this._modeEpoch, clearedNodeCount, hugeNodeCount: this._hugeNodeList?.length || 0 });
+      for (const entry of this._hugeNodeList || []) this._destroyNode(entry);
+      this._hugeNodeList = [];
+      this._pendingHugeAssets = [];
+      this._hugePlaceQueue = [];
+      this._seenAssets.clear();
+      this._firstRevealDone = false;
+      this._matchedAnchorId = null;
+      // 兜底回收此前构建异常留下的、未能登记的动态根节点。
+      const orphans = [...(this.shadowRoot?.children || [])];
+      for (const node of orphans) this._destroyNode({ node });
+      if (orphans.length) matchLog("清理未登记场景节点", { count: orphans.length });
     },
   };
 };

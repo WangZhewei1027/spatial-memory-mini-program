@@ -1,12 +1,12 @@
 # 小程序文档索引
 
-本目录的现行说明以 VisionKit OSD / SLAM + Three.js 运行时为准。安装与入口见[项目 README](../README.md)，Web 的接口契约维护在相邻 `spatial-memory/docs/miniapp-api.md`。
+本目录的现行说明以 MediaPipe Worker + VisionKit SLAM + Three.js 运行时为准。安装与入口见[项目 README](../README.md)，Web 的接口契约维护在相邻 `spatial-memory/docs/miniapp-api.md`。
 
 ## 开发与播放
 
 | 文档 | 用途 |
 | --- | --- |
-| [本地开发](local-development.md) | 后端环境、自动同步开发地址与线上域名配置 |
+| [本地开发](local-development.md) | 后端环境、自动同步开发地址、线上域名配置与不含实验页的上传副本 |
 | [扫码参数](scan-config-priority-strategy.md) | 团队/地图/场景入口优先级、Storage 与历史 |
 | [正式 AR 运行时](visionkit-three-migration.md) | VisionKit 与 Three 的职责、资源生命周期和兼容边界 |
 | [场景播放](scene-asset.md) | 当前播放协议、观看位置、媒体同步与跨端验证 |
@@ -30,3 +30,5 @@
 - [XR-Frame 坐标](xr-frame-coordinates.md)、[交互示例](xr-3d-interaction-summary.md)：仅适用于 xr-frame 实验页和上游 demo。
 
 带日期的验收结果只代表当时版本与环境；旧协议、测试数量和截图不能作为当前版本已验收的证据。
+
+- [SIMD 兼容调查（暂停）](simd-investigation.md)：已验证的指令探针、完整模型异常与恢复无 SIMD 的决定。

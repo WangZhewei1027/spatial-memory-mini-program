@@ -18,11 +18,11 @@
 | `miniprogram/pages/index/` | 扫码参数、最近入口和历史切换 |
 | `miniprogram/pages/ar/`、`components/xr-start/` | 地图 GPS/匹配发现、素材放置与活动展示 |
 | `miniprogram/pages/scene/` | 独立场景预览、手动放置与播放控制 |
-| `miniprogram/lib/three-runtime/` | VisionKit OSD / SLAM、Three.js、模型/纹理和原生媒体适配 |
+| `miniprogram/lib/three-runtime/` | VisionKit SLAM、Three.js、模型/纹理和原生媒体适配 |
 | `miniprogram/lib/scene-runtime/` | 共享 Scene Core 与实际场景播放器 |
-| `miniprogram/labs/xr-three/` | 独立实验、历史桥接与无相机场景联调 |
+| `miniprogram/labs/` | 图像匹配、xr-three 等实验页；只用于开发者工具和真机预览，不上传体验版／正式版 |
 
-正式 AR 使用 VisionKit OSD 识别、v2 SLAM 空间展示与 WebGL2 + Three.js；xr-frame 只用于桥接实验和参考示例。团队素材与独立活动分别读取；活动记录不作为普通素材写入。
+正式 AR 使用 MediaPipe 模型的无 SIMD Worker 识别、单个 VisionKit v2 SLAM 会话与 WebGL2 + Three.js；xr-frame 只用于桥接实验和参考示例。团队素材与独立活动分别读取；活动记录不作为普通素材写入。
 
 ## 检查与构建
 
@@ -34,5 +34,7 @@ npm run test:scene-memory
 `npm test` 使用本地 fixture 和微信 API 替身，不替代真机网络、相机、原生视频解码与音画同步验收。完整脚本以 `package.json` 为准。
 
 修改 Three bundle 后运行 `npm run build:xr-three-lab`；更新共享 Core 按相邻 Web 仓库的 `packages/scene-core/README.md` 更新 npm pack 快照，再运行 `npm run build:scene-core`。生成 bundle 提交在仓库中，开发者工具无需再次构建 npm。
+
+上传体验版／正式版前运行 `npm run release:stage`，再上传生成的 `.release/miniprogram-upload` 目录；主项目包含实验页，直接上传会被 `beforeUpload` 拒绝。详见[上传体验版／正式版](docs/local-development.md#上传体验版正式版)。
 
 文档入口见[文档索引](docs/README.md)。`xr-frame-demo-master/` 是上游参考工程，不属于正式小程序。

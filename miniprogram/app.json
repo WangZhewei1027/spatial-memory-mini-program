@@ -5,14 +5,46 @@
     "pages/scene/scene"
   ],
   "subpackages": [
-    { "root": "labs/image-match", "pages": ["index"] },
-    { "root": "labs/image-match-wasm", "name": "image-match-wasm", "pages": ["index"] },
+    {
+      "root": "labs/image-match",
+      "pages": [
+        "index"
+      ]
+    },
+    {
+      "root": "labs/image-match-wasm",
+      "name": "image-match-wasm",
+      "pages": [
+        "index"
+      ]
+    },
     {
       "root": "labs/xr-three",
       "pages": [
         "index",
         "bridge",
         "scene-preview"
+      ]
+    },
+    {
+      "root": "packages/image-match-runtime",
+      "name": "image-match-runtime",
+      "pages": [
+        "index"
+      ]
+    },
+    {
+      "root": "packages/image-match-model-a",
+      "name": "image-match-model-a",
+      "pages": [
+        "index"
+      ]
+    },
+    {
+      "root": "packages/image-match-model-b",
+      "name": "image-match-model-b",
+      "pages": [
+        "index"
       ]
     }
   ],
@@ -33,5 +65,9 @@
   ],
   "style": "v2",
   "componentFramework": "glass-easel",
-  "lazyCodeLoading": "requiredComponents"
+  "lazyCodeLoading": "requiredComponents",
+  "workers": {
+    "path": "workers",
+    "isSubpackage": true
+  }
 }

@@ -30,7 +30,7 @@ const XR_CONFIG = {
   // 普通模型较小、复用率高，上限可放宽；巨型模型动辄几十 MB，从紧。
   maxCachedModelUrls: 8,
   maxCachedHugeUrls: 3,
-  // OSD 不提供世界位移，GPS 模式定期读取最新附近内容。
+  // 图像匹配不提供目标位姿，GPS 模式定期读取最新附近内容。
   gpsRefreshMs: 30000,
   // 相机画面与定位就绪后，错开首批资源构建。
   firstFetchDelayMs: 1000,

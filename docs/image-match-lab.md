@@ -118,3 +118,19 @@ Apple M1 Pro，微信开发者工具，基础库 3.17.4；实际执行 MediaPipe
 验证：`npm test`，含 `npm run test:image-match` 的编解码缺失环境、帧缓冲区所有权、取消、相册跨前后台、计时口径、WASM 体积及真实初始化内存一致性回归。Node 替身不替代真机相机验收；附近目标载入和多建筑准确率尚未验收。
 
 官方参考：[Image Embedder](https://developers.google.com/edge/mediapipe/solutions/vision/image_embedder?tab=Web)、[MediaPipe 源码](https://github.com/google-ai-edge/mediapipe)、[固定模型](https://storage.googleapis.com/mediapipe-models/image_embedder/mobilenet_v3_small/float32/1/mobilenet_v3_small.tflite)、[编码兼容库](https://github.com/inexorabletash/text-encoding)。
+
+## 2026-11-09 接入现有匹配流程
+
+用户决定暂停 SIMD 调查，先采用无 SIMD。实验页仍保留原 MediaPipe Tasks Vision SDK，正式页改为同一个 MobileNet 模型的 CPU TFLite Worker 运行器；理由是微信 Worker 无 Canvas/wx API，SDK 浏览器图像输入不能直接在该线程运行。具体实现、配置与验收见[正式识别流程](anchor-recognition.md)。
+
+迁移中按模型 metadata 核实输入归一化为 RGB/255（mean=0、std=255）。最初试用其他 MobileNet 常见的 [-1,1] 预处理，模拟器同图向量相似度仅 0.5016 / 0.0856；修正后与原 SDK 对同一份 224×224 像素的特征相似度为 0.999999999997 / 0.999999999998。这个校验防止将“能运行”误认为“模型输入正确”。
+
+`labs/image-match/index?worker=1` 自动做同图 SDK/Worker 对照、两张不同图片检查、12 次 Worker 推理与主线程 16ms 定时器探针。模拟器推理 22–32ms，探针记录 55 次、最大间隔 43ms；[完整报告](benchmarks/image-match-worker-simulator-2026-11-09.json)。定时器用于观察 JS 响应，不是实际渲染 FPS；模拟器结果不能当作手机或相机实测。新流程直接读取 224×224 RGBA，与前述 480×640 SDK 测试属于不同运行链路，耗时不能拼接比较。
+
+生产默认每秒一帧、单任务在途、慢帧自适应降频、旧帧丢弃、命中后终止 Worker。单个 SLAM 会话同时提供扫描像素与展示位姿，取消 OSD→SLAM 重启。代码分包提供模型与 WASM，只有实验报告仍依赖本机 8787 服务。构建生产路径：`npm run build:image-matcher`；数值与生命周期回归：`npm run test:image-matcher`。
+
+### Worker 真机结果（2026-11-09）
+
+同一台 iPhone 15 Pro / iOS 26.6.2 / 微信 8.0.80 / 基础库 3.17.6，用户确认「后台识别验证完成」。两张同图 SDK/Worker 特征余弦相似度为 **0.999999999997 / 0.999999999998**；不同图为 0.300219。12 次合成图 Worker 推理 **149–156ms，P50 151ms**；主线程 16ms 定时器回调 135 次，最大间隔 **51ms**。证据：[完整手机报告](benchmarks/image-match-worker-iphone15pro-2026-11-09.json)。
+
+该报告验证数值和 Worker 推理期间的 JS 响应，没有采集真实相机或渲染 FPS。51ms 不是零卡顿承诺；149–156ms 不能当作相机端到端耗时，也不能直接与先前 SDK 的 480×640 相机实验做百分比性能承诺。真实地点正负样本、拍摄方向、识别阈值和完整 AR 媒体流畅度仍需现场验收。

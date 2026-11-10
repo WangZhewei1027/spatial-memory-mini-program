@@ -9,12 +9,14 @@ const { disposeTree } = require("./resources");
 class ARRuntime {
   constructor(
     canvas,
-    { width, height, onReady, onTick, onState, onAnchors, debugTimings = false },
+    { width, height, onReady, onTick, onState, onCameraFrame, requireTracking, debugTimings = false },
   ) {
     this.canvas = canvas;
     this.onReady = onReady;
     this.onTick = onTick;
     this.onState = onState;
+    this.onCameraFrame = onCameraFrame;
+    this.requireTracking = requireTracking;
     this.debugTimings = debugTimings;
     try {
       const gl = (this.gl = canvas.getContext("webgl2", {
@@ -37,7 +39,7 @@ class ARRuntime {
           context.getProgramInfoLog(program) || "Three shader 编译失败";
       };
       this.scene = new THREE.Scene();
-      // OSD scans without content; spatial display uses native v2 camera poses.
+      // Content uses native v2 camera poses; pixel recognition runs in a Worker.
       this.camera = new THREE.PerspectiveCamera(60, 1, 0.01, 300);
       this.content = new THREE.Group();
       this.scene.add(this.content);
@@ -53,7 +55,6 @@ class ARRuntime {
         gl,
         maxFps: 30,
         mode: "slam",
-        onAnchors,
         size: () => ({ width: canvas.width, height: canvas.height }),
         onFrame: (frame, timing) => this.frame(frame, timing),
         onState: (state, message) => {
@@ -74,14 +75,14 @@ class ARRuntime {
     width = Math.max(16, width);
     height = Math.max(16, height);
     this.renderer.setSize(width, height, false);
-    if (this.session?.mode !== "slam") {
+    // Before the first native pose; afterwards VisionKit supplies the projection.
+    if (!this.session) {
       this.camera.aspect = width / height;
       this.camera.updateProjectionMatrix();
     }
   }
-  start(mode = this.session.mode) {
+  start() {
     this.stop();
-    this.session.mode = mode;
     this.ready = false;
     this.tracking = null;
     this.shaderError = null;
@@ -91,13 +92,7 @@ class ARRuntime {
     this.lastFrameAt = null;
     this.validFrameAt = null;
     this.cameraFrameAt = null;
-    if (mode === "osd") {
-      this.camera.matrixAutoUpdate = this.camera.matrixWorldAutoUpdate = true;
-      this.camera.position.set(0, 0, 0);
-      this.camera.quaternion.identity();
-      this.camera.scale.set(1, 1, 1);
-      this.resize(this.canvas.width, this.canvas.height);
-    }
+    this.trackingWaitAt = null;
     this.session.start();
   }
   stop() {
@@ -105,7 +100,7 @@ class ARRuntime {
     this.session.stop();
   }
   updateTracking(valid) {
-    if (this.session.mode !== "slam" || this.tracking === valid) return;
+    if (this.tracking === valid) return;
     this.tracking = valid;
     this.onState(valid ? (this.ready ? "trackingrestored" : "trackingready") : "tracking",
       valid ? "空间追踪已就绪" : "请缓慢左右移动手机，建立空间定位…");
@@ -118,10 +113,8 @@ class ARRuntime {
         throw new Error("未取得相机帧，请检查设备兼容性和权限");
       return;
     }
-    const spatial = this.session.mode === "slam";
-    const poseValid = !spatial || (this.session.isTracking() &&
-      syncVKCamera(this.camera, frame.camera, 0.01, this.camera.far));
-    if (!spatial) this.camera.updateMatrixWorld(true);
+    const poseValid = this.session.isTracking() &&
+      syncVKCamera(this.camera, frame.camera, 0.01, this.camera.far);
     const matrixMs = Date.now() - start;
     const backgroundAt = Date.now();
     if (
@@ -139,15 +132,21 @@ class ARRuntime {
     }
     this.cameraFrameAt = start;
     const backgroundMs = Date.now() - backgroundAt;
+    // Image recognition needs pixels, not a metric pose. This synchronous hook
+    // consumes any requested native buffer before VKFrame's lifetime ends.
+    this.onCameraFrame?.(frame);
     this.updateTracking(poseValid);
     // Never place or render spatial content against an initializing/stale pose.
     // Keep the camera background visible while native tracking recovers.
     if (!poseValid) {
-      if (start - (this.validFrameAt || this.startedAt) > 30000)
+      if (this.requireTracking?.() === false) this.trackingWaitAt = null;
+      else if (this.trackingWaitAt == null) this.trackingWaitAt = start;
+      if (this.trackingWaitAt != null && start - this.trackingWaitAt > 30000)
         throw new Error("空间定位超过 30 秒，请在光线充足、有纹理的环境中重试");
       return;
     }
     this.validFrameAt = start;
+    this.trackingWaitAt = null;
     if (!this.ready) {
       this.ready = true;
       this.onReady();
@@ -162,13 +161,7 @@ class ARRuntime {
     const businessAt = Date.now();
     this.onTick(dt);
     const far = sceneFarPlane(this.camera, this.content);
-    if (far !== this.camera.far) {
-      if (spatial) syncVKCamera(this.camera, frame.camera, 0.01, far);
-      else {
-        this.camera.far = far;
-        this.camera.updateProjectionMatrix();
-      }
-    }
+    if (far !== this.camera.far) syncVKCamera(this.camera, frame.camera, 0.01, far);
     const businessMs = Date.now() - businessAt,
       renderAt = Date.now();
     this.renderer.render(this.scene, this.camera);

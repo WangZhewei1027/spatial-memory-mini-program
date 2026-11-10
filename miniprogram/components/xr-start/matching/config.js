@@ -1,13 +1,18 @@
 module.exports = {
   debugLogs: true,
   diagnosticIntervalMs: 3000,
-  batchSize: 5, // App limit, not a claimed native OSD limit; rotate through all nearby targets.
-  batchDurationMs: 12000,
+  candidateRefreshDistanceMeters: 20, // Also require displacement beyond the combined GPS accuracy.
+  gpsCheckIntervalMs: 5000, // Checks location only; stationary scans do not re-fetch candidates.
+  maxCachedReferences: 200,
   minimumObservations: 3,
-  confirmDurationMs: 700,
-  maxObservationGapMs: 1500,
-  emptyRetryMs: 30000,
-  errorRetryMs: 10000,
+  confirmDurationMs: 1800,
+  maxObservationGapMs: 4500,
+  frameIntervalMs: 1000,
+  maxFrameIntervalMs: 3000,
+  maxResultAgeMs: 2500,
+  // Trial threshold for validating matched content placement; field calibration is pending.
+  minimumScore: 0.5,
+  minimumMargin: 0.08,
   gpsCacheMs: 5000,
   gpsWatchMaxAgeMs: 10000,
 };

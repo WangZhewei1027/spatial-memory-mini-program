@@ -170,6 +170,24 @@ async function main() {
 
   const { ARRuntime } = lib("ar-runtime");
   {
+    let captured = 0, needsPose = false;
+    const scanning = Object.assign(Object.create(ARRuntime.prototype), {
+      canvas: { width: 320, height: 480 }, session: { mode: 'slam', isTracking: () => false },
+      background: { draw: () => true }, renderer: {}, onState() {},
+      onCameraFrame() { captured++; }, requireTracking: () => needsPose,
+      startedAt: Date.now() - 60000, trackingWaitAt: Date.now() - 60000,
+    });
+    scanning.frame({}, { now: 1000, acquireMs: 0 });
+    assert.equal(captured, 1, 'recognition receives pixels without a SLAM pose');
+    assert.equal(scanning.trackingWaitAt, null, 'scanning does not time out waiting for a pose');
+    needsPose = true;
+    scanning.frame({}, { now: 1034, acquireMs: 0 });
+    assert.ok(Date.now() - scanning.trackingWaitAt < 1000, 'placement starts its own tracking deadline');
+    scanning.trackingWaitAt = Date.now() - 31000;
+    assert.throws(() => scanning.frame({}, { now: 1068, acquireMs: 0 }), /空间定位超过/);
+    console.log('PASS camera pixels arrive before SLAM tracking; placement retains its tracking timeout');
+  }
+  {
     const display = Object.assign(Object.create(ARRuntime.prototype), {
       camera: new THREE.PerspectiveCamera(60, 1, .01, 300), renderer: { setSize() {} },
     });
@@ -187,11 +205,13 @@ async function main() {
     const clockRuntime = Object.assign(Object.create(ARRuntime.prototype), {
       canvas: { width: 320, height: 480 }, scene: new THREE.Scene(), content: new THREE.Group(),
       camera: new THREE.PerspectiveCamera(),
-      session: { mode: 'osd', start() {}, stop() {} }, background: { draw: () => true },
+      session: { mode: 'slam', start() {}, stop() {}, isTracking: () => true }, background: { draw: () => true },
       renderer: { render() {}, setSize() {}, info: { render: { calls: 0 }, memory: { geometries: 0, textures: 0 } } },
-      onReady() {}, onTick(dt) { deltas.push(dt); core.advance(dt); },
+      onReady() {}, onState() {}, onTick(dt) { deltas.push(dt); core.advance(dt); },
     });
-    const frame = { get camera() { throw new Error("OSD must not read a metric pose"); } };
+    const pose = new THREE.PerspectiveCamera(60, 320 / 480, .01, 300); pose.updateMatrixWorld(true);
+    const frame = { camera: { viewMatrix: pose.matrixWorldInverse.toArray(), getProjectionMatrix(near, far) {
+      pose.near = near; pose.far = far; pose.updateProjectionMatrix(); return pose.projectionMatrix.toArray(); } } };
     clockRuntime.start(); core.play();
     for (const now of [1000, 1350, 1750, 2050]) clockRuntime.frame(frame, { now, acquireMs: 0 });
     assert.ok(Math.abs(core.time - 1.05) < 1e-9, 'slow render frames must preserve elapsed scene time, matching native audio');
@@ -261,13 +281,7 @@ async function main() {
     scene: new THREE.Scene(),
   };
   host._runtime.camera.updateMatrixWorld();
-  host._runtime.session = { mode: "osd" };
-  host._audioEntries = [{ audioRefs: { ctx: { volume: 0 }, baseVolume: .6 },
-    node: { get position() { throw new Error("OSD audio must not calculate physical distance"); } } }];
-  host._arReady = true;
-  host.tickAudioVolume(true);
-  assert.equal(host._audioEntries[0].audioRefs.ctx.volume, .6);
-  host._audioEntries = [];
+  host._runtime.session = { mode: "slam" };
   host.scene = host._runtime.scene;
   host.shadowRoot = new THREE.Group();
   host.scene.add(host.shadowRoot);
@@ -388,7 +402,8 @@ async function main() {
   host._retrievalPaused = false;
   host._arReady = true;
   host.retrievalMode = "anchor";
-  host._osdPhase = "scanning";
+  host._matchPhase = "scanning";
+  host._sessionActive = true; host._cameraReady = true; host._arReady = false;
   wx.uploadFile = () => { throw new Error("camera upload is forbidden"); };
   wx.request = options => {
     assert.ok(options.url.endsWith("/api/miniapp/anchors/content"));
@@ -411,12 +426,12 @@ async function main() {
     canvas: { width: 390, height: 844 }, content: host.shadowRoot,
     background: { draw: () => true },
     renderer: { setSize() {}, render(scene, camera) { scene.updateMatrixWorld(true); camera.updateMatrixWorld(); spatialRenders++; }, info: { render: {}, memory: {} } },
-    session: { mode: 'osd', start() { sessionStarts++; }, stop() {}, isTracking: () => tracking, getOSDDiagnostics: () => ({}) },
+    session: { mode: 'slam', start() { sessionStarts++; }, stop() {}, isTracking: () => tracking, getDiagnostics: () => ({}) },
     onReady: () => host.handleARReady(), onTick: dt => host.handleTick(dt),
     onState: (state, message) => { trackingStates.push(state); host.onARState(state, message); },
   });
-  await host._acceptOSDMatch({ id: "matched-place", name: "Place", reference_version: "v1" });
-  assert.equal(host._osdPhase, 'tracking');
+  await host._acceptImageMatch({ id: "matched-place", name: "Place", reference_version: "v1" });
+  assert.equal(host._matchPhase, 'tracking');
   assert.equal(host.nodeList.length, 0);
   host._runtime.frame(nativeFrame, { now: 1000, acquireMs: 0 });
   assert.equal(host._arReady, false); assert.equal(spatialRenders, 0);
@@ -426,8 +441,8 @@ async function main() {
   assert.equal(host.nodeList.length, 0, 'singular poses must never place content');
   host._runtime.frame(nativeFrame, { now: 1034, acquireMs: 0 });
   assert.equal(host._matchedAnchorId, "matched-place");
-  assert.equal(host._osdPhase, "locked");
-  assert.equal(host._nextRecognitionAt, Infinity);
+  assert.equal(host._matchPhase, "locked");
+  assert.ok(host._nextRecognitionAt > Date.now(), 'locked content still schedules a GPS movement check');
   assert.equal(host.nodeList.length, 1);
   assert.equal(host.nodeList[0].assetId, "result-text");
   assert.deepEqual(host._runtime.camera.position.toArray(), nativeCamera.position.toArray());
@@ -457,23 +472,25 @@ async function main() {
   host._runtime.frame(nativeFrame, { now: 1200, acquireMs: 0 });
   assert.equal(host._arReady, true); assert.equal(host.nodeList.length, 1);
   await host.recognizeAnchor();
-  assert.equal(host._osdPhase, "locked", "moving must not unlock content");
+  assert.equal(host._matchPhase, "locked", "moving must not unlock content");
   host.recognizeAnchor = async () => {};
   host.rescan();
   assert.equal(host.nodeList.length, 0);
   assert.equal(host.shadowRoot.children.length, 0);
-  assert.equal(host._osdPhase, "idle");
-  assert.equal(host._runtime.session.mode, 'osd');
-  assert.deepEqual(Array.from(host._runtime.camera.position.toArray()), [0, 0, 0]);
+  assert.equal(host._matchPhase, "idle");
+  assert.equal(host._runtime.session.mode, 'slam');
+  assert.ok(host._runtime.camera.position.distanceTo(nativeCamera.position) < 1e-8);
   host._runtime.frame(nativeFrame, { now: 1234, acquireMs: 0 });
   assert.equal(host._arReady, true);
   const startsBeforeRescan = sessionStarts;
   host.rescan();
-  assert.equal(sessionStarts, startsBeforeRescan + 1, 'rescan must restart even when already in OSD mode');
-  assert.equal(host._arReady, false, 'a restarted scan waits for its new camera frame');
+  assert.equal(sessionStarts, startsBeforeRescan, 'rescan must reuse the live SLAM session');
+  assert.equal(host._arReady, true, 'rescan preserves the established metric pose');
   host._runtime.frame(nativeFrame, { now: 1268, acquireMs: 0 });
   assert.equal(host._arReady, true);
-  console.log("PASS OSD -> SLAM initialization -> world-locked Three content with camera parallax -> tracking recovery -> rescan");
+  host.pauseRetrieval();
+  assert.equal(host._matchDiagnosticTimer, null, 'leaving the scanning fixture releases its heartbeat');
+  console.log("PASS Worker match -> existing SLAM pose -> world-locked Three content with camera parallax -> tracking recovery -> rescan");
 
   let decoderRemoved = 0,
     audioDestroyed = 0,

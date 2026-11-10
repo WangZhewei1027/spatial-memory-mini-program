@@ -1,0 +1,153 @@
+[
+  {
+    "receivedAt": 1794196837917,
+    "event": "[DEBUG-simd] probe-result",
+    "detail": {
+      "sha256": "a7eda7ef8e4fbebea8afca3795e6a863cccf5e5ba77e95fd30f72050cda9359d",
+      "operations": 90,
+      "total": 2196,
+      "failed": 0,
+      "failedProbes": [],
+      "failures": []
+    },
+    "environment": {
+      "platform": "ios",
+      "system": "iOS 26.6.2",
+      "model": "iPhone 15 pro<iPhone16,1>",
+      "SDKVersion": "3.17.6",
+      "version": "8.0.80"
+    }
+  },
+  {
+    "receivedAt": 1794197035362,
+    "event": "[DEBUG-simd] probe-result",
+    "detail": {
+      "sha256": "90896c966d2726f636ec1cdf6f538d70319b2f19d938eda2ef1fd1859683792d",
+      "operations": 90,
+      "total": 6768,
+      "failed": 0,
+      "failedProbes": [],
+      "failures": []
+    },
+    "environment": {
+      "platform": "ios",
+      "system": "iOS 26.6.2",
+      "model": "iPhone 15 pro<iPhone16,1>",
+      "SDKVersion": "3.17.6",
+      "version": "8.0.80"
+    }
+  },
+  {
+    "receivedAt": 1794197037146,
+    "event": "engine-ready",
+    "detail": {
+      "ms": 1670.509033203125,
+      "runtime": "MediaPipe 0.10.21 / WXWebAssembly / CPU"
+    },
+    "environment": {
+      "platform": "ios",
+      "system": "iOS 26.6.2",
+      "model": "iPhone 15 pro<iPhone16,1>",
+      "SDKVersion": "3.17.6",
+      "version": "8.0.80"
+    }
+  },
+  {
+    "receivedAt": 1794197037344,
+    "event": "input-check",
+    "detail": {
+      "distinctImageCosine": 0.9999996624751116,
+      "pixelStats": [
+        {
+          "min": 36,
+          "max": 228,
+          "mean": 131.63932291666666,
+          "stddev": 63.85232384964461,
+          "alphaMin": 255,
+          "samples": 1024
+        },
+        {
+          "min": 0,
+          "max": 255,
+          "mean": 127.5,
+          "stddev": 127.5,
+          "alphaMin": 255,
+          "samples": 1024
+        }
+      ]
+    },
+    "environment": {
+      "platform": "ios",
+      "system": "iOS 26.6.2",
+      "model": "iPhone 15 pro<iPhone16,1>",
+      "SDKVersion": "3.17.6",
+      "version": "8.0.80"
+    }
+  },
+  {
+    "receivedAt": 1794197350898,
+    "event": "[DEBUG-simd] probe-result",
+    "detail": {
+      "sha256": "90896c966d2726f636ec1cdf6f538d70319b2f19d938eda2ef1fd1859683792d",
+      "operations": 90,
+      "total": 6768,
+      "failed": 0,
+      "failedProbes": [],
+      "failures": []
+    },
+    "environment": {
+      "platform": "ios",
+      "system": "iOS 26.6.2",
+      "model": "iPhone 15 pro<iPhone16,1>",
+      "SDKVersion": "3.17.6",
+      "version": "8.0.80"
+    }
+  },
+  {
+    "receivedAt": 1794197351406,
+    "event": "engine-ready",
+    "detail": {
+      "ms": 500.08203125,
+      "runtime": "MediaPipe 0.10.21 / WXWebAssembly / CPU"
+    },
+    "environment": {
+      "platform": "ios",
+      "system": "iOS 26.6.2",
+      "model": "iPhone 15 pro<iPhone16,1>",
+      "SDKVersion": "3.17.6",
+      "version": "8.0.80"
+    }
+  },
+  {
+    "receivedAt": 1794197351749,
+    "event": "input-check",
+    "detail": {
+      "distinctImageCosine": 0.9999996624751116,
+      "pixelStats": [
+        {
+          "min": 36,
+          "max": 228,
+          "mean": 131.63932291666666,
+          "stddev": 63.85232384964461,
+          "alphaMin": 255,
+          "samples": 1024
+        },
+        {
+          "min": 0,
+          "max": 255,
+          "mean": 127.5,
+          "stddev": 127.5,
+          "alphaMin": 255,
+          "samples": 1024
+        }
+      ]
+    },
+    "environment": {
+      "platform": "ios",
+      "system": "iOS 26.6.2",
+      "model": "iPhone 15 pro<iPhone16,1>",
+      "SDKVersion": "3.17.6",
+      "version": "8.0.80"
+    }
+  }
+]

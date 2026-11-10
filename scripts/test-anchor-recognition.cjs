@@ -5,317 +5,268 @@ const vm = require('node:vm');
 const path = require('node:path');
 const base = path.resolve(__dirname, '../miniprogram');
 const config = require(path.join(base, 'components/xr-start/matching/config'));
-const target = (id = 'a') => ({ id, name: id, image_url: `https://media.test/${id}.png`, reference_version: `version-${id}` });
-const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
+const policy = require(path.join(base, 'lib/image-matcher/policy'));
+const target = (id = 'a', version = `version-${id}`) => ({ id, name: id, image_url: `https://media.test/${id}.png`, reference_version: version });
+const deferred = () => { let resolve, reject; const promise = new Promise((a,b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
+const settle = async () => { for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve)); };
 function load(file, dependencies, globals = {}) {
   const m = { exports: {} };
   vm.runInNewContext(fs.readFileSync(path.join(base, file), 'utf8'), {
     module: m, exports: m.exports, require: name => {
-      assert.ok(name in dependencies, `unexpected dependency: ${name}`);
-      return dependencies[name];
+      assert.ok(name in dependencies, `unexpected dependency: ${name}`); return dependencies[name];
     }, console, setTimeout, clearTimeout, ...globals,
-  });
-  return m.exports;
+  }); return m.exports;
+}
+// Loads real modules by base-relative path and follows their relative requires,
+// so splitting a module needs no test change; `mocks` replaces I/O boundaries.
+function loadTree(mocks, globals = {}) {
+  const loaded = new Map();
+  const load = key => {
+    key = key.replace(/\.js$/, '');
+    if (key in mocks) return mocks[key];
+    if (loaded.has(key)) return loaded.get(key).exports;
+    const m = { exports: {} }; loaded.set(key, m);
+    vm.runInNewContext(fs.readFileSync(path.join(base, `${key}.js`), 'utf8'), {
+      module: m, exports: m.exports, require: name => {
+        assert.ok(name.startsWith('.'), `unexpected dependency: ${name}`);
+        return load(path.posix.join(path.posix.dirname(key), name));
+      }, console, setTimeout, clearTimeout, ...globals,
+    });
+    return m.exports;
+  };
+  return load;
 }
 function fixture(overrides = {}) {
-  let now = 1000, nextId = overrides.firstMarkerId ?? 0;
-  const calls = [], logs = [], files = new Set(), removed = [], native = new Map();
-  const log = (event, fields, level) => logs.push({ event, fields: JSON.parse(JSON.stringify(fields)), level });
-  const api = {
-    CONFIG: { workspaceId: 'map' },
-    async fetchAnchorCandidates(body) { calls.push(['candidates', body]); return { statusCode: 200, data: { candidates: [target()] } }; },
-    async fetchAnchorContent(body) { calls.push(['content', body]); return { statusCode: 200, data: { anchor: { id: body.anchor_id }, assets: [{ id: 'content-a', file_type: 'text' }] } }; },
-    ...overrides,
-  };
-  const removeFile = p => { if (p) { removed.push(p); files.delete(p); } };
+  let now = 1000, closed = 0, embedded = 0, loaded = 0, captures = 0, candidateCalls = 0;
+  let gps = { latitude: 31, longitude: 121, accuracy: 10 };
+  const calls = [], statuses = [], logs = [], diagnosticTimers = new Map();
+  let diagnosticTimerId = 0;
   const clock = { Date: class extends Date { static now() { return now; } } };
-  const diagnostics = load('components/xr-start/matching/diagnostics.js', { './config': config, './log': log }, clock);
-  const methods = load('components/xr-start/matching/index.js', {
-    './config': config, './log': log, '../../../utils/backend': api,
-    './diagnostics': diagnostics,
-    '../../../lib/three-runtime/resources': { removeFile },
-    './reference': { loadOSDReference: overrides.loadReference || (async url => { const p = `/tmp/${url.split('/').pop()}-${nextId}.jpg`; files.add(p); return p; }) },
-  }, {
-    Date: class extends Date { static now() { return now; } },
-    wx: { uploadFile() { throw new Error('No camera uploads'); }, getLocation({ success }) { success({ latitude: 31, longitude: 121, accuracy: 10 }); } },
+  const diagnostics = load('components/xr-start/matching/diagnostics.js', { './config': config }, { ...clock,
+    setTimeout(fn) { const id = ++diagnosticTimerId; diagnosticTimers.set(id, fn); return id; }, clearTimeout(id) { diagnosticTimers.delete(id); },
   });
-  const host = Object.assign({
-    retrievalMode: 'anchor', _arReady: true, _modeEpoch: 0, _contentEpoch: 0,
-    _nextRecognitionAt: 0, _osdPhase: 'idle', _allowedAssetIds: new Set(),
-    _seenAssets: new Map(), nodeList: [], statuses: [], displayed: [],
-    setData() {}, triggerEvent(_name, value) { this.statuses.push(value); },
-    displayAssets(assets) { this.displayed.push(assets); }, _destroyNode() {},
-    fetchNearbyAssets() {}, fetchHugeAssets() {},
-    _desiredARMode() { return this.retrievalMode === 'anchor' ? 'osd' : 'slam'; },
-    _ensureARMode(mode) {
-      this._runtime.session.mode = mode;
-      this._arReady = !(mode === 'slam' && overrides.deferTracking);
-      return this._arReady;
-    },
-    _runtime: { session: {
-      mode: 'osd',
-      addOSDMarker(p) { const id = nextId++; native.set(id, p); return id; },
-      removeOSDMarker(id) { native.delete(id); },
-    } },
-  }, methods);
-  const observe = (id = [...native.keys()][0], patch = {}) => host.handleOSDAnchors('updateAnchors', [{
-    id: id + 100, markerId: id, type: 2, path: native.get(id), origin: { x: 0.2, y: 0.2 }, size: { width: 0.4, height: 0.4 }, ...patch,
-  }]);
-  return { host, api, calls, logs, files, removed, native, observe, tick: ms => { now += ms; }, settle: async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); } };
+  const api = { CONFIG: { workspaceId: 'map' },
+    async fetchAnchorCandidates(body) { calls.push(['candidates', body]); return { statusCode: 200, data: { candidates: [target()] } }; },
+    async fetchAnchorContent(body) { calls.push(['content', body]); return { statusCode: 200, data: { anchor: { id: body.anchor_id }, assets: [{ id: 'text', file_type: 'text' }] } }; }, ...overrides };
+  const fetchCandidates = api.fetchAnchorCandidates;
+  api.fetchAnchorCandidates = async body => { candidateCalls++; return fetchCandidates(body); };
+  class Matcher {
+    async start() { await overrides.start?.(); return this; }
+    async embed(pixels) { embedded++; return overrides.embed ? overrides.embed(pixels) : { vector: [1,0], inferenceMs: 200 }; }
+    close() { if (!this.closed) closed++; this.closed = true; }
+  }
+  const matching = 'components/xr-start/matching';
+  const loadModule = loadTree({
+    [`${matching}/config`]: config, [`${matching}/log`]: (...args) => logs.push(args), [`${matching}/diagnostics`]: diagnostics,
+    'utils/backend': api, 'lib/image-matcher/client': { ImageMatcher: Matcher }, 'lib/image-matcher/policy': policy,
+    [`${matching}/reference`]: { async loadReferencePixels(url, current) { loaded++; return overrides.loadReference ? overrides.loadReference(url, current) : new ArrayBuffer(4); } },
+  }, { Date: class extends Date { static now() { return now; } },
+    wx: { uploadFile() { throw Error('camera upload forbidden'); }, getLocation({ success, fail }) { if (overrides.locate) overrides.locate({ success, fail }); else success(gps); } } });
+  const methods = loadModule(`${matching}/index`);
+  const host = { ...methods, ...loadModule(`${matching}/state`).initialRecognitionState(), retrievalMode: 'anchor', _arReady: true, _cameraReady: true, _sessionActive: true,
+    _modeEpoch: 0, _contentEpoch: 0, _nextRecognitionAt: 0, _matchPhase: 'idle', _allowedAssetIds: new Set(),
+    _seenAssets: new Map(), nodeList: [], displayed: [],
+    setData() {}, triggerEvent(_name, value) { statuses.push(value); },
+    displayAssets(assets) { this.displayed.push(assets); }, _destroyNode() {}, fetchNearbyAssets() {}, fetchHugeAssets() {},
+    // Asset-module boundary; its resource release is covered by test-ar-runtime.
+    _clearRemoteAssets() { this._contentEpoch++; this._allowedAssetIds.clear(); this.nodeList = []; this._matchedAnchorId = null; },
+    _ensureARSession() { return this._arReady; }, _runtime: { session: { mode: 'slam' } },
+  };
+  const pixels = new Uint8Array(224*224*4);
+  for (let i=0;i<pixels.length;i++) pixels[i] = Math.floor(i/4)%251;
+  const frame = { getCameraBuffer(w,h) { captures++; assert.equal(w,224); assert.equal(h,224); return pixels.buffer; } };
+  const sample = async () => { host.handleRecognitionFrame(frame); await new Promise(resolve => setTimeout(resolve, 5)); await settle(); };
+  return { host, api, calls, statuses, logs, pixels, frame, sample, diagnosticTimers,
+    heartbeat() { for (const [id, fn] of [...diagnosticTimers]) { diagnosticTimers.delete(id); fn(); } }, tick(ms=1000) { now += ms; }, now: () => now,
+    move(meters, accuracy = 10) { gps = { latitude: 31 + meters / 6371000 * 180 / Math.PI, longitude: 121, accuracy }; host.currentGPS = { ...gps, sampledAt: now }; },
+    counts: () => ({ closed, embedded, loaded, captures, candidateCalls }) };
 }
-test('iOS empty-path OSD trace confirms by registered markerId and locks content once', async () => {
-  const f = fixture({ firstMarkerId: 10001 });
-  await f.host.recognizeAnchor();
-  // iPhone 15 Pro / WeChat 8.0.80 / SDK 3.17.6: path is empty, id changes
-  // every update, markerId stays 10001. Replay the observed 268 callbacks.
-  const sample = { type: 2, markerId: 10001, path: '',
-    origin: { x: .13948634266853333, y: .31419575214385986 },
-    size: { width: .7120342254638672, height: .37108778953552246 } };
-  for (let id = 0; id < 268; id++) {
-    f.host.handleOSDAnchors(id === 0 ? 'addAnchors' : 'updateAnchors', [{ ...sample, id }]);
-    f.tick(1000 / 30); await f.settle();
+test('three spaced Worker results lock once, release inference, and rescan reuses SLAM', async () => {
+  const f=fixture(); await f.host.recognizeAnchor();
+  assert.equal(f.host._matchPhase,'scanning');
+  await f.sample(); f.tick(); await f.sample(); assert.equal(f.host.displayed.length,0);
+  f.tick(); await f.sample(); assert.equal(f.host._matchPhase,'locked'); assert.equal(f.host.displayed.length,1);
+  assert.equal(f.counts().closed,1); assert.equal(f.host._imageMatcher,null);
+  f.tick(60000); await f.sample(); assert.equal(f.calls.length,2);
+  f.host.rescan(); await settle(); assert.equal(f.host._matchPhase,'scanning'); assert.equal(f.host._matchedAnchorId,null);
+  f.host.pauseRetrieval(); assert.equal(f.counts().closed,2);
+});
+test('recognition phases follow the declared lifecycle and cancellation restores every per-scan field', async () => {
+  const state = require(path.join(base, 'components/xr-start/matching/state'));
+  const { PHASES: P, canTransition } = state;
+  for (const [from, to] of [[P.IDLE,P.PREPARING],[P.PREPARING,P.SCANNING],[P.SCANNING,P.LOADING],[P.LOADING,P.TRACKING],[P.TRACKING,P.LOCKED],[P.LOCKED,P.IDLE],[P.ERROR,P.IDLE]])
+    assert.ok(canTransition(from, to), `${from} -> ${to}`);
+  for (const [from, to] of [[P.IDLE,P.SCANNING],[P.LOCKED,P.SCANNING],[P.ERROR,P.SCANNING],[P.TRACKING,P.ERROR],[P.EMPTY,P.PREPARING]])
+    assert.ok(!canTransition(from, to), `${from} -> ${to} must be rejected`);
+  const f=fixture(); await f.host.recognizeAnchor();
+  for (let i=0;i<3;i++) { await f.sample(); f.tick(); }
+  assert.equal(f.host._matchPhase,'locked');
+  f.host.rescan(); await settle(); f.host.pauseRetrieval();
+  assert.ok(!f.logs.some(([event]) => event === '非法识别状态切换'), 'normal flow must not log illegal transitions');
+  const fields = Object.fromEntries(Object.keys(state.scanState()).map(k => [k, f.host[k]]));
+  assert.equal(JSON.stringify(fields), JSON.stringify(state.scanState()), 'pause restores every per-scan field');
+  f.host._matchPhase='locked'; f.host._setMatchPhase('scanning');
+  assert.equal(JSON.stringify(f.logs.at(-1).slice(0,2)), JSON.stringify(['非法识别状态切换', { run: f.host._modeEpoch, phase: 'locked', from: 'locked', to: 'scanning' }]));
+});
+test('pixels can be matched before SLAM tracking; content waits for pose and cancellation discards it', async () => {
+  for (const cancel of [false,true]) {
+    const f=fixture(); f.host._arReady=false; await f.host.recognizeAnchor();
+    await f.host._acceptImageMatch(target()); assert.equal(f.host._matchPhase,'tracking'); assert.equal(f.host.displayed.length,0);
+    if(cancel)f.host.pauseRetrieval(); f.host._arReady=true; f.host._finishMatchPlacement();
+    assert.equal(f.host.displayed.length,cancel?0:1);
   }
-  assert.equal(f.host._osdPhase, 'locked', 'valid iOS detections must not be rejected because path is empty');
-  assert.equal(f.calls.filter(([kind]) => kind === 'content').length, 1);
-  assert.equal(f.host.displayed.length, 1);
-  assert.equal(f.logs.filter(x => x.event === '回调被过滤').length, 0);
-  f.host.rescan(); await f.settle();
-  assert.equal(f.host._osdPhase, 'scanning');
-  assert.ok(f.native.has(10002));
-  for (let i = 0; i < 3; i++) {
-    f.host.handleOSDAnchors('updateAnchors', [{ ...sample, id: 300 + i }]);
-    f.tick(350); await f.settle();
-  }
-  assert.equal(f.host._osdEvidence, null, 'removed marker IDs cannot confirm in a new scan');
-  assert.equal(f.calls.filter(([kind]) => kind === 'content').length, 1);
+});
+test('busy frames are dropped, native pixels are copied, and slow responses reduce cadence', async () => {
+  let pending, input;
+  const f=fixture({embed: pixels => { if(!pending)return {vector:[1,0],inferenceMs:10};input=pixels;return pending.promise; }});
+  await f.host.recognizeAnchor(); pending=deferred(); await f.sample();
+  for(let i=0;i<30;i++){f.tick(40);f.host.handleRecognitionFrame(f.frame);}
+  assert.equal(f.counts().captures,1); assert.notEqual(input,f.pixels.buffer);
+  const copy=new Uint8Array(input)[20];f.pixels[20]=255;assert.equal(new Uint8Array(input)[20],copy);
+  pending.resolve({vector:[1,0],inferenceMs:1200});await settle();
+  assert.equal(f.host._nextMatchFrameAt,4000); assert.equal(f.host._matchFrameBusy,false);
   f.host.pauseRetrieval();
 });
-test('OSD waits for a valid SLAM pose, and rescan/hide cancels pending spatial placement', async () => {
-  for (const action of ['ready', 'rescan', 'hide', 'gps']) {
-    const f = fixture({ deferTracking: true });
-    await f.host.recognizeAnchor(); await f.host._acceptOSDMatch(target());
-    assert.equal(f.host._osdPhase, 'tracking');
-    assert.equal(f.host._runtime.session.mode, 'slam');
-    assert.equal(f.host.displayed.length, 0, 'OSD camera cannot place world content');
-    assert.equal(f.native.size, 0); assert.equal(f.files.size, 0);
-    f.host._finishOSDPlacement();
-    assert.equal(f.host.displayed.length, 0, 'native start success is not spatial readiness');
-    if (action === 'rescan') f.host.rescan();
-    if (action === 'hide') f.host.pauseRetrieval();
-    if (action === 'gps') f.host.setRetrievalMode('gps');
-    await f.settle();
-    f.host._arReady = true;
-    f.host._finishOSDPlacement(); f.host._finishOSDPlacement();
-    assert.equal(f.host.displayed.length, action === 'ready' ? 1 : 0);
-    if (action === 'rescan') {
-      assert.equal(f.host._runtime.session.mode, 'osd');
-      assert.equal(f.host._osdPhase, 'scanning');
-    }
-    f.host.pauseRetrieval();
-  }
+test('dark images and stale inference never confirm a target', async () => {
+  const f=fixture();await f.host.recognizeAnchor();f.pixels.fill(0);await f.sample();assert.equal(f.counts().embedded,1);
+  f.host._matchEvidence={id:'a',count:2,since:0,lastAt:1000};
+  f.host._imageMatcher.embed=async()=>{f.tick(3000);return {vector:[1,0],inferenceMs:3000};};
+  await f.host._matchCameraPixels(new ArrayBuffer(4),f.host._modeEpoch,f.now());assert.equal(f.host._matchEvidence,null);
+  assert.equal(f.host.displayed.length,0);f.host.pauseRetrieval();
 });
-test('diagnostics distinguish absent SDK callbacks from rejected observations without flooding logs', async () => {
-  const silent = fixture(); await silent.host.recognizeAnchor();
-  silent.tick(3000); silent.host.reportOSDScan?.();
-  const idle = silent.logs.find(x => x.event === '扫描摘要');
-  assert.ok(idle, 'scanning with zero SDK callbacks must produce a diagnostic summary');
-  assert.equal(idle.fields.result, 'no_native_events');
-  assert.equal(idle.fields.callbacks, 0);
-  const filtered = fixture(); await filtered.host.recognizeAnchor();
-  for (let i = 0; i < 1000; i++) filtered.observe(999, { path: '' });
-  filtered.tick(3000); filtered.host.reportOSDScan?.();
-  const rejected = filtered.logs.find(x => x.event === '扫描摘要');
-  assert.equal(rejected.fields.result, 'all_observations_rejected');
-  assert.equal(rejected.fields.rejected.unknown_marker, 1000);
-  assert.equal(filtered.logs.filter(x => x.event === '回调被过滤').length, 1);
-  assert.ok(filtered.logs.length < 20, 'native frame events must not flood console');
-  silent.host.pauseRetrieval(); filtered.host.pauseRetrieval();
+test('ambiguous scores, weak matches, changed targets and observation gaps reset confirmation', () => {
+  const a={id:'a',vector:[1,0]}, b={id:'b',vector:[.99,.01]};
+  assert.equal(policy.evaluateMatch([1,0],[a,b],config).match,null);assert.equal(policy.evaluateMatch([0,1],[a],config).match,null);
+  let evidence=policy.observe(null,{reference:a},1000,config).evidence;
+  evidence=policy.observe(evidence,{reference:b},2000,config).evidence;assert.equal(evidence.count,1);
+  evidence=policy.observe(evidence,{reference:b},7000,config).evidence;assert.equal(evidence.count,1);
+  assert.equal(policy.observe(evidence,null,8000,config).evidence,null);
 });
-test('OSD confirms stable observations, locks content after target loss, and rescans manually', async () => {
-  const f = fixture(); await f.host.recognizeAnchor();
-  assert.equal(f.host._osdPhase, 'scanning'); assert.equal(f.native.size, 1);
-  f.observe(); f.tick(350); f.observe(); assert.equal(f.calls.length, 1);
-  f.tick(350); f.observe(); await f.settle();
-  assert.equal(f.host._osdPhase, 'locked'); assert.equal(f.host._matchedAnchorId, 'a');
-  assert.equal(f.host.displayed.length, 1); assert.equal(f.native.size, 0); assert.equal(f.files.size, 0);
-  assert.equal(f.logs.find(x => x.event === '扫描摘要').fields.result, 'confirmed');
-  assert.equal(f.logs.filter(x => x.event === '确认命中').length, 1);
-  f.tick(60000); f.host.handleOSDAnchors('removeAnchors', [{ id: 100, markerId: 0 }]); await f.host.recognizeAnchor();
-  assert.equal(f.calls.length, 2); assert.equal(f.host._osdPhase, 'locked');
-  f.host.rescan(); await f.settle();
-  assert.equal(f.host._matchedAnchorId, null); assert.equal(f.host._osdPhase, 'scanning');
-  assert.equal(f.host._contentEpoch, 2); assert.equal(f.native.size, 1);
-  f.host.pauseRetrieval(); assert.equal(f.native.size, 0); assert.equal(f.files.size, 0);
-});
-test('diagnostics expose stalled confirmation, malformed payloads and cancellation without signed URLs', async () => {
-  const f = fixture({ fetchAnchorCandidates: async () => ({ statusCode: 200, data: {
-    candidates: [{ ...target(), image_url: 'https://media.test/image.png?token=DO_NOT_LOG#secret' }],
-  } }) });
-  await f.host.recognizeAnchor();
-  f.host.handleOSDAnchors('updateAnchors', { anchors: [] });
-  assert.equal(f.logs.find(x => x.event === '回调未进入确认').fields.reason, 'payload_not_array');
-  f.observe(); f.tick(2000); f.observe(); f.tick(1000); f.host.reportOSDScan();
-  const summary = f.logs.find(x => x.event === '扫描摘要');
-  assert.equal(summary.fields.result, 'awaiting_confirmation');
-  assert.equal(summary.fields.resets.observation_gap, 1);
-  assert.equal(summary.fields.bestObservations, 1);
-  assert.ok(!JSON.stringify(f.logs).includes('DO_NOT_LOG'));
-  const run = summary.fields.run;
-  f.host.pauseRetrieval();
-  assert.equal(f.logs.findLast(x => x.event === '扫描摘要').fields.run, run);
-  const count = f.logs.length;
-  f.tick(3000); f.host.reportOSDScan(); f.observe();
-  assert.equal(f.logs.length, count, 'cancelled scans stop diagnostic polling');
-});
-test('wrong type, unknown markers, conflicting targets and observation gaps do not confirm', async () => {
-  const f = fixture(); await f.host.recognizeAnchor();
-  f.observe(0, { type: 1 }); f.observe(999, { path: f.native.get(0) }); assert.equal(f.host._osdEvidence, null);
-  f.observe(); f.tick(2000); f.observe(); f.tick(350); f.observe();
-  assert.equal(f.calls.length, 1); assert.equal(f.host._osdEvidence.count, 2);
-  f.host.handleOSDAnchors('removeAnchors', [{ id: 100, markerId: 0 }]);
-  assert.equal(f.host._osdEvidence, null);
-  f.host._osdMarkers.set(2, { ...target('b'), path: '/b.jpg' });
-  const anchor = id => ({ id, markerId: id, type: 2, path: id === 0 ? f.native.get(0) : '/b.jpg', origin: { x: 0, y: 0 }, size: { width: .5, height: .5 } });
-  f.host.handleOSDAnchors('updateAnchors', [anchor(0), anchor(2)]);
-  assert.equal(f.host._osdEvidence, null); assert.equal(f.calls.length, 1);
+test('all nearby references participate immediately, including targets beyond the old five-image batch', async () => {
+  let embeddings = 0;
+  const f = fixture({ fetchAnchorCandidates: async () => ({ statusCode: 200, data: { candidates: Array.from({ length: 7 }, (_, i) => target(String(i))) } }),
+    embed: () => ({ vector: ++embeddings < 7 ? [0, 1] : [1, 0], inferenceMs: 150 }) });
+  await f.host.recognizeAnchor(); assert.equal(f.counts().loaded, 7); assert.equal(f.host._matchReferences.length, 7);
+  for (let i = 0; i < 3; i++) { f.tick(); await f.sample(); }
+  assert.equal(f.host._matchedAnchorId, '6'); assert.equal(f.host._matchPhase, 'locked');
   f.host.pauseRetrieval();
 });
-test('missing or rewritten native paths still identify the registered target by markerId', async () => {
-  for (const nativePath of [undefined, '/native/reference.jpg']) {
-    const f = fixture(); await f.host.recognizeAnchor();
-    f.observe(0, { path: nativePath }); f.tick(350);
-    f.observe(0, { path: nativePath }); f.tick(350);
-    f.observe(0, { path: nativePath }); await f.settle();
-    assert.equal(f.host._osdPhase, 'locked');
-    assert.equal(f.calls.filter(([kind]) => kind === 'content').length, 1);
-    f.host.pauseRetrieval();
-  }
-});
-test('batches remain bounded and visit candidates beyond the first five', async () => {
+test('stationary scanning never rotates or refetches candidates, and keeps one camera inference per sample', async () => {
   const f = fixture({ fetchAnchorCandidates: async () => ({ statusCode: 200, data: { candidates: Array.from({ length: 7 }, (_, i) => target(String(i))) } }) });
-  await f.host.recognizeAnchor(); assert.equal(f.native.size, 5); assert.equal(f.files.size, 5);
-  f.tick(config.batchDurationMs); await f.host.recognizeAnchor();
-  assert.equal(f.native.size, 2); assert.equal(f.files.size, 2);
-  assert.deepEqual([...f.host._osdMarkers.values()].map(x => x.id), ['5', '6']);
-  f.host.setRetrievalMode('gps'); assert.equal(f.files.size, 0); assert.equal(f.native.size, 0);
-});
-test('unchanged single-batch targets keep their native markers through a minute without callbacks', async () => {
-  const f = fixture({ firstMarkerId: 10001 });
   await f.host.recognizeAnchor();
-  const registered = [...f.native.entries()];
-  // Replay the user's five 12-second scan windows, with no native detections.
-  for (let i = 0; i < 5; i++) {
-    f.tick(config.batchDurationMs); await f.host.recognizeAnchor();
-    assert.deepEqual([...f.native.entries()], registered,
-      'an unchanged single batch must not be removed/re-added every 12 seconds');
-  }
-  assert.equal(f.removed.length, 0);
-  assert.equal(f.logs.filter(x => x.event === '标记已注册').length, 1);
-  assert.equal(f.host._osdPhase, 'scanning');
-  assert.equal(f.host.displayed.length, 0, 'silence must never be converted into a match');
-  f.host.reportOSDScan();
-  assert.equal(f.logs.findLast(x => x.event === '扫描摘要').fields.elapsedMs, 60000,
-    'diagnostics must accumulate across unchanged candidate refreshes');
-  f.host.pauseRetrieval(); assert.equal(f.native.size, 0); assert.equal(f.files.size, 0);
-});
-test('candidate refresh retains confirmation but replaces changed references and removes absent targets', async () => {
-  let candidates = [target()];
-  const f = fixture({ fetchAnchorCandidates: async () => ({ statusCode: 200, data: { candidates } }) });
-  await f.host.recognizeAnchor();
-  const marker = [...f.native.keys()][0];
-  f.tick(config.batchDurationMs - 350); f.observe();
-  candidates = [{ ...target(), name: 'updated name', image_url: 'https://media.test/a.png?signature=new' }];
-  f.tick(350); await f.host.recognizeAnchor(); f.observe();
-  assert.equal(f.host._osdEvidence.count, 2, 'refresh must not reset a pending confirmation');
-  assert.equal(f.host._osdMarkers.get(marker).name, 'updated name');
-  assert.equal(f.removed.length, 0);
-  candidates = [{ ...target(), reference_version: 'version-2' }];
-  f.tick(config.batchDurationMs); await f.host.recognizeAnchor();
-  assert.equal(f.native.size, 1); assert.equal(f.files.size, 1);
-  assert.ok(!f.native.has(marker)); assert.equal(f.removed.length, 1);
-  assert.equal(f.host._osdEvidence, null);
-  candidates = [];
-  f.tick(config.batchDurationMs); await f.host.recognizeAnchor();
-  assert.equal(f.host._osdPhase, 'empty');
-  assert.equal(f.native.size, 0); assert.equal(f.files.size, 0);
-});
-test('a match during candidate refresh wins over late results and errors', async () => {
-  for (const statusCode of [200, 500]) {
-    const d = deferred();
-    let response = { statusCode: 200, data: { candidates: [target()] } };
-    const g = fixture({ fetchAnchorCandidates: () => response });
-    await g.host.recognizeAnchor(); response = d.promise;
-    g.tick(config.batchDurationMs - 350); g.observe();
-    g.tick(350); const refresh = g.host.recognizeAnchor(); await g.settle();
-    assert.equal(g.host._osdPhase, 'scanning');
-    g.observe(); g.tick(350); g.observe(); await g.settle();
-    assert.equal(g.host._osdPhase, 'locked');
-    d.resolve({ statusCode, data: { candidates: [target('replacement')] } }); await refresh;
-    assert.equal(g.host._osdPhase, 'locked');
-    assert.equal(g.host.displayed.length, 1); assert.equal(g.native.size, 0); assert.equal(g.files.size, 0);
-    g.host.pauseRetrieval();
-  }
-});
-test('late candidate discovery and late reference files cannot revive a cancelled scan', async () => {
-  const d = deferred(); const f = fixture({ fetchAnchorCandidates: () => d.promise });
-  const task = f.host.recognizeAnchor(); await f.settle(); f.host.pauseRetrieval();
-  d.resolve({ statusCode: 200, data: { candidates: [target()] } }); await task;
-  assert.equal(f.native.size, 0); assert.equal(f.host._osdPhase, 'idle');
-  const image = deferred(); const g = fixture({ loadReference: () => image.promise });
-  const pending = g.host.recognizeAnchor(); await g.settle(); g.host.setRetrievalMode('gps');
-  image.resolve('/late.jpg'); await pending;
-  assert.ok(g.removed.includes('/late.jpg')); assert.equal(g.native.size, 0);
-});
-test('late content and errors never overwrite a newer scan, including the same target', async () => {
-  const d = deferred(); const f = fixture({ fetchAnchorContent: () => d.promise });
-  await f.host.recognizeAnchor();
-  const accept = f.host._acceptOSDMatch(target()); await f.settle();
-  f.host.rescan(); await f.settle();
-  d.resolve({ statusCode: 200, data: { anchor: { id: 'a' }, assets: [{ id: 'late', file_type: 'text' }] } }); await accept;
-  assert.equal(f.host.displayed.length, 0); assert.equal(f.host._osdPhase, 'scanning');
+  for (let i = 0; i < 40; i++) { f.tick(); f.move(0); await f.sample(); }
+  assert.equal(f.counts().candidateCalls, 1); assert.equal(f.counts().loaded, 7);
+  assert.equal(f.counts().embedded, 47); assert.equal(f.host._matchReferences.length, 7);
   f.host.pauseRetrieval();
 });
-test('empty candidates, malformed data, bad reference and stale content have actionable states', async () => {
-  const f = fixture({ fetchAnchorCandidates: async () => ({ statusCode: 200, data: { candidates: [] } }) });
-  await f.host.recognizeAnchor(); assert.equal(f.host._osdPhase, 'empty');
-  const malformed = fixture({ fetchAnchorCandidates: async () => ({ statusCode: 200, data: { candidates: [{}] } }) });
-  await malformed.host.recognizeAnchor(); assert.equal(malformed.host._osdPhase, 'error');
-  const bad = fixture({ loadReference: async () => { throw new Error('参考图过小'); } });
-  await bad.host.recognizeAnchor(); assert.equal(bad.native.size, 0); assert.match(bad.host.statuses.at(-1).message, /过小/);
-  const stale = fixture({ fetchAnchorContent: async () => ({ statusCode: 409, data: { error: '参考图已更新，请重新扫描' } }) });
-  await stale.host.recognizeAnchor(); await stale.host._acceptOSDMatch(target());
-  assert.equal(stale.host._osdPhase, 'error'); assert.equal(stale.host._nextRecognitionAt, Infinity);
-  assert.equal(stale.native.size, 0); assert.equal(stale.files.size, 0);
+test('GPS movement refreshes the full set and reuses cached versions across areas and rescans', async () => {
+  let candidates = [target('a'), target('b')];
+  const f = fixture({ fetchAnchorCandidates: async () => ({ statusCode: 200, data: { candidates } }) });
+  await f.host.recognizeAnchor(); assert.equal(f.counts().loaded, 2);
+  candidates = [target('b'), target('c')]; f.tick(5000); f.move(30); await f.host.recognizeAnchor();
+  assert.equal(f.counts().candidateCalls, 2); assert.equal(f.counts().loaded, 3);
+  assert.equal(f.host._matchReferences.map(x => x.id).join(','), 'b,c');
+  candidates = [target('a'), target('b', 'changed')]; f.tick(5000); f.move(0); await f.host.recognizeAnchor();
+  assert.equal(f.counts().candidateCalls, 3); assert.equal(f.counts().loaded, 4);
+  f.host.rescan(); await settle(); assert.equal(f.counts().loaded, 4, 'manual rescan revalidates metadata but reuses vectors');
+  f.api.CONFIG.workspaceId = 'another-map'; f.host.rescan(); await settle();
+  assert.equal(f.counts().loaded, 6, 'another map must not inherit cached reference vectors');
+  f.host.pauseRetrieval();
 });
-test('OSD session uses one native session, never probes v2, and discards callbacks after stop', () => {
-  const { VKSessionController } = require(path.join(base, 'lib/three-runtime/vk-session'));
-  let options, stopped = 0, destroyed = 0, observed = 0, start;
-  const listeners = new Map();
-  const native = { version: 'v1', getAllOSDMarker: () => [{ markerId: 0, path: '/private/user/reference.jpg?token=secret' }],
-    on: (n, f) => listeners.set(n, f), off() {}, start: f => { start = f; },
-    requestAnimationFrame: () => 1, cancelAnimationFrame() {}, stop: () => stopped++, destroy: () => destroyed++,
-    addOSDMarker: () => 0, removeOSDMarker() {} };
-  const session = new VKSessionController({ mode: 'osd', api: { isVKSupport() { throw Error('v2 forbidden'); }, createVKSession: o => { options = o; return native; } },
-    size: () => ({ width: 10, height: 10 }), onState() {}, onAnchors: () => observed++, onFrame() {} });
-  session.start(); start(); assert.deepEqual(options.track, { OSD: true }); assert.equal(options.version, 'v1');
-  assert.equal(session.addOSDMarker('/reference.jpg'), 0);
-  const snapshot = session.getOSDDiagnostics();
-  assert.equal(snapshot.actualVersion, 'v1'); assert.equal(snapshot.planeEnabled, false);
-  assert.equal(snapshot.nativeMarkerCount, 1); assert.equal(snapshot.nativeMarkers[0].file, 'reference.jpg');
-  assert.ok(!JSON.stringify(snapshot).includes('secret'));
-  assert.deepEqual(snapshot.anchorListeners, ['addAnchors', 'updateAnchors', 'removeAnchors']);
-  assert.deepEqual(snapshot.anchorEvents, {});
-  const old = listeners.get('updateAnchors'); old([]);
-  assert.deepEqual(session.getOSDDiagnostics().anchorEvents, { updateAnchors: 1 });
-  session.stop(); old([]);
-  assert.equal(observed, 1); assert.equal(stopped, 1); assert.equal(destroyed, 1); assert.deepEqual(session.hitTest(), []);
-  session.start(); start(); old([]);
-  const restarted = session.getOSDDiagnostics();
-  assert.ok(restarted.sessionGeneration > snapshot.sessionGeneration);
-  assert.deepEqual(restarted.anchorEvents, {}, 'old session callbacks must not enter new-session diagnostics');
-  session.stop();
+test('GPS jitter and uncertain fixes do not refresh; displacement is measured from the last discovery', async () => {
+  const f = fixture(); await f.host.recognizeAnchor();
+  for (const [meters, accuracy] of [[5, 10], [15, 10], [30, 40]]) {
+    f.tick(5000); f.move(meters, accuracy); await f.host.recognizeAnchor();
+    assert.equal(f.counts().candidateCalls, 1);
+  }
+  f.tick(5000); f.move(30, 10); await f.host.recognizeAnchor(); assert.equal(f.counts().candidateCalls, 2);
+  f.host.pauseRetrieval();
 });
-test('switching OSD to SLAM destroys the old session, ignores planes, and rejects v1 fallback', () => {
+test('same-area GPS checks preserve confirmation; a slow fallback fix does not pause image inference', async () => {
+  let pendingFix;
+  const f = fixture({ locate: handlers => { pendingFix = handlers; } });
+  f.move(0); await f.host.recognizeAnchor(); await f.sample(); const evidence = f.host._matchEvidence;
+  f.tick(5000); f.move(1); await f.host.recognizeAnchor(); assert.equal(f.host._matchEvidence, evidence);
+  f.tick(11000); const check = f.host.recognizeAnchor(); await settle();
+  const before = f.counts().captures; await f.sample(); assert.equal(f.counts().captures, before + 1);
+  pendingFix.success({ latitude: 31, longitude: 121, accuracy: 10 }); await check;
+  assert.equal(f.counts().candidateCalls, 1); f.host.pauseRetrieval();
+});
+test('moving after a lock starts a new scan without discarding reference embeddings', async () => {
+  const f = fixture(); await f.host.recognizeAnchor();
+  for (let i = 0; i < 3; i++) { f.tick(); await f.sample(); }
+  assert.equal(f.host._matchPhase, 'locked'); assert.equal(f.counts().loaded, 1);
+  f.tick(5000); f.move(40); await f.host.recognizeAnchor();
+  assert.equal(f.host._matchPhase, 'scanning'); assert.equal(f.host._matchedAnchorId, null);
+  assert.equal(f.counts().loaded, 1); assert.equal(f.counts().candidateCalls, 2); f.host.pauseRetrieval();
+});
+test('movement discards in-flight matches and old discovery responses without losing the new scan', async () => {
+  const inference = deferred(); let embeddings = 0;
+  const f = fixture({ embed: () => ++embeddings === 2 ? inference.promise : { vector: [1, 0], inferenceMs: 150 } });
+  await f.host.recognizeAnchor(); await f.sample(); const oldEpoch = f.host._modeEpoch;
+  f.tick(5000); f.move(40); await f.host.recognizeAnchor();
+  assert.ok(f.host._modeEpoch > oldEpoch); assert.equal(f.host._matchPhase, 'scanning');
+  inference.resolve({ vector: [1, 0], inferenceMs: 150 }); await settle();
+  assert.equal(f.host._matchEvidence, null); assert.equal(f.host.displayed.length, 0);
+  assert.equal(f.counts().loaded, 1); f.host.pauseRetrieval();
+  const discovery = deferred(); let requests = 0;
+  const g = fixture({ fetchAnchorCandidates: async () => ++requests === 1 ? discovery.promise : { statusCode: 200, data: { candidates: [target('new')] } } });
+  const old = g.host.recognizeAnchor(); await settle(); g.host.rescan(); await settle();
+  discovery.resolve({ statusCode: 200, data: { candidates: [target('old')] } }); await old;
+  assert.equal(g.host._matchReferences.map(x => x.id).join(','), 'new'); g.host.pauseRetrieval();
+});
+test('reference cache is bounded and preserves all reusable targets even when new targets come first', async () => {
+  const limit = config.maxCachedReferences;
+  let candidates = Array.from({ length: limit }, (_, i) => target(String(i)));
+  const f = fixture({ fetchAnchorCandidates: async () => ({ statusCode: 200, data: { candidates } }) });
+  await f.host.recognizeAnchor(); assert.equal(f.counts().loaded, limit);
+  candidates = [...Array.from({ length: 10 }, (_, i) => target(`new-${i}`)), ...candidates.slice(0, limit - 10)];
+  f.tick(5000); f.move(40); await f.host.recognizeAnchor();
+  assert.equal(f.counts().loaded, limit + 10, 'unchanged references must not be evicted before they are reused');
+  assert.equal(f.host._referenceCache.size, limit); assert.equal(f.host._matchReferences.length, limit);
+  f.host.pauseRetrieval(); assert.equal(f.host._referenceCache.size, 0);
+});
+test('an unavailable competitor blocks matching; retry only computes missing reference features', async () => {
+  let unavailable = true;
+  const f = fixture({ fetchAnchorCandidates: async () => ({ statusCode: 200, data: { candidates: [target('a'), target('b')] } }),
+    loadReference: url => { if (unavailable && url.endsWith('/b.png')) throw Error('reference unavailable'); return new ArrayBuffer(4); } });
+  await f.host.recognizeAnchor(); assert.equal(f.host._matchPhase, 'error'); assert.equal(f.counts().embedded, 1);
+  await f.sample(); assert.equal(f.counts().captures, 0);
+  unavailable = false; f.host.rescan(); await settle();
+  assert.equal(f.host._matchPhase, 'scanning'); assert.equal(f.host._matchReferences.length, 2);
+  assert.equal(f.counts().embedded, 2); assert.equal(f.counts().loaded, 3); f.host.pauseRetrieval();
+});
+test('empty areas stay cached until movement or explicit rescan', async () => {
+  let candidates = [];
+  const f = fixture({ fetchAnchorCandidates: async () => ({ statusCode: 200, data: { candidates } }) });
+  await f.host.recognizeAnchor(); f.tick(60000); f.move(0); await f.sample();
+  assert.equal(f.counts().candidateCalls, 1); assert.equal(f.host._matchPhase, 'empty');
+  candidates = [target()]; f.tick(5000); f.move(40); await f.host.recognizeAnchor();
+  assert.equal(f.counts().candidateCalls, 2); assert.equal(f.host._matchPhase, 'scanning'); f.host.pauseRetrieval();
+});
+test('late discovery, reference embedding and inference cannot revive a cancelled generation', async () => {
+  for(const stage of ['discovery','reference','embedding','frame']) {
+    const pending=deferred();let embeds=0;
+    const f=fixture(stage==='discovery'?{fetchAnchorCandidates:()=>pending.promise}:stage==='reference'?{loadReference:()=>pending.promise}:
+      {embed:()=> (++embeds===(stage==='frame'?2:1))?pending.promise:{vector:[1,0],inferenceMs:200}});
+    const run=f.host.recognizeAnchor();await settle();if(stage==='frame'){await run;await f.sample();}
+    f.host.pauseRetrieval();
+    pending.resolve(stage==='discovery'?{statusCode:200,data:{candidates:[target()]}}:stage==='reference'?new ArrayBuffer(4):{vector:[1,0],inferenceMs:200});
+    await run;await settle();assert.equal(f.host._matchPhase,'idle');assert.equal(f.host._imageMatcher,null);assert.equal(f.host.displayed.length,0);
+  }
+});
+test('late content errors cannot overwrite a new scan; paused or changed server references do not display', async () => {
+  const pending=deferred(),f=fixture({fetchAnchorContent:()=>pending.promise});await f.host.recognizeAnchor();
+  const loading=f.host._acceptImageMatch(target());await settle();f.host.rescan();await settle();
+  pending.resolve({statusCode:409,data:{error:'参考图已更新'}});await loading;assert.equal(f.host._matchPhase,'scanning');f.host.pauseRetrieval();
+  for(const statusCode of [404,409]) {const g=fixture({fetchAnchorContent:async()=>({statusCode,data:{error:'目标不可用'}})});await g.host.recognizeAnchor();await g.host._acceptImageMatch(target());assert.equal(g.host._matchPhase,'error');assert.equal(g.host.displayed.length,0);assert.equal(g.host._nextRecognitionAt,Infinity);}
+});
+test('empty candidates wait for movement; invalid candidates and failed Worker require explicit rescan', async () => {
+  for(const candidates of [[],[target(),target()]]) {const f=fixture({fetchAnchorCandidates:async()=>({statusCode:200,data:{candidates}})});await f.host.recognizeAnchor();assert.equal(f.host._matchPhase,candidates.length?'error':'empty');assert.equal(f.host._imageMatcher,null);}
+  const f=fixture();await f.host.recognizeAnchor();f.host._imageMatcher.embed=async()=>{throw Error('worker died');};await f.sample();
+  assert.equal(f.host._matchPhase,'error');assert.equal(f.host._nextRecognitionAt,Infinity);assert.equal(f.host._imageMatcher,null);
+});
+test('one v2 session at a time: SLAM ignores plane anchors, lab plane mode discards stale callbacks, v1 fallback fails', () => {
   const { VKSessionController } = require(path.join(base, 'lib/three-runtime/vk-session'));
   let alive = 0, observed = 0, forceFallback = false;
   const instances = [], states = [];
@@ -325,60 +276,115 @@ test('switching OSD to SLAM destroys the old session, ignores planes, and reject
     const native = { options, listeners, state: 3, version: forceFallback ? 'v1' : options.version,
       on: (n, f) => listeners.set(n, f), off() {}, start: f => f(),
       requestAnimationFrame: () => 1, cancelAnimationFrame() {}, stop() {}, destroy() { alive--; },
-      hitTest() { throw Error('production must not use plane results'); } };
+      hitTest() { return [{ id: 'hit' }]; } };
     instances.push(native); return native;
   } };
-  const session = new VKSessionController({ mode: 'osd', api, size: () => ({ width: 1, height: 1 }),
+  const session = new VKSessionController({ mode: 'plane', api, size: () => ({ width: 1, height: 1 }),
     onState: (state, message) => states.push([state, message]), onAnchors: () => observed++, onFrame() {} });
-  session.start(); const late = instances[0].listeners.get('updateAnchors');
+  session.start();
+  assert.deepEqual(instances[0].options.track, { plane: { mode: 1 } });
+  const late = instances[0].listeners.get('updateAnchors'); late([]);
+  assert.equal(observed, 1); assert.deepEqual(session.getDiagnostics().anchorEvents, { updateAnchors: 1 });
+  assert.equal(session.hitTest().length, 1, 'lab plane mode keeps hit tests');
   session.mode = 'slam'; session.start(); late([]);
-  assert.equal(observed, 0);
+  assert.equal(observed, 1, 'callbacks from a stopped session are discarded');
+  assert.deepEqual(session.getDiagnostics().anchorEvents, {}, 'old session callbacks must not enter new-session diagnostics');
   assert.equal(instances[1].options.version, 'v2');
   assert.deepEqual(instances[1].options.track, { plane: { mode: 1, force: true } });
   assert.equal(instances[1].listeners.size, 0); assert.deepEqual(session.hitTest(), []);
   assert.equal(session.isTracking(), false);
   instances[1].state = 1; assert.equal(session.isTracking(), true);
-  session.mode = 'osd'; session.start();
-  assert.deepEqual(instances[2].options.track, { OSD: true });
-  forceFallback = true; session.mode = 'slam'; session.start();
+  forceFallback = true; session.start();
   assert.equal(session.running, false); assert.equal(alive, 0);
   assert.equal(states.at(-1)[0], 'error'); assert.match(states.at(-1)[1], /v2/);
+  const unsupported = new VKSessionController({ mode: 'slam', api: { isVKSupport: () => false, createVKSession() { throw Error('must not create'); } },
+    size: () => ({ width: 1, height: 1 }), onState: (state, message) => states.push([state, message]), onFrame() {} });
+  unsupported.start(); assert.match(states.at(-1)[1], /不支持 VisionKit v2/);
 });
 
-function referenceFixture({ width = 1600, height = 1200, deferExport = false } = {}) {
-  const removed = [], drawn = [], progress = [];
-  let current = true, exportOptions, canvasOptions;
-  const { loadOSDReference } = load('components/xr-start/matching/reference.js', {
-    '../../../lib/three-runtime/resources': { download: async () => '/source.png', removeFile: p => { if (p) removed.push(p); } },
-  }, { wx: {
-    getImageInfo: ({ success }) => success({ width, height }),
-    createOffscreenCanvas(options) {
-      canvasOptions = options;
-      const ctx = { fillStyle: '', fillRect() { drawn.push(this.fillStyle); }, drawImage() { drawn.push('image'); } };
-      return { getContext: () => ctx, createImage: () => ({ set src(_value) { this.onload(); } }) };
-    },
-    canvasToTempFilePath(options) { exportOptions = options; if (!deferExport) options.success({ tempFilePath: '/rgb.jpg' }); },
-  } });
-  return { run: () => loadOSDReference('https://media.test/source.png', () => current, (stage, fields) => progress.push({ stage, fields })), removed, drawn, progress,
-    cancel: () => { current = false; }, finish: () => exportOptions.success({ tempFilePath: '/rgb.jpg' }),
-    options: () => ({ canvasOptions, exportOptions }) };
-}
-test('reference conversion produces bounded RGB JPEG and releases source files', async () => {
-  const f = referenceFixture(); assert.equal(await f.run(), '/rgb.jpg');
-  assert.deepEqual(f.drawn, ['#ffffff', 'image']);
-  assert.equal(f.options().canvasOptions.width, 1080); assert.equal(f.options().canvasOptions.height, 810);
-  assert.equal(f.options().exportOptions.fileType, 'jpg');
-  assert.deepEqual(f.progress.map(p => p.stage), ['downloaded', 'image_info', 'jpeg_ready']);
-  assert.equal(f.progress.at(-1).fields.width, 1080);
-  assert.deepEqual(f.removed, ['/source.png']);
-  for (const dimensions of [{ width: 100, height: 100 }, { width: 2000, height: 300 }]) {
-    const bad = referenceFixture(dimensions); await assert.rejects(bad.run(), /参考图/);
-    assert.deepEqual(bad.removed, ['/source.png']); assert.equal(bad.options().exportOptions, undefined);
+test('reference input is white-composited, model-sized, owns its buffer, and releases temporary files on cancellation', async () => {
+  for(const cancel of [false,true]) {
+    const removed=[],drawn=[];let current=true,decoded;
+    const backing=new Uint8ClampedArray(224*224*4+16);backing.fill(42);
+    const image={width:1600,height:1200,set src(value){decoded=()=>this.onload();}};
+    const context={fillRect(...args){drawn.push(args);},drawImage(...args){drawn.push(args.slice(1));},getImageData(){return{data:backing.subarray(16)};}};
+    const canvas={width:224,height:224,createImage:()=>image,getContext:()=>context};
+    const {loadReferencePixels}=load('components/xr-start/matching/reference.js',{'../../../lib/three-runtime/resources':{
+      download:async()=>'/tmp/reference.png',removeFile:path=>removed.push(path)},'../../../lib/image-matcher/spec':require(path.join(base,'lib/image-matcher/spec'))},{wx:{createOffscreenCanvas:()=>canvas}});
+    const pending=loadReferencePixels('https://media.test/a.png',()=>current);await settle();
+    if(cancel) current=false;
+    decoded();
+    if(cancel)await assert.rejects(pending,/取消/);
+    else {const pixels=await pending;assert.equal(pixels.byteLength,224*224*4);assert.notEqual(pixels,backing.buffer);assert.equal(new Uint8Array(pixels)[0],42);assert.equal(context.fillStyle,'#ffffff');assert.deepEqual(drawn,[[0,0,224,224],[0,0,224,224]]);}
+    assert.deepEqual(removed,['/tmp/reference.png']);assert.equal(canvas.width,1);assert.equal(image.onload,null);
   }
 });
-test('reference export finishing after rescan releases both temporary files', async () => {
-  const f = referenceFixture({ deferExport: true }), task = f.run();
-  for (let i = 0; i < 12; i++) await Promise.resolve();
-  f.cancel(); f.finish(); await assert.rejects(task, /取消/);
-  assert.deepEqual(f.removed.sort(), ['/rgb.jpg', '/source.png']);
+
+test('cold entry starts matching from camera frames without a rescan, even while model and pose initialize', async () => {
+  const initialization = deferred();
+  const f = fixture({ start: () => initialization.promise });
+  f.host._cameraReady = false; f.host._arReady = false; f.host._sessionActive = false;
+  f.host.rescan = () => { throw Error('automatic entry must not require a button'); };
+  await f.sample(); assert.equal(f.calls.length, 0);
+  f.host._sessionActive = true;
+  await f.sample(); assert.equal(f.calls[0][0], 'candidates');
+  f.tick(); await f.sample(); assert.equal(f.counts().captures, 0, 'wait for model without blocking camera callbacks');
+  initialization.resolve(); await settle();
+  assert.equal(f.host._matchPhase, 'scanning');
+  for (let i = 0; i < 3; i++) { f.tick(); await f.sample(); }
+  assert.equal(f.counts().captures, 3);
+  assert.equal(f.host._matchPhase, 'tracking', 'automatic matching finishes before a SLAM pose');
+  f.host._arReady = true; f.host._finishMatchPlacement();
+  assert.equal(f.host._matchPhase, 'locked'); assert.equal(f.host.displayed.length, 1);
+});
+test('unmatched automatic scanning reports that inference ran and why the target was rejected', async () => {
+  let embeddings = 0;
+  const f = fixture({ embed: () => ({ vector: ++embeddings === 1 ? [1, 0] : [0.28, 0.96], inferenceMs: 150 }) });
+  f.host._cameraReady = false;
+  await f.sample(); f.tick(); await f.sample(); f.tick(); await f.sample();
+  assert.equal(f.host._matchPhase, 'scanning'); assert.ok(f.counts().captures >= 1);
+  assert.ok(f.logs.some(([event]) => event === '扫描开始'), 'must announce automatic scan startup');
+  const result = f.logs.find(([event]) => event === '匹配结果');
+  assert.ok(result, 'low scores must not be silent');
+  assert.equal(result[1].reason, 'score_below_threshold'); assert.equal(result[1].topScore, 0.28);
+  f.host.pauseRetrieval();
+});
+
+test('diagnostic heartbeat distinguishes waiting for camera, model and inference, then stops on pause', async () => {
+  const initialization = deferred(), inference = deferred();
+  let embeddings = 0;
+  const f = fixture({ start: () => initialization.promise,
+    embed: () => ++embeddings === 1 ? { vector: [1, 0] } : inference.promise });
+  f.host._cameraReady = false; f.host._startMatchDiagnostics('enter');
+  const lastSummary = () => f.logs.filter(([event]) => event === '扫描摘要').at(-1)[1];
+  f.tick(3000); f.heartbeat();
+  assert.equal(lastSummary().stage, 'waiting_camera'); assert.equal(lastSummary().cameraFrames, 0);
+  await f.sample(); f.tick(3000); f.heartbeat();
+  assert.equal(lastSummary().stage, 'initializing_worker'); assert.equal(lastSummary().stageMs, 3000);
+  initialization.resolve(); await settle(); await f.sample(); f.tick(3000); f.heartbeat();
+  assert.equal(lastSummary().stage, 'scanning'); assert.equal(lastSummary().captured, 1);
+  assert.equal(lastSummary().inferred, 0); assert.equal(lastSummary().workerBusy, true);
+  assert.equal(lastSummary().inFlightMs, 3000);
+  const lateHeartbeat = [...f.diagnosticTimers.values()][0];
+  f.host.pauseRetrieval(); assert.equal(f.diagnosticTimers.size, 0);
+  const stoppedLogCount = f.logs.length;
+  lateHeartbeat(); inference.resolve({ vector: [1, 0], inferenceMs: 3000 }); await settle();
+  assert.equal(f.logs.length, stoppedLogCount); assert.equal(f.diagnosticTimers.size, 0);
+});
+
+test('steady weak results update summary without spamming logs or UI, and dark frames explain rejection', async () => {
+  let embeddings = 0;
+  const f = fixture({ embed: () => ({ vector: ++embeddings === 1 ? [1, 0] : [0.28, 0.96], inferenceMs: 150 }) });
+  await f.host.recognizeAnchor(); const statusCount = f.statuses.length;
+  for (let i = 0; i < 5; i++) { f.tick(); await f.sample(); }
+  assert.equal(f.logs.filter(([event]) => event === '匹配结果').length, 1);
+  assert.equal(f.statuses.length, statusCount, 'unchanged scan status must not trigger setData every sample');
+  f.heartbeat(); const summary = f.logs.filter(([event]) => event === '扫描摘要').at(-1)[1];
+  assert.equal(summary.inferred, 5); assert.equal(summary.lastResult.topScore, 0.28);
+  assert.equal(summary.lastResult.minimumScore, config.minimumScore);
+  assert.ok(!JSON.stringify(summary).includes('image_url')); assert.ok(!JSON.stringify(summary).includes('latitude'));
+  f.pixels.fill(0); f.tick(); await f.sample();
+  assert.equal(f.logs.filter(([event]) => event === '匹配结果').at(-1)[1].reason, 'invalid_pixels');
+  assert.match(f.statuses.at(-1).message, /画面过暗/);
+  f.host.pauseRetrieval(); assert.equal(f.diagnosticTimers.size, 0);
 });

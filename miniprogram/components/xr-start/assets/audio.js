@@ -100,10 +100,6 @@ module.exports = (XR_CONFIG) => ({
     this._audioUpdatedAt = now;
     const camera = this._runtime.camera.position,
       entries = this._audioEntries || [];
-    if (this._runtime.session?.mode === "osd") {
-      for (const entry of entries) entry.audioRefs.ctx.volume = entry.audioRefs.baseVolume;
-      return;
-    }
     let focus = null,
       nearest = 0.3;
     for (const entry of entries) {

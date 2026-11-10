@@ -19,6 +19,7 @@ async function main() {
   // The SIMD build returns nearly identical features for unrelated images on
   // the tested iPhone/WeChat runtime. Keep it opt-in for compatibility diagnosis.
   const simd = process.argv.includes('--simd');
+  const externalCopy = process.argv.includes('--external-copy');
   const stem = simd ? 'vision_wasm_internal' : 'vision_wasm_nosimd_internal';
   const memoryExport = simd ? 'Xc' : 'Wc', constructorExport = simd ? 'Yc' : 'Xc';
   const loader = fs.readFileSync(path.join(source, `wasm/${stem}.js`), 'utf8');
@@ -46,9 +47,13 @@ async function main() {
       self.ModuleFactory = optionsArg => new Promise((resolve, reject) => {
         factory({ ...optionsArg, ...options, instantiateWasm(imports, receive) {
           platform.trace('wasm-instantiate', {});
+          let externalMemoryCopy;
+          ${externalCopy ? `imports.a.${simd ? 'ic' : 'hc'} = (destination, source, length) => externalMemoryCopy(destination, source, length);` : ''}
           platform.wasm.instantiate(platform.wasmPath, imports)
-            .then(result => {
+            .then(async result => {
               platform.trace('wasm-instantiated', { hasInstance: !!result.instance, hasModule: !!result.module });
+              ${externalCopy ? `const helper = await platform.wasm.instantiate('labs/image-match/memory-copy.wasm.br', { env: { memory: result.instance.exports.${memoryExport} } });
+              externalMemoryCopy = helper.instance.exports.copy;` : ''}
               // Leave the native completion callback before calling back into WASM.
               setTimeout(() => {
                 try {
@@ -83,7 +88,7 @@ async function main() {
     : '3821ea9b1f7fb8c549ef2a064ef5c85750bf375c545a49fd6eea0df44a95f1f4';
   if (upstreamWasmSha256 !== expectedHash)
     throw new Error('Upstream WASM changed; revalidate the adapter');
-  const nativeCopy = !process.argv.includes('--upstream');
+  const nativeCopy = !process.argv.includes('--upstream') && !externalCopy;
   const binary = nativeCopy ? await useWasmMemoryCopy(upstream, simd ? 'ic' : 'hc') : upstream;
   const wasmSha256 = crypto.createHash('sha256').update(binary).digest('hex');
   let brotli;
@@ -95,7 +100,8 @@ async function main() {
   if (brotli.length > 2 * 1024 * 1024 - 4096) throw new Error('MediaPipe WASM exceeds the dedicated subpackage budget');
   fs.writeFileSync(path.join(wasmTarget, 'vision.wasm.br'), brotli);
   const info = { version, simd, wasmBytes: binary.length, brotliBytes: brotli.length,
-    upstreamWasmSha256, wasmAdapter: nativeCopy ? 'WASM memory.copy replaces Emscripten JS memcpy' : 'upstream unchanged',
+    upstreamWasmSha256, wasmAdapter: nativeCopy ? 'WASM memory.copy replaces Emscripten JS memcpy'
+      : externalCopy ? 'upstream unchanged; JS memcpy calls external WASM memory.copy' : 'upstream unchanged',
     adapterSha256: crypto.createHash('sha256').update(fs.readFileSync(path.join(target, 'mediapipe.js'))).digest('hex'),
     wasmSha256, textCodec: 'text-encoding@0.7.0 (scoped UTF-8 / UTF-16LE compatibility)',
     adapter: 'scoped WXWebAssembly loader; original MediaPipe graph/model/inference',

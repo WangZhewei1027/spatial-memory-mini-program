@@ -4,7 +4,7 @@
 import { resolveBackendBaseUrl } from "./backend-environment";
 import type { ActivityLocation, ActivitySubmission } from "./activity-state";
 
-// 开发版连接本地 Web；体验版／正式版保留线上后端。OSD 参考图和内容查询也使用此地址。
+// 开发版连接本地 Web；体验版／正式版保留线上后端。识别参考图和内容查询也使用此地址。
 // 地址配置与真机开发说明见 backend-environment.ts 和 docs/local-development.md。
 const API_BASE_URL = resolveBackendBaseUrl(
   wx.getAccountInfoSync().miniProgram.envVersion,
@@ -314,7 +314,7 @@ export function submitActivityRecord(input: ActivitySubmission): Promise<ApiResp
   return request("/activity-records", "POST", input);
 }
 
-/** OSD only exchanges reference metadata and content. Camera images stay on device. */
+/** Image matching only exchanges reference metadata and content. Camera images stay on device. */
 export function fetchAnchorCandidates(data: Record<string, any>): Promise<ApiResponse<any>> {
   return request("/anchors/candidates", "POST", data, recognitionHeaders());
 }

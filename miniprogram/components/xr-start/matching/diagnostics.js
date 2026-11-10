@@ -1,105 +1,52 @@
-const config = require("./config");
-const log = require("./log");
+const config = require('./config');
+const round = value => Number.isFinite(value) ? +value.toFixed(3) : null;
 
-// Paths identify the image/marker without disclosing signed URLs or user directories.
-function pathInfo(path) {
-  if (typeof path !== "string") return { kind: typeof path, file: null };
-  if (!path) return { kind: "empty", file: null };
-  const clean = path.split(/[?#]/)[0];
-  return { kind: /^https?:/.test(path) ? "remote" : /(?:\/tmp\/|\/temp\/|tmp_)/.test(path) ? "temp" : "local",
-    file: clean.split("/").pop().slice(0, 120) };
-}
-function anchorInfo(anchor) {
-  if (!anchor || typeof anchor !== "object") return { valueType: typeof anchor };
-  const scalar = value => typeof value === "number" || typeof value === "string" ? String(value).slice(0, 80) : null;
-  return { id: scalar(anchor.id), type: scalar(anchor.type), markerId: scalar(anchor.markerId),
-    markerIdType: typeof anchor.markerId, path: pathInfo(anchor.path),
-    origin: { x: scalar(anchor.origin?.x), y: scalar(anchor.origin?.y) },
-    size: { width: scalar(anchor.size?.width), height: scalar(anchor.size?.height) } };
-}
-
-const methods = {
-  _osdLog(event, fields = {}, level = "info") {
-    log(event, { run: this._osdDiagnostics?.run ?? this._modeEpoch, batch: this._osdBatchEpoch, phase: this._osdPhase, ...fields }, level);
+// Bounded, permanent diagnostics. No images, embeddings, URLs or coordinates.
+module.exports = {
+  _startMatchDiagnostics(source = 'automatic') {
+    if (config.debugLogs === false || this._matchDiagnostics) return;
+    const now = Date.now();
+    const d = this._matchDiagnostics = { source, startedAt: now, stage: 'waiting_camera', stageAt: now,
+      cameraFrames: 0, captured: 0, inferred: 0, invalidPixels: 0, staleResults: 0, busyFrames: 0,
+      lastFrameAt: null, submittedAt: null, lastResult: null, lastDecision: null };
+    this._matchLog('识别启动', { source, automatic: true, intervalMs: config.frameIntervalMs });
+    const report = () => {
+      if (this._matchDiagnostics !== d || this._disposed || this._retrievalPaused) return;
+      this._reportMatchDiagnostics();
+      this._matchDiagnosticTimer = setTimeout(report, config.diagnosticIntervalMs);
+    };
+    this._matchDiagnosticTimer = setTimeout(report, config.diagnosticIntervalMs);
   },
-  _beginOSDDiagnostics() {
-    if (config.debugLogs === false) return;
-    this._osdDiagnostics = { run: this._modeEpoch, startedAt: Date.now(), reportedAt: Date.now(), callbacks: 0, observations: 0,
-      accepted: 0, events: {}, rejected: {}, ignored: {}, resets: {}, bestCount: 0, bestDurationMs: 0,
-      progressAt: -Infinity, sampleKeys: new Set() };
+  _matchStage(stage) {
+    const d = this._matchDiagnostics;
+    if (d && d.stage !== stage) { d.stage = stage; d.stageAt = Date.now(); }
   },
-  _sampleOSD(key, event, fields, level = "info") {
-    const d = this._osdDiagnostics;
-    if (!d || d.sampleKeys.has(key)) return;
-    d.sampleKeys.add(key);
-    this._osdLog(event, fields, level);
-  },
-  _recordOSDEvent(event, anchors) {
-    const d = this._osdDiagnostics;
+  _recordMatchDecision(fields) {
+    const d = this._matchDiagnostics;
     if (!d) return;
-    d.callbacks++;
-    d.lastCallbackAt = Date.now();
-    d.events[event] = (d.events[event] || 0) + 1;
-    if (Array.isArray(anchors) && event !== "removeAnchors") d.observations += anchors.length;
-    const shape = Array.isArray(anchors) ? anchors.length ? "nonempty" : "empty" : "invalid";
-    this._sampleOSD(`event:${event}:${shape}`, "原生回调", { event,
-      payloadType: Array.isArray(anchors) ? "array" : typeof anchors,
-      count: Array.isArray(anchors) ? anchors.length : null,
-      samples: Array.isArray(anchors) ? anchors.slice(0, 3).map(anchorInfo) : [] });
+    d.lastResult = { ...fields, topScore: round(fields.topScore), secondScore: round(fields.secondScore),
+      margin: round(fields.margin) };
+    const key = `${fields.reason}:${fields.topId || ''}:${fields.observations || 0}`;
+    // Log first result / reason transitions / confirmation progress immediately;
+    // unchanged decisions are included in the 3-second summary, not every frame.
+    if (key !== d.lastDecision) this._matchLog('匹配结果', d.lastResult);
+    d.lastDecision = key;
   },
-  _rejectOSD(reason, anchor) {
-    const d = this._osdDiagnostics;
+  _reportMatchDiagnostics(reason = 'periodic') {
+    const d = this._matchDiagnostics;
     if (!d) return;
-    d.rejected[reason] = (d.rejected[reason] || 0) + 1;
-    this._sampleOSD(`reject:${reason}`, "回调被过滤", { reason, sample: anchorInfo(anchor),
-      registeredReference: pathInfo(this._osdMarkers.get(anchor?.markerId)?.path) }, "warn");
+    const now = Date.now();
+    this._matchLog('扫描摘要', { reason, stage: d.stage, stageMs: now - d.stageAt,
+      cameraFrames: d.cameraFrames, captured: d.captured, inferred: d.inferred,
+      invalidPixels: d.invalidPixels, staleResults: d.staleResults, busyFrames: d.busyFrames,
+      frameAgeMs: d.lastFrameAt == null ? null : now - d.lastFrameAt,
+      workerBusy: !!this._matchFrameBusy,
+      inFlightMs: this._matchFrameBusy && d.submittedAt != null ? now - d.submittedAt : 0,
+      nextFrameInMs: Math.max(0, (this._nextMatchFrameAt || 0) - now),
+      references: this._matchReferences?.length || 0, lastResult: d.lastResult });
   },
-  _ignoreOSD(reason) {
-    const d = this._osdDiagnostics;
-    if (!d) return;
-    d.ignored[reason] = (d.ignored[reason] || 0) + 1;
-    this._sampleOSD(`ignore:${reason}`, "回调未进入确认", { reason });
-  },
-  _resetOSDEvidence(reason) {
-    const d = this._osdDiagnostics;
-    if (d && this._osdEvidence) {
-      d.resets[reason] = (d.resets[reason] || 0) + 1;
-      this._sampleOSD(`reset:${reason}`, "连续确认重置", { reason, observations: this._osdEvidence.count,
-        durationMs: this._osdEvidence.lastAt - this._osdEvidence.since, gapMs: Date.now() - this._osdEvidence.lastAt });
-    }
-    this._osdEvidence = null;
-  },
-  _logOSDProgress(evidence, confirmed) {
-    const d = this._osdDiagnostics;
-    if (!d) return;
-    const now = Date.now(), durationMs = now - evidence.since;
-    d.bestCount = Math.max(d.bestCount, evidence.count);
-    d.bestDurationMs = Math.max(d.bestDurationMs, durationMs);
-    if (!confirmed && now - d.progressAt < 1000) return;
-    d.progressAt = now;
-    this._osdLog(confirmed ? "确认命中" : "连续确认进度", {
-      markerId: evidence.id, anchorId: this._osdMarkers.get(evidence.id)?.id,
-      observations: evidence.count, requiredObservations: config.minimumObservations,
-      durationMs, requiredDurationMs: config.confirmDurationMs, maxGapMs: config.maxObservationGapMs });
-  },
-  reportOSDScan(reason = "periodic") {
-    const d = this._osdDiagnostics, now = Date.now();
-    if (!d || (reason === "periodic" && (this._osdPhase !== "scanning" || now - d.reportedAt < config.diagnosticIntervalMs))) return;
-    d.reportedAt = now;
-    const result = reason === "matched" ? "confirmed" : !d.callbacks ? "no_native_events"
-      : !d.observations ? "no_observations" : !d.accepted
-        ? Object.keys(d.rejected).length ? "all_observations_rejected" : "observations_ignored"
-        : "awaiting_confirmation";
-    this._osdLog("扫描摘要", { reason, result, elapsedMs: now - d.startedAt,
-      callbacks: d.callbacks, events: { ...d.events }, observations: d.observations, accepted: d.accepted,
-      rejected: { ...d.rejected }, ignored: { ...d.ignored }, resets: { ...d.resets },
-      bestObservations: d.bestCount, bestDurationMs: d.bestDurationMs,
-      lastCallbackAgeMs: d.lastCallbackAt == null ? null : now - d.lastCallbackAt,
-      confirmation: this._osdEvidence ? { markerId: this._osdEvidence.id, count: this._osdEvidence.count,
-        durationMs: this._osdEvidence.lastAt - this._osdEvidence.since, gapMs: now - this._osdEvidence.lastAt } : null,
-      registered: this._osdMarkers.size,
-      cameraFrameAgeMs: this._runtime?.validFrameAt ? Math.max(0, now - this._runtime.validFrameAt) : null,
-      native: this._runtime?.session?.getOSDDiagnostics?.() || null });
+  _stopMatchDiagnostics(reason) {
+    this._reportMatchDiagnostics(reason);
+    clearTimeout(this._matchDiagnosticTimer); this._matchDiagnosticTimer = null; this._matchDiagnostics = null;
   },
 };
-module.exports = { methods, pathInfo };

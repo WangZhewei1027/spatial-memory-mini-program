@@ -1,0 +1,10 @@
+const fs = require('node:fs');
+const file = process.argv[2];
+if (!file) throw new Error('Pass an events JSONL file from the two-image self-check');
+const rows = fs.readFileSync(file, 'utf8').trim().split('\n').map(JSON.parse);
+const row = rows.filter(r => r.event === 'input-check').at(-1);
+if (!row) throw new Error('No input-check in the supplied report');
+const score = row.detail.distinctImageCosine;
+const pass = Number.isFinite(score) && Math.abs(score - 0.28575) < 0.005;
+console.log(JSON.stringify({ pass, score, expected: '0.28575 ± 0.005', environment: row.environment }));
+process.exitCode = pass ? 0 : 1;

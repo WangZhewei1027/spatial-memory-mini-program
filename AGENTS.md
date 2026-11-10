@@ -6,22 +6,23 @@
 
 | 改动 | 文档 |
 | --- | --- |
-| 后端地址、开发工具与真机连接 | [本地开发](docs/local-development.md) |
+| 后端地址、开发工具、真机连接与上传 | [本地开发](docs/local-development.md) |
 | 扫码、页面入口、Storage | [扫码参数](docs/scan-config-priority-strategy.md)、[持久化规则](.github/instructions/miniprogram-storage-persistence.instructions.md) |
 | AR 会话、相机、资源加载 | [正式运行时](docs/visionkit-three-migration.md)、[性能与资源管理](docs/performance-optimization.md) |
 | 素材队列、容量与释放 | [串行放置](docs/asset-place-queue-strategy.md)、[容量与去重](docs/node-list-queue-strategy.md) |
 | 场景协议、媒体与观看位置 | [场景播放](docs/scene-asset.md)、[自动联调](docs/scene-auto-debug.md) |
 | 活动与参与记录 | [活动](docs/activities.md) |
-| OSD 识别、锁定与重新扫描 | [识别流程](docs/anchor-recognition.md) |
+| MediaPipe 识别、Worker 与重新扫描 | [识别流程](docs/anchor-recognition.md) |
 
 ## 实现边界
 
 - 后端请求经过 `miniprogram/utils/backend.ts`。团队与地图由扫码上下文提供；普通发现记录的 `id` 是 Placement ID，独立场景预览使用 Scene ID。
-- 生产识别使用 VisionKit v1 OSD，命中后切换到 v2 SLAM + Three 空间展示；GPS 与独立 Scene 直接使用 v2。每次只运行一个会话；只消费相机位姿，平面交互留在实验页。配置限制见正式运行时文档。Three 相机前方是 -Z。
+- 生产识别使用固定 MediaPipe 模型的无 SIMD CPU Worker；相机、识别与展示共用一个 VisionKit v2 SLAM 会话。取帧不等待空间位姿，内容放置等待有效位姿；重扫复用会话。Worker 生命周期与取帧调度见识别流程，平面交互留在实验页。Three 相机前方是 -Z。
 - `components/xr-start` 的方法由各模块组合，每实例状态通过 `buildInitialState()` 初始化；异步加载完成后检查当前内容代次，退出时释放晚到资源。
 - 模型模板由 `ModelCache` 引用计数管理，实例清理调用 handle 的 `release()`；共享模板的物理释放由缓存负责。
 - Scene 使用保存的米制变换和共享 Core；普通地图模型归一化策略不适用于 Scene 内实例。
 - 活动参与记录由服务端保存；本地 Storage 保留入口历史与匿名参与标识，不作为打卡完成的权威来源。
+- `miniprogram/labs/` 只用于开发者工具和预览；生产代码不引用实验页。体验版／正式版从 `npm run release:stage` 生成的副本上传。
 
 ## 验证
 

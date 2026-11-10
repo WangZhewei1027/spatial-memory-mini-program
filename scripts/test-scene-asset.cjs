@@ -895,7 +895,7 @@ async function main() {
         content: new T.Group(), reticle: new T.Group(),
         background: { draw: () => true, dispose() {} },
         renderer: { render() {}, resetState() {}, dispose() {}, info: { render: {}, memory: {} } },
-        session: { mode: 'slam', isTracking: () => true, start() {}, stop() {}, getOSDDiagnostics: () => ({}) },
+        session: { mode: 'slam', isTracking: () => true, start() {}, stop() {}, getDiagnostics: () => ({}) },
         onState: (state, message) => host.onARState(state, message),
         onReady: () => host.handleARReady(), onTick: dt => host.handleTick(dt),
       });

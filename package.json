@@ -11,7 +11,7 @@
     "test:xr-three-lab": "node scripts/test-xr-three-lab.cjs",
     "test:ar-runtime": "node scripts/test-ar-runtime.cjs",
     "test:backend": "node scripts/test-dev-backend.cjs && node scripts/test-backend-environment.cjs",
-    "test": "node scripts/test-dev-backend.cjs && node scripts/test-backend-environment.cjs && node scripts/test-scan-config.cjs && node scripts/test-map-config.cjs && node scripts/test-activities.cjs && node scripts/test-xr-three-lab.cjs && node scripts/test-ar-runtime.cjs && node scripts/test-anchor-recognition.cjs && node scripts/test-asset-timing.cjs && node scripts/test-scene-asset.cjs && node scripts/test-scene-manifest.cjs && node scripts/test-scene-media.cjs && node --test scripts/test-scene-audio-sync.cjs && node scripts/test-scene-soundtrack-sync.cjs && node scripts/test-scene-preview.cjs && node --test scripts/test-image-match.cjs",
+    "test": "node scripts/test-dev-backend.cjs && node scripts/test-backend-environment.cjs && node scripts/test-scan-config.cjs && node scripts/test-map-config.cjs && node scripts/test-activities.cjs && node scripts/test-xr-three-lab.cjs && node scripts/test-ar-runtime.cjs && node scripts/test-anchor-recognition.cjs && node scripts/test-asset-timing.cjs && node scripts/test-scene-asset.cjs && node scripts/test-scene-manifest.cjs && node scripts/test-scene-media.cjs && node --test scripts/test-scene-audio-sync.cjs && node scripts/test-scene-soundtrack-sync.cjs && node scripts/test-scene-preview.cjs && node --test scripts/test-image-match.cjs && node --test scripts/test-image-matcher.cjs && node --test scripts/test-release-package.cjs",
     "test:activities": "node scripts/test-activities.cjs",
     "test:scan-config": "node scripts/test-scan-config.cjs",
     "test:scene-asset": "node scripts/test-scene-asset.cjs",
@@ -26,13 +26,18 @@
     "image-match:serve": "node scripts/serve-image-match-lab.cjs",
     "test:image-match": "node --test scripts/test-image-match.cjs",
     "build:image-match-lab:upstream": "node scripts/build-image-match-lab.cjs --upstream",
-    "build:image-match-lab:simd": "node scripts/build-image-match-lab.cjs --simd"
+    "build:image-match-lab:simd": "node scripts/build-image-match-lab.cjs --simd",
+    "build:image-matcher": "node scripts/build-image-matcher.cjs",
+    "test:image-matcher": "node --test scripts/test-image-matcher.cjs",
+    "release:stage": "node scripts/release-package.cjs",
+    "test:release": "node --test scripts/test-release-package.cjs"
   },
   "keywords": [],
   "author": "",
   "license": "",
   "devDependencies": {
     "@mediapipe/tasks-vision": "0.10.21",
+    "@tensorflow/tfjs-tflite": "0.0.1-alpha.10",
     "abort-controller": "3.0.0",
     "binaryen": "130.0.0",
     "esbuild": "0.28.2",

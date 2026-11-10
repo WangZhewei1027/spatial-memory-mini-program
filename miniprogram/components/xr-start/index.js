@@ -3,6 +3,7 @@ const scenePreview = require("./scene-preview");
 const gps = require("./gps");
 const navigation = require("./navigation");
 const matching = require("./matching/index");
+const { initialRecognitionState } = require("./matching/state");
 const mapConfig = require("./map-config");
 const { THREE } = require("../../lib/three-runtime/runtime");
 const { ARRuntime } = require("../../lib/three-runtime/ar-runtime");
@@ -22,13 +23,7 @@ function buildInitialState() {
     _modeEpoch: 0,
     _contentEpoch: 0,
     _allowedAssetIds: new Set(),
-    _nextRecognitionAt: 0,
-    _osdMarkers: new Map(),
-    _osdPhase: "idle",
-    _osdBatchEpoch: 0,
-    _osdCandidates: [],
-    _pendingOSDPlacement: null,
-    _osdCursor: 0,
+    ...initialRecognitionState(),
     _disposed: false,
     _retrievalPaused: false,
     nodeIdCounter: 0,
@@ -97,6 +92,7 @@ Component({
   },
   data: {
     arReady: false,
+    cameraReady: false,
     retrievalMode: "gps",
     renderError: "",
     renderStatus: "正在启动 AR 相机…",
@@ -127,7 +123,8 @@ Component({
               onReady: () => this.handleARReady(),
               onTick: (dt) => this.handleTick(dt),
               onState: (state, message) => this.onARState(state, message),
-              onAnchors: (event, anchors) => this.handleOSDAnchors(event, anchors),
+              onCameraFrame: (frame) => this.handleRecognitionFrame(frame),
+              requireTracking: () => this._scenePreviewMode || this.retrievalMode !== "anchor" || ["tracking", "locked"].includes(this._matchPhase),
               debugTimings: XR_CONFIG.debugLog,
             });
             this.scene = this._runtime.scene;
@@ -199,35 +196,25 @@ Component({
     },
     startAR() {
       if (this._disposed || !this._runtime || this._sessionActive) return;
-      this._ensureARMode(this._desiredARMode());
+      this._ensureARSession();
     },
-    _desiredARMode() {
-      return this._scenePreviewMode || this.retrievalMode !== "anchor" ||
-        ["tracking", "locked"].includes(this._osdPhase) ? "slam" : "osd";
-    },
-    _ensureARMode(mode, { restart = false } = {}) {
+    // Camera, recognition and display share one SLAM session; rescans reuse it.
+    _ensureARSession() {
       if (this._disposed || this._pageVisible === false || !this._runtime || this._contextLost || (!this._scenePreviewMode && !this._mapConfigReady)) return false;
-      if (!restart && this._sessionActive && this._runtime.session.mode === mode) return this._arReady;
+      if (this._sessionActive) return this._arReady;
       clearTimeout(this._firstFetchTimer);
       this._firstFetchStarted = false;
       this._arReady = false;
+      this._cameraReady = false;
       this._sessionActive = true;
-      this.setData({ arReady: false, renderError: "", renderStatus: mode === "slam" ? "正在启动空间追踪…" : "正在启动识别相机…" });
-      this._runtime.start(mode);
+      this.setData({ arReady: false, cameraReady: false, renderError: "", renderStatus: "正在启动空间追踪…" });
+      this._runtime.start();
       return this._arReady;
     },
     onARState(state, message) {
-      if (this._runtime?.session?.mode === "osd") {
-        let info = {};
-        try {
-          const device = wx.getDeviceInfo?.() || {}, app = wx.getAppBaseInfo?.() || {};
-          info = { platform: device.platform, model: device.model, system: device.system,
-            wechatVersion: app.version, SDKVersion: app.SDKVersion };
-        } catch (_) {}
-        this._osdLog("相机会话", { state, message, ...info, native: this._runtime.session.getOSDDiagnostics() }, state === "error" ? "error" : "info");
-      } else if (this._runtime?.session?.mode === "slam") {
+      if (this._runtime?.session) {
         console[state === "error" ? "error" : "log"]("[SLAM] 相机会话", JSON.stringify({
-          state, message, native: this._runtime.session.getOSDDiagnostics(),
+          state, message, native: this._runtime.session.getDiagnostics(),
         }));
       }
       if (this._disposed) return;
@@ -251,12 +238,13 @@ Component({
       } else if (state === "trackingrestored") {
         this._arReady = true;
         this.setData({ arReady: true, renderStatus: "" });
+        this._finishMatchPlacement();
         if (!this._placingBusy && this._placeQueue?.length) this._drainPlaceQueue();
       } else if (state !== "trackingready")
         this.setData({
           renderStatus:
             state === "running"
-              ? (this._runtime?.session.mode === "slam" ? "请缓慢左右移动手机，建立空间定位…" : "正在获取相机画面…")
+              ? "请缓慢左右移动手机，建立空间定位…"
               : "正在启动 AR 相机…",
         });
       this.triggerEvent("renderstatus", {
@@ -272,7 +260,7 @@ Component({
       if (!this._placingBusy && this._placeQueue?.length) this._drainPlaceQueue();
       if (this._scenePreviewMode) { this._beginScenePreview(); return; }
       if (this.retrievalMode === "anchor") {
-        if (this._osdPhase === "tracking") this._finishOSDPlacement();
+        if (this._matchPhase === "tracking") this._finishMatchPlacement();
         else void this.recognizeAnchor();
         return;
       }
@@ -299,8 +287,6 @@ Component({
         if (entry.billboardEl) entry.billboardEl.lookAt(camPos);
       if (this._retrievalPaused) return;
       if (this.retrievalMode === "anchor") {
-        this.reportOSDScan();
-        if (Date.now() >= this._nextRecognitionAt) this.recognizeAnchor();
         return;
       }
       // Activities can be paused or moderated while the visitor stands still.

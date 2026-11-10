@@ -20,13 +20,13 @@
 
 ### 真机开发地址自动更新
 
-`project.config.json` 已配置 `beforeCompile`、`beforePreview`、`beforeUpload` 执行 `sh scripts/sync-dev-backend.sh`。启动脚本从 PATH、常见 Homebrew 安装位置或 nvm 默认版本查找 Node.js，解决从桌面启动开发者工具时缺少终端 PATH 的问题，再运行 `scripts/sync-dev-backend.cjs`。当前开发者工具另有自身保存的“启用自定义处理命令”开关，单改文件里的 `setting.scriptsEnable` 不足以启用，新电脑需要在界面勾选一次。
+`project.config.json` 已配置 `beforeCompile`、`beforePreview` 执行 `sh scripts/sync-dev-backend.sh`；`beforeUpload` 执行 `sh scripts/before-upload.sh`，先刷新地址，再拒绝含实验页的上传（见[上传体验版／正式版](#上传体验版正式版)）。`scripts/node.sh` 从 PATH、常见 Homebrew 安装位置或 nvm 默认版本查找 Node.js，解决从桌面启动开发者工具时缺少终端 PATH 的问题，再运行 `scripts/sync-dev-backend.cjs`。当前开发者工具另有自身保存的“启用自定义处理命令”开关，单改文件里的 `setting.scriptsEnable` 不足以启用，新电脑需要在界面勾选一次。
 
 脚本在电脑上枚举网卡，优先使用默认路由对应的局域网 IPv4，排除 VPN、Docker 等虚拟网卡；默认路由不可用时，仅在剩余地址唯一时自动选择。输出 `miniprogram/utils/backend-development-local.js`，运行时再按版本选用该地址。已在本机开发者工具实际编译验证：无需终端预先执行命令，编译钩子成功重新生成地址文件。
 
 **换 Wi-Fi 后，直接重新编译／预览并让手机扫码新包，无需手改 IP。** 已在手机运行的旧包不会自动发现电脑新地址。Web 仍需监听 `0.0.0.0:3000`，手机与电脑需要网络互通。
 
-地址文件和可选覆盖文件均已加入 `.gitignore`。地址没变时不重写文件，避免重复触发热重载。断网或网卡选择有歧义时会清空旧地址并提示；此时模拟器、体验版和正式版仍可正常选择后端，真机开发会明确报错，不会沿用旧地址或回退线上。当前启动脚本用于 macOS/Linux；Windows 可将三个预处理命令改成 `node scripts/sync-dev-backend.cjs`，并确保 Node.js 在开发者工具 PATH 中。
+地址文件和可选覆盖文件均已加入 `.gitignore`。地址没变时不重写文件，避免重复触发热重载。断网或网卡选择有歧义时会清空旧地址并提示；此时模拟器、体验版和正式版仍可正常选择后端，真机开发会明确报错，不会沿用旧地址或回退线上。当前启动脚本用于 macOS/Linux；Windows 可将编译、预览命令改成 `node scripts/sync-dev-backend.cjs`，上传命令改成 `node scripts/sync-dev-backend.cjs && node scripts/check-upload-package.cjs`，并确保 Node.js 在开发者工具 PATH 中。
 
 多网卡／VPN 环境可在小程序仓库根目录创建 `.miniapp-dev.local.json`，指定固定网卡，之后该网卡的 IP 仍会自动更新：
 
@@ -39,6 +39,26 @@
 模拟器根据 `wx.getDeviceInfo().platform === "devtools"` 自动使用 `127.0.0.1`；真机上的 localhost 指手机自身，不能用于连接电脑。体验版和正式版始终按环境选择线上配置。所有回归使用固定测试地址，不再依赖开发者当前 IP。
 
 选择本地 Web 数据库里存在的组织与工作区，可使用本地管理端生成的入口参数。原有默认 ID 和扫码历史保持不变；若本地没有对应记录，改用本地 ID，不会自动复制线上数据。普通素材的下载仍使用本地数据库记录的 file_url，识别模型也仍按 Web 的服务端配置运行。
+
+## 上传体验版／正式版
+
+`miniprogram/labs/` 下的实验页（图像匹配实验、SIMD 探针、xr-three 等）只在开发者工具编译和真机预览中使用，不进入体验版和正式版。主项目始终注册这些分包，因此不能直接从主项目上传：
+
+```sh
+npm run release:stage
+```
+
+脚本生成 `.release/miniprogram-upload/`（已加入 `.gitignore`），内容如下：
+
+- 复制 `miniprogram/`、`tsconfig.json` 和 `typings/`，去掉 `labs/` 目录；从 `app.json` 删除实验分包，从 `packOptions` 删除实验文件。
+- 不复制 `scripts/`，关闭预处理命令。`backend-development-local.js` 写为空地址，发布包不带开发电脑的局域网 IP。
+- 生成后检查页面文件、强制打包文件是否齐全，任何源文件引用 `labs/` 路径都会失败；最后按主包和分包输出源文件体积（不含 `packOptions.ignore` 的文件，未经开发者工具压缩）。
+
+然后用开发者工具导入并上传 `.release/miniprogram-upload` 目录；用命令行时，把 `wechatide` 的 `upload --project` 指向该目录。每次上传前重新生成副本。若在主项目里点「上传」，`beforeUpload` 会列出实验分包并以非零状态退出，提示改用发布副本。这一检查只在开发者工具执行预处理命令时生效，需要先勾选「启用自定义处理命令」。
+
+发布副本不复制 `project.private.config.json`，域名校验保持开启；在模拟器里打开副本时，开发环境请求 `127.0.0.1:3000` 会报 `url not in domain list`，这是预期行为，不影响体验版和正式版使用线上域名。2026-11-09 已在开发者工具中导入并编译副本：控制台显示 3 个分包（不含实验页），首页正常渲染，没有模块缺失错误。上传后的包体积与真机行为尚未验证。
+
+回归：`npm run test:release` 验证主项目上传检查、发布副本内容，以及生产代码引用实验页时生成失败。
 
 ## 线上配置
 

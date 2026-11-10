@@ -34,8 +34,8 @@ function launch(sceneId = "") {
     startGPSWatch() {},
   };
   component.lifetimes.attached.call(host);
-  host._runtime = { session: { mode: null, clearOSDMarkers() {} },
-    start(mode) { this.session.mode = mode; starts.push(mode); }, stop() {}, dispose() {},
+  host._runtime = { session: { mode: "slam" },
+    start() { starts.push(this.session.mode); }, stop() {}, dispose() {},
   };
   // No scene is rendered in this configuration test; cleanup of actual render resources has separate runtime coverage.
   host._clearRemoteAssets = () => {};
@@ -53,7 +53,7 @@ async function main() {
     assert.equal(app.requests.length, 1);
     const pending = app.host.loadMapConfig(); assert.equal(app.requests.length, 1, "retry while pending shares the request");
     app.respond({ ...config, retrieval_mode: mode }); await pending;
-    assert.deepEqual(app.starts, [mode === "anchor" ? "osd" : "slam"], "start the configured camera directly");
+    assert.deepEqual(app.starts, ["slam"], "start the configured camera directly");
     assert.equal(app.host._textAssetStyle, "plain_white"); assert.equal(app.host._confettiEnabled, true);
     assert.ok(app.events.some((event) => event.ready && event.retrievalMode === mode && event.footerEnabled));
     app.component.pageLifetimes.hide.call(app.host);
@@ -63,7 +63,7 @@ async function main() {
     app.respond({ ...config, retrieval_mode: mode === "anchor" ? "gps" : "anchor", footer_enabled: false }, 1);
     await app.host._mapConfigRequest;
     assert.equal(app.host._retrievalPaused, false);
-    assert.equal(app.starts[1], mode === "anchor" ? "slam" : "osd");
+    assert.equal(app.starts[1], "slam");
     assert.equal(app.events.filter((event) => event.name === "mapconfigload").at(-1).footerEnabled, false);
     app.component.lifetimes.detached.call(app.host);
   }
@@ -71,7 +71,7 @@ async function main() {
     const app = launch(); await flush(); app.respond(invalid); await app.host._mapConfigRequest;
     assert.equal(app.host._mapConfigReady, false); assert.deepEqual(app.starts, []); assert.ok(app.host.data.renderError);
     app.host.retryAR(); await flush(); app.respond(config, 1); await app.host._mapConfigRequest;
-    assert.deepEqual(app.starts, ["osd"], "configuration failure can be retried");
+    assert.deepEqual(app.starts, ["slam"], "configuration failure can be retried");
     app.component.lifetimes.detached.call(app.host);
   }
   for (const result of [{ statusCode: 503, data: {} }, { statusCode: 200, data: [] },

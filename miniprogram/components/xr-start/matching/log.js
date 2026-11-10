@@ -6,7 +6,7 @@ module.exports = function matchLog(event, fields = {}, level = "info", requestId
   try {
     const write = level === "error" ? console.error : level === "warn" ? console.warn : console.log;
     // Serialize immediately so DevTools does not show subsequently mutated values.
-    write.call(console, `[OSD]${requestId ? `[${requestId}]` : ""} ${event}`,
+    write.call(console, `[ImageMatch]${requestId ? `[${requestId}]` : ""} ${event}`,
       JSON.stringify(fields));
   } catch (_) {
     // Diagnostics must never interrupt recognition.

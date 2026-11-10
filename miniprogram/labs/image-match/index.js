@@ -48,7 +48,7 @@ Page({
       'wasm-constructors-end': '4/5 构造函数完成…', 'wasm-receive-end': '4/5 初始化完成…',
       'module-ready': '5/5 加载推理模型…' };
     if (stages[event] && this._active && !this._dead) this.setData({ status: stages[event] });
-    if (this._server && (stages[event] || ['error', 'engine-ready', 'gl-readback', 'input-check', 'benchmark-start', 'benchmark-first-pair'].includes(event))) {
+    if (this._server && (event.startsWith('worker-') || event.startsWith('[DEBUG-simd]') || stages[event] || ['error', 'engine-ready', 'gl-readback', 'input-check', 'benchmark-start', 'benchmark-first-pair'].includes(event))) {
       wx.request({ url: `${this._server}/event`, method: 'POST', timeout: 3000,
         data: { runId: this._runId, event, detail, environment: this._environment }, fail() {} });
     }
@@ -67,6 +67,12 @@ Page({
       const dev = this._environment.platform === 'devtools';
       const host = dev ? '127.0.0.1' : require('../../utils/backend-development-local').apiBaseUrl.replace(/^https?:\/\//, '').split(':')[0];
       this._server = `http://${host}:8787`;
+      if (this._options.simdProbe) {
+        this.setData({ status: '检查 SIMD 指令数值…' });
+        const result = await require('./simd-probe').runSimdProbes(current, (e,d) => this.log(e,d));
+        if (current()) this.setData({ status: `SIMD 诊断完成：${result.total} 项，${result.failed} 项不一致` });
+        if (this._options.simdProbe === '1') return;
+      }
       const engine = await createEngine(`${this._server}/model.tflite`, current, (e,d) => this.log(e,d), this._inferenceCanvas);
       if (!current()) { engine.close(); return; }
       this._engine = engine; this._processor = createProcessor();
@@ -85,6 +91,7 @@ Page({
       this._inputCheck = { distinctImageCosine: cosine(vectors[0], vectors[1]), pixelStats };
       this.log('input-check', this._inputCheck);
       if (this._inputCheck.distinctImageCosine > 0.99) throw new Error('两张不同测试图的特征过于接近，图像输入验证未通过');
+      if (this._options.worker === '1') { await require('./worker-check').runWorkerCheck(this, current); return; }
       this.setData({ ready: true, status: '选择参考图，或载入当前地图的目标' });
       await this.importPendingReferences(generation);
       if (!current() || this._choosingReferences) return;
@@ -312,6 +319,7 @@ Page({
   },
   copyReport() { if (this._report) wx.setClipboardData({ data: JSON.stringify(this._report, null, 2) }); },
   release() {
+    this._workerMatcher?.close(); this._workerMatcher = null;
     this._active = false; this._generation++; this.stopCamera();
     this._autoCameraBenchStarted = false;
     this._engine?.close(); this._engine = null; this._processor?.close(); this._processor = null;

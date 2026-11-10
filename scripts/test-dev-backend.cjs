@@ -51,7 +51,10 @@ try {
 
 const config = JSON.parse(fs.readFileSync(path.join(__dirname, "../project.config.json"), "utf8"));
 assert.equal(config.setting.scriptsEnable, true);
-for (const name of ["beforeCompile", "beforePreview", "beforeUpload"]) {
+for (const name of ["beforeCompile", "beforePreview"]) {
   assert.equal(config.scripts[name], "sh scripts/sync-dev-backend.sh");
 }
+// Upload also refreshes the address, then rejects packages that still contain labs.
+assert.equal(config.scripts.beforeUpload, "sh scripts/before-upload.sh");
+assert.match(fs.readFileSync(path.join(__dirname, "before-upload.sh"), "utf8"), /sync-dev-backend\.sh[\s\S]*check-upload-package\.cjs/);
 console.log("PASS DevTools hooks are enabled for compile, preview and upload");

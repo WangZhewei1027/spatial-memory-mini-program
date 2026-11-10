@@ -1,0 +1,6 @@
+TFLite runtime: @tensorflow/tfjs-tflite@0.0.1-alpha.10 (Google, Apache-2.0).
+Source: https://github.com/tensorflow/tfjs/tree/master/tfjs-tflite
+Adaptations: static embind closures, scoped WXWebAssembly loader, WASM memory.copy.
+MediaPipe model (unchanged): https://storage.googleapis.com/mediapipe-models/image_embedder/mobilenet_v3_small/float32/1/mobilenet_v3_small.tflite
+Model SHA-256: bbbb4c51a55a53905af1daec995ca1aae355046f8839bb8c9f5ce9271394bc40
+Text encoding: text-encoding@0.7.0; see TEXT-ENCODING-LICENSE.txt.
