@@ -26,7 +26,7 @@
 
 ### 兼容边界
 
-- Three 锁定 `0.186.1`，构建为 CommonJS。小程序版本、设备是否同时支持 VisionKit v2 + WebGL2 需要真机验证。
+- 当前 Three 与 Web 统一锁定 `0.183.2`，构建为 CommonJS；早期实验的 `0.186.1` 记录保留在下文。小程序版本、设备是否同时支持 VisionKit v2 + WebGL2 需要真机验证。
 - 官方旧示例 UV 取 `.ra`，当前默认沿用；调试提供 `.rg` 手动对照，记录机型后再决定是否需要按平台适配。不是自动准确判断纹理格式的算法。
 - 平面追踪不等于深度遮挡，也不等于跨会话 VPS 重定位。
 - 本次 GLB fixture 无纹理、无压缩、buffer 内嵌。本地图片经 Canvas.createImage 创建 Three.Texture；网络加载、带内嵌图片的任意 GLB、Draco/KTX2、字体、视频、后处理还未全面适配。

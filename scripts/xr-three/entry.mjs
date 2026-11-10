@@ -12,3 +12,5 @@ export { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
 export { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 export function decodeUTF8(bytes) { return new TextDecoder().decode(bytes); }
+
+export { createSceneLighting, renderSceneContent, DEFAULT_SCENE_LIGHTING, lightingIssues } from '@spatial-memory/scene-lighting';

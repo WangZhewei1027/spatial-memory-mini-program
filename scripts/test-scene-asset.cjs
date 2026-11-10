@@ -894,6 +894,7 @@ async function main() {
         canvas: { width: 480, height: 640 }, scene: new T.Scene(), camera: new T.PerspectiveCamera(),
         content: new T.Group(), reticle: new T.Group(),
         background: { draw: () => true, dispose() {} },
+        lighting: { apply() {}, dispose() {} },
         renderer: { render() {}, resetState() {}, dispose() {}, info: { render: {}, memory: {} } },
         session: { mode: 'slam', isTracking: () => true, start() {}, stop() {}, getDiagnostics: () => ({}) },
         onState: (state, message) => host.onARState(state, message),

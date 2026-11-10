@@ -1,5 +1,6 @@
 // Validate external playback data before starting downloads or constructing a hierarchy.
 // The server remains authoritative for team ownership; this boundary protects native resources.
+const { lightingIssues } = require("../three-runtime/runtime").THREE;
 const own = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
 const record = value => !!value && typeof value === "object" && !Array.isArray(value);
 const finite = (value, min = -Infinity, max = Infinity) => typeof value === "number" && Number.isFinite(value) && value >= min && value <= max;
@@ -11,11 +12,14 @@ function invalid(message, instance) {
 }
 function validateManifest(manifest) {
   const version = manifest?.schemaVersion, content = manifest?.content;
-  if (![4, 5, 7, 8, 9].includes(version) || !record(content) || content.kind !== "composition") invalid("不支持的场景播放协议");
+  if (![4, 5, 7, 8, 9, 10].includes(version) || !record(content) || content.kind !== "composition") invalid("不支持的场景播放协议");
   if (content.units !== "meters" || typeof content.loop !== "boolean") invalid("场景单位或循环参数无效");
   if (version === 9 || content.viewerPosition !== undefined) {
     const position = content.viewerPosition;
-    if (version !== 9 || !Array.isArray(position) || position.length !== 3 || !position.every(value => finite(value)) || (position[0] === 0 && position[2] === 0)) invalid("场景观看位置无效或播放协议不匹配");
+    if (version < 9 || !Array.isArray(position) || position.length !== 3 || !position.every(value => finite(value)) || (position[0] === 0 && position[2] === 0)) invalid("场景观看位置无效或播放协议不匹配");
+  }
+  if (version === 10 || content.lighting !== undefined) {
+    if (version !== 10 || lightingIssues(content.lighting).length) invalid("场景灯光参数无效或播放协议不匹配");
   }
   if (content.durationSeconds !== null && !finite(content.durationSeconds, Number.MIN_VALUE)) invalid("场景时长必须是有限正数");
   const list = content.instances, groupList = version === 4 || content.groups === undefined ? [] : content.groups;

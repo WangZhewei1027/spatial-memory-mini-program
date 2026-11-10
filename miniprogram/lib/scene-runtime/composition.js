@@ -116,6 +116,7 @@ function createCompositionPlayer(manifest, { modelCache, canvas = modelCache?.ca
       // State observers may navigate away synchronously when loading starts.
       if (disposed || generation !== loadGeneration) return;
       const { list, groupList, resources, kindOf } = validateManifest(manifest);
+      root.userData.sceneLighting = content.lighting || THREE.DEFAULT_SCENE_LIGHTING;
       if (list.some(inst => kindOf(inst) === "model") && !modelCache) throw tagError(new Error("缺少 ModelCache"), { kind: "protocol" });
       let createSurface = surfaceFactory;
       if (list.some(inst => kindOf(inst) !== "model") && !createSurface) {

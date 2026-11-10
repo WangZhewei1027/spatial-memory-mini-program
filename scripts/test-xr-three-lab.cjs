@@ -18,7 +18,7 @@ function load(file) {
 }
 async function main() {
   const { THREE, createAnimationRig, applyToXR, probeWebGL2, createCanvasFacade, flipRows, createFixtureGLB } = load(path.join(base, 'runtime.js'));
-  assert.equal(THREE.REVISION, '186');
+  assert.equal(THREE.REVISION, '183');
   const rig = createAnimationRig();
   rig.sample(2);
   assert.ok(Math.abs(rig.object.position.x - 0.5) < 1e-6);

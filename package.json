@@ -43,9 +43,10 @@
     "esbuild": "0.28.2",
     "miniprogram-api-typings": "^2.8.3-1",
     "text-encoding": "0.7.0",
-    "three": "0.186.1"
+    "three": "0.183.2"
   },
   "dependencies": {
-    "@spatial-memory/scene-core": "file:vendor/spatial-memory-scene-core-2.7.0.tgz"
+    "@spatial-memory/scene-core": "file:vendor/spatial-memory-scene-core-2.7.0.tgz",
+    "@spatial-memory/scene-lighting": "file:vendor/spatial-memory-scene-lighting-1.0.0.tgz"
   }
 }

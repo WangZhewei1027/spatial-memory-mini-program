@@ -43,10 +43,8 @@ class ARRuntime {
       this.camera = new THREE.PerspectiveCamera(60, 1, 0.01, 300);
       this.content = new THREE.Group();
       this.scene.add(this.content);
-      this.scene.add(new THREE.AmbientLight(0xffffff, 3));
-      const light = new THREE.DirectionalLight(0xffffff, 3);
-      light.position.set(0, 3, 2);
-      this.scene.add(light);
+      this.lighting = THREE.createSceneLighting(this.renderer, this.scene);
+      this.lighting.apply();
       this.background = createCameraBackground(gl);
       this.renderer.resetState();
       this.resize(width, height);
@@ -65,6 +63,7 @@ class ARRuntime {
         },
       });
     } catch (error) {
+      this.lighting?.dispose();
       disposeTree(this.scene);
       this.background?.dispose();
       this.renderer?.dispose();
@@ -164,7 +163,7 @@ class ARRuntime {
     if (far !== this.camera.far) syncVKCamera(this.camera, frame.camera, 0.01, far);
     const businessMs = Date.now() - businessAt,
       renderAt = Date.now();
-    this.renderer.render(this.scene, this.camera);
+    THREE.renderSceneContent(this.renderer, this.scene, this.camera, this.content, this.lighting);
     if (this.shaderError) throw new Error(this.shaderError);
     this.frames = (this.frames || 0) + 1;
     if (!this.reportAt) this.reportAt = now;
@@ -192,6 +191,7 @@ class ARRuntime {
   dispose() {
     this.disposed = true;
     this.stop();
+    this.lighting.dispose();
     disposeTree(this.scene);
     this.background.dispose();
     this.renderer.dispose();

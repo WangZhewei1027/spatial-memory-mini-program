@@ -58,3 +58,12 @@ assert.equal(syncVKCamera(camera, source, .01, far), true);
 assert.equal(camera.far, far, 'native projection and camera metadata use the same adaptive far plane');
 mesh.geometry.dispose(); mesh.material.dispose();
 console.log('PASS large manifests, cyclic and invalid input rejection, adaptive native camera clipping');
+
+const { DEFAULT_SCENE_LIGHTING } = require('../miniprogram/lib/three-runtime/runtime').THREE;
+const lit = structuredClone(manifest);
+lit.schemaVersion = 10; lit.content.lighting = { ...DEFAULT_SCENE_LIGHTING };
+assert.doesNotThrow(() => validateManifest(lit));
+for (const change of [value => { value.schemaVersion = 8; }, value => { delete value.content.lighting; }, value => { value.content.lighting.environmentIntensity = -1; }, value => { value.content.lighting.url = 'external'; }]) {
+  const invalid = structuredClone(lit); change(invalid); assert.throws(() => validateManifest(invalid));
+}
+console.log('PASS schema 10 lighting validation before native allocations');

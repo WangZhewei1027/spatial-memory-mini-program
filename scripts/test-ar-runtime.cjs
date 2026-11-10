@@ -206,6 +206,7 @@ async function main() {
       canvas: { width: 320, height: 480 }, scene: new THREE.Scene(), content: new THREE.Group(),
       camera: new THREE.PerspectiveCamera(),
       session: { mode: 'slam', start() {}, stop() {}, isTracking: () => true }, background: { draw: () => true },
+      lighting: { apply() {} },
       renderer: { render() {}, setSize() {}, info: { render: { calls: 0 }, memory: { geometries: 0, textures: 0 } } },
       onReady() {}, onState() {}, onTick(dt) { deltas.push(dt); core.advance(dt); },
     });
@@ -425,6 +426,7 @@ async function main() {
   host._runtime = Object.assign(Object.create(ARRuntime.prototype), host._runtime, {
     canvas: { width: 390, height: 844 }, content: host.shadowRoot,
     background: { draw: () => true },
+    lighting: { apply() {} },
     renderer: { setSize() {}, render(scene, camera) { scene.updateMatrixWorld(true); camera.updateMatrixWorld(); spatialRenders++; }, info: { render: {}, memory: {} } },
     session: { mode: 'slam', start() { sessionStarts++; }, stop() {}, isTracking: () => tracking, getDiagnostics: () => ({}) },
     onReady: () => host.handleARReady(), onTick: dt => host.handleTick(dt),

@@ -6,7 +6,7 @@ const { scenePlacementFromCamera } = require("../../../lib/scene-runtime/vendor/
 // One scene placement occupies one queue slot; all children share its lifetime.
 module.exports = {
   async _loadScenePlayer(asset, manifest) {
-    if (![4, 5, 7, 8, 9].includes(manifest?.schemaVersion) || manifest.assetId !== asset.id || manifest.content?.kind !== "composition")
+    if (![4, 5, 7, 8, 9, 10].includes(manifest?.schemaVersion) || manifest.assetId !== asset.id || manifest.content?.kind !== "composition")
       throw new Error("不支持的场景内容");
     if (manifest.content.instances?.length === 0) return null;
     const player = createCompositionPlayer(manifest, {
