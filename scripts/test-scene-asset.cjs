@@ -931,7 +931,7 @@ async function main() {
     console.log("PASS AR component hide/show and detach/re-entry: playing/paused/ended reset clock and pose, old players fully disposed");
   }
 
-  // Real queue integration: same registry, tick, tap, capacity and clearing as other assets.
+  // Real queue integration: same registry, tick, capacity and clearing as other assets; no tap transport.
   {
     let response = { statusCode: 200, data: compositionManifest() };
     let pendingResponse;
@@ -969,11 +969,9 @@ async function main() {
     const model = entry.node.children[0].children[0].children[0];
     entry.tick(1);
     near(model.position.x, 1);
-    entry.onTap(); entry.tick(1);
-    near(model.position.x, 1, "tap pauses");
-    entry.onTap(); entry.tick(10);
-    entry.onTap(); entry.tick(0.5);
-    near(model.position.x, 0.5, "tap replays ended scene");
+    assert.equal(entry.onTap, null, "tapping a placed scene never controls playback");
+    entry.tick(1);
+    near(model.position.x, 2, "the scene keeps playing on its own clock");
     host._destroyNode(entry); host.nodeList = [];
     assert.equal(cache.stats.live, 0);
     assert.equal(host.shadowRoot.children.length, 0);
@@ -1044,7 +1042,7 @@ async function main() {
     assert.equal(host.nodeList.filter((e) => e.type === "text").length, 1);
     for (const node of host.nodeList) host._destroyNode(node);
     assert.equal(cache.stats.live, 0);
-    console.log("PASS scene asset queue: placement, tap, dependency errors, late results, whole-scene capacity and disposal");
+    console.log("PASS scene asset queue: placement, no tap transport, dependency errors, late results, whole-scene capacity and disposal");
   }
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

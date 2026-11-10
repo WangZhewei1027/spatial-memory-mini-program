@@ -61,11 +61,8 @@ module.exports = {
         if (this._mountedScenePreviewPlayer === player) this._mountedScenePreviewPlayer = null;
         player.dispose();
       }, tick: (dt) => player.update(dt),
-      onTap: () => {
-        if (player.state === "ended") player.restart();
-        else if (player.state === "playing") player.pause();
-        else player.play();
-      },
+      // No canvas-tap transport: map, recognition and QR scenes play the same
+      // way; only the QR scene page offers explicit pause/replay buttons.
     });
     if (!entry._destroyed) {
       if (this._scenePreviewMode) this._mountedScenePreviewPlayer = player;
