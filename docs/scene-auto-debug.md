@@ -1,4 +1,12 @@
-# Web → 小程序场景自动联调
+# 场景预览与历史自动联调
+
+当前入口：在本地 Web 保存场景后执行 `npm run scene:preview -- <sceneId> <organizationId>`，在开发者工具选择「Scene 本地预览」。它打开正式页面 `pages/scene/scene`，在手机上验证 AR 放置与播放；后端连接见 [本地开发](local-development.md)。
+
+旧模拟相机联调页已归档到 `ignore/labs/xr-three/scene-preview.js`，不再注册到主项目。`npm run test:scene-preview` 仍使用归档夹具回归正式播放器；`scene:fixture` 只更新归档素材。
+
+## 以下为历史实验记录
+
+下文实验页入口、编译条件、自动化命令和验收记录描述归档前的流程，不能直接用于当前主项目。
 
 本文记录已实现的本机联调流程：通过 Web 编辑器创建并保存 scene，在微信开发者工具中加载相同数据，使用小程序实际的 Three.js、GLB 加载器和场景播放器自动检查，再操作播放界面确认结果。适用于日常场景开发，也可作为 AI 自动调试的执行说明。
 
@@ -287,8 +295,8 @@ npm run scene:preview -- d6fe703f-5b43-41a7-b25e-53ea690b2d8d 02212116-256b-4b60
 | 文件 | 职责 |
 |---|---|
 | [prepare-scene-preview.cjs](../scripts/prepare-scene-preview.cjs) | 检查场景接口，生成编译条件 |
-| [scene-preview.js](../miniprogram/labs/xr-three/scene-preview.js) | 小程序联调页、实际渲染、播放控制和生命周期 |
-| [scene-checks.js](../miniprogram/labs/xr-three/scene-checks.js) | 针对已加载场景的确定性检查 |
+| [scene-preview.js](../ignore/labs/xr-three/scene-preview.js) | 小程序联调页、实际渲染、播放控制和生命周期 |
+| [scene-checks.js](../ignore/labs/xr-three/scene-checks.js) | 针对已加载场景的确定性检查 |
 | [composition.js](../miniprogram/lib/scene-runtime/composition.js) | 联调页与正式 AR 共用的场景播放器 |
 | [backend-environment.ts](../miniprogram/utils/backend-environment.ts) | 模拟器、真机开发、体验版和正式版地址选择 |
 | [sync-dev-backend.cjs](../scripts/sync-dev-backend.cjs) | 电脑网卡检测与本机地址文件生成 |

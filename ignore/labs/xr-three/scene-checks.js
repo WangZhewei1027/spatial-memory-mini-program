@@ -1,4 +1,4 @@
-const { samplePresentation } = require("../../lib/scene-runtime/vendor/scene-core");
+const { samplePresentation } = require("../../../miniprogram/lib/scene-runtime/vendor/scene-core");
 // Deterministic checks against a loaded, real mini-program composition player.
 // No alternate renderer, animation evaluator or fake model cache is used here.
 function verifyScenePlayer(player, manifest, cache) {

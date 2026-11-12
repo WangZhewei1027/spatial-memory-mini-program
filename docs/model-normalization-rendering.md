@@ -1,6 +1,6 @@
 # 模型归一化大小渲染逻辑调查（xr-start）
 
-> **当前实现**：正式 AR 页 `pages/ar/ar` 已从 xr-frame 切换为 VisionKit v2 + Three.js（见 [`visionkit-three-migration.md`](visionkit-three-migration.md)）。"最长边归一到目标尺寸再乘 `scale_multiplier`" 的思路不变，但本文原先引用的 xr-frame 机制（`calcTotalBoundBox`、`transform.scale.setValue`、`gltfComp`、`_placeHugeModel`、`HUGE_MODEL_SCALE`）已不存在，当前统一由 `assets/model.js` 的 `instantiateModel(handle, targetSize, config)` 用 `THREE.Box3().setFromObject()` 实现；下文已按当前实现更新。xr-frame 写法仅适用于 `labs/xr-three/xr-view/` 与 `xr-frame-demo-master/`（注意 xr-frame 相机 forward 为 +Z，Three 为 −Z）。
+> **当前实现**：正式 AR 页 `pages/ar/ar` 已从 xr-frame 切换为 VisionKit v2 + Three.js（见 [`visionkit-three-migration.md`](visionkit-three-migration.md)）。"最长边归一到目标尺寸再乘 `scale_multiplier`" 的思路不变，但本文原先引用的 xr-frame 机制（`calcTotalBoundBox`、`transform.scale.setValue`、`gltfComp`、`_placeHugeModel`、`HUGE_MODEL_SCALE`）已不存在，当前统一由 `assets/model.js` 的 `instantiateModel(handle, targetSize, config)` 用 `THREE.Box3().setFromObject()` 实现；下文已按当前实现更新。xr-frame 写法仅适用于 `labs/xr-three/xr-view/` 与 `ignore/xr-frame-demo-master/`（注意 xr-frame 相机 forward 为 +Z，Three 为 −Z）。
 
 ## 调查范围
 

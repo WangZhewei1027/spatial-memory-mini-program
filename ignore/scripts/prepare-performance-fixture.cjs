@@ -2,8 +2,8 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { execFileSync } = require('node:child_process');
-const { createFixtureGLB } = require('../miniprogram/labs/xr-three/runtime');
-const target = path.resolve(__dirname, '../miniprogram/labs/xr-three/fixtures');
+const { createFixtureGLB } = require('../labs/xr-three/runtime');
+const target = path.resolve(__dirname, '../labs/xr-three/fixtures');
 fs.mkdirSync(target, { recursive: true });
 const ffmpeg = (args) => execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'error', '-y', ...args], { stdio: 'inherit' });
 ffmpeg(['-f', 'lavfi', '-i', 'testsrc2=size=160x90:rate=15:duration=8', '-f', 'lavfi', '-i', 'sine=frequency=440:sample_rate=22050:duration=8', '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-profile:v', 'baseline', '-c:a', 'aac', '-b:a', '32k', '-movflags', '+faststart', path.join(target, 'performance.mp4')]);

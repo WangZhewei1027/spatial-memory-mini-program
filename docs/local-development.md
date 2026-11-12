@@ -15,12 +15,12 @@
 
 1. 启动 Web 使用的本地数据库。在相邻 `spatial-memory` 仓库确认 `.env.local` 的 `DATABASE_URL`。已有开发环境可能仍使用 `localhost:55432` 的 `sanlin` 数据库；这是保留数据的历史部署标识，本次项目改名不会重命名数据库，以实际配置为准。
 2. 在 Web 仓库运行 `npm run dev -- --hostname 0.0.0.0 --port 3000`。若 3000 已有开发服务，不要另起一个自动换端口的实例。
-3. 首次拉取代码后在小程序仓库执行 `npm install`，自动生成本机地址文件。在微信开发者工具“设置 → 项目设置 → 本地设置”勾选“启用自定义处理命令”（本机已启用），确认三个预处理命令均为 `sh scripts/sync-dev-backend.sh`，然后重新编译。保留“不校验合法域名”；当前 `project.private.config.json` 已设置 `urlCheck: false`。
+3. 首次拉取代码后在小程序仓库执行 `npm install`，自动生成本机地址文件。在微信开发者工具“设置 → 项目设置 → 本地设置”勾选“启用自定义处理命令”（本机已启用），确认编译／预览命令为 `sh scripts/sync-dev-backend.sh`，上传命令为 `sh scripts/before-upload.sh`，然后重新编译。保留“不校验合法域名”；当前 `project.private.config.json` 已设置 `urlCheck: false`。
 4. 真机预览使用开发版，手机与电脑连接同一可互访的 Wi-Fi，打开小程序调试，并允许电脑防火墙的 3000 端口访问。VisionKit AR 仍需真机验证。
 
 ### 真机开发地址自动更新
 
-`project.config.json` 已配置 `beforeCompile`、`beforePreview` 执行 `sh scripts/sync-dev-backend.sh`；`beforeUpload` 执行 `sh scripts/before-upload.sh`，先刷新地址，再拒绝含实验页的上传（见[上传体验版／正式版](#上传体验版正式版)）。`scripts/node.sh` 从 PATH、常见 Homebrew 安装位置或 nvm 默认版本查找 Node.js，解决从桌面启动开发者工具时缺少终端 PATH 的问题，再运行 `scripts/sync-dev-backend.cjs`。当前开发者工具另有自身保存的“启用自定义处理命令”开关，单改文件里的 `setting.scriptsEnable` 不足以启用，新电脑需要在界面勾选一次。
+`project.config.json` 已配置 `beforeCompile`、`beforePreview` 执行 `sh scripts/sync-dev-backend.sh`；`beforeUpload` 执行 `sh scripts/before-upload.sh`，先刷新地址，再检查主项目的上传内容（见[上传体验版／正式版](#上传体验版正式版)）。`scripts/node.sh` 从 PATH、常见 Homebrew 安装位置或 nvm 默认版本查找 Node.js，解决从桌面启动开发者工具时缺少终端 PATH 的问题，再运行 `scripts/sync-dev-backend.cjs`。当前开发者工具另有自身保存的“启用自定义处理命令”开关，单改文件里的 `setting.scriptsEnable` 不足以启用，新电脑需要在界面勾选一次。
 
 脚本在电脑上枚举网卡，优先使用默认路由对应的局域网 IPv4，排除 VPN、Docker 等虚拟网卡；默认路由不可用时，仅在剩余地址唯一时自动选择。输出 `miniprogram/utils/backend-development-local.js`，运行时再按版本选用该地址。已在本机开发者工具实际编译验证：无需终端预先执行命令，编译钩子成功重新生成地址文件。
 
@@ -42,23 +42,19 @@
 
 ## 上传体验版／正式版
 
-`miniprogram/labs/` 下的实验页（图像匹配实验、SIMD 探针、xr-three 等）只在开发者工具编译和真机预览中使用，不进入体验版和正式版。主项目始终注册这些分包，因此不能直接从主项目上传：
+在微信开发者工具打开当前项目根目录，直接点击「上传」。命令行上传同样把项目路径指向当前仓库根目录。
+
+`miniprogramRoot` 固定为 `miniprogram/`。实验页、旧参考工程、闲置资源和临时产物集中在同级的 `ignore/`，不属于小程序编译、预览或上传范围。`app.json` 只注册正式页面与三个识别资源分包，`packOptions.include` 保留正式 WASM、模型和许可证。目录清单见 [ignore/README.md](../ignore/README.md)。
+
+上传前可运行：
 
 ```sh
-npm run release:stage
+npm run check:upload
 ```
 
-脚本生成 `.release/miniprogram-upload/`（已加入 `.gitignore`），内容如下：
+`beforeUpload` 也会执行这项检查，确认页面文件、Worker 目录和强制打包资源存在，正式源码未引用实验目录。输出的体积为源文件总量，实际上传包以开发者工具为准。启用自定义处理命令后钩子才会自动执行；目录隔离本身始终有效。
 
-- 复制 `miniprogram/`、`tsconfig.json` 和 `typings/`，去掉 `labs/` 目录；从 `app.json` 删除实验分包，从 `packOptions` 删除实验文件。
-- 不复制 `scripts/`，关闭预处理命令。`backend-development-local.js` 写为空地址，发布包不带开发电脑的局域网 IP。
-- 生成后检查页面文件、强制打包文件是否齐全，任何源文件引用 `labs/` 路径都会失败；最后按主包和分包输出源文件体积（不含 `packOptions.ignore` 的文件，未经开发者工具压缩）。
-
-然后用开发者工具导入并上传 `.release/miniprogram-upload` 目录；用命令行时，把 `wechatide` 的 `upload --project` 指向该目录。每次上传前重新生成副本。若在主项目里点「上传」，`beforeUpload` 会列出实验分包并以非零状态退出，提示改用发布副本。这一检查只在开发者工具执行预处理命令时生效，需要先勾选「启用自定义处理命令」。
-
-发布副本不复制 `project.private.config.json`，域名校验保持开启；在模拟器里打开副本时，开发环境请求 `127.0.0.1:3000` 会报 `url not in domain list`，这是预期行为，不影响体验版和正式版使用线上域名。2026-11-09 已在开发者工具中导入并编译副本：控制台显示 3 个分包（不含实验页），首页正常渲染，没有模块缺失错误。上传后的包体积与真机行为尚未验证。
-
-回归：`npm run test:release` 验证主项目上传检查、发布副本内容，以及生产代码引用实验页时生成失败。
+开发地址继续由同步脚本生成；体验版与正式版通过运行环境选择线上地址。`npm run test:package` 验证主项目可直接上传、目录隔离和缺失资源检查。
 
 ## 线上配置
 
@@ -81,7 +77,7 @@ npm run release:stage
 
 ## Web → 小程序的场景自动联调
 
-完整操作步骤、AI 执行约定、自动检查覆盖范围、常见故障和历史验收记录统一维护在 [Web → 小程序场景自动联调](scene-auto-debug.md)。本文负责后端地址与本机环境配置。
+当前场景预览入口使用正式页面 `pages/scene/scene`；旧模拟相机实验与历史记录见 [场景联调说明](scene-auto-debug.md)。本文负责后端地址与本机环境配置。
 
 在 Web 保存至少包含一个实例的 scene 后，在小程序仓库执行：
 
@@ -89,6 +85,6 @@ npm run release:stage
 npm run scene:preview -- <sceneId> <organizationId>
 ```
 
-然后在微信开发者工具选择「Scene 本地全流程验证」并完整编译。页面使用实际小程序播放器自动检查、渲染并播放；后续 Web 保存后点击“加载并自动验证”即可重新加载。
+然后在微信开发者工具选择「Scene 本地预览」并完整编译。入口指向正式场景页面；在手机上启动 AR 相机、放置场景并验证播放。Web 保存后重新进入页面加载最新内容。
 
 准备命令只检查接口和配置入口；GPU、画面和播放按钮需在小程序页面验证。相机追踪、平面检测、GPS／识别触发与手机性能仍需真机验收。

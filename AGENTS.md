@@ -22,7 +22,7 @@
 - 模型模板由 `ModelCache` 引用计数管理，实例清理调用 handle 的 `release()`；共享模板的物理释放由缓存负责。
 - Scene 使用保存的米制变换和共享 Core；普通地图模型归一化策略不适用于 Scene 内实例。
 - 活动参与记录由服务端保存；本地 Storage 保留入口历史与匿名参与标识，不作为打卡完成的权威来源。
-- `miniprogram/labs/` 只用于开发者工具和预览；生产代码不引用实验页。体验版／正式版从 `npm run release:stage` 生成的副本上传。
+- 实验、历史参考与临时产物集中在项目根目录 `ignore/`，位于 `miniprogramRoot` 之外。主项目直接编译、预览与上传；正式代码的运行依赖留在 `miniprogram/`。目录清单见 `ignore/README.md`。
 
 ## 验证
 

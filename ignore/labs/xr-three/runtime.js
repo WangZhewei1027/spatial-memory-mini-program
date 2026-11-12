@@ -1,4 +1,4 @@
-const { THREE, probeWebGL2, createCanvasFacade, disposeRenderer } = require('../../lib/three-runtime/runtime');
+const { THREE, probeWebGL2, createCanvasFacade, disposeRenderer } = require('../../../miniprogram/lib/three-runtime/runtime');
 
 function createAnimationRig() {
   const root = new THREE.Group();

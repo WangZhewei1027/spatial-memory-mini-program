@@ -6,27 +6,6 @@
   ],
   "subpackages": [
     {
-      "root": "labs/image-match",
-      "pages": [
-        "index"
-      ]
-    },
-    {
-      "root": "labs/image-match-wasm",
-      "name": "image-match-wasm",
-      "pages": [
-        "index"
-      ]
-    },
-    {
-      "root": "labs/xr-three",
-      "pages": [
-        "index",
-        "bridge",
-        "scene-preview"
-      ]
-    },
-    {
       "root": "packages/image-match-runtime",
       "name": "image-match-runtime",
       "pages": [

@@ -1,11 +1,11 @@
-const { THREE, probeWebGL2, createCanvasFacade, disposeRenderer } = require("../../lib/three-runtime/runtime");
-const { ModelCache, disposeTree } = require("../../lib/three-runtime/resources");
-const { createCompositionPlayer } = require("../../lib/scene-runtime/composition");
-const { fetchScenePreview } = require("../../utils/backend");
+const { THREE, probeWebGL2, createCanvasFacade, disposeRenderer } = require("../../../miniprogram/lib/three-runtime/runtime");
+const { ModelCache, disposeTree } = require("../../../miniprogram/lib/three-runtime/resources");
+const { createCompositionPlayer } = require("../../../miniprogram/lib/scene-runtime/composition");
+const { fetchScenePreview } = require("../../../miniprogram/utils/backend");
 const { verifyScenePlayer } = require("./scene-checks");
 const { stressScene } = require("./scene-stress");
 const { visualProbe } = require("./scene-visual-probe");
-const { sceneFarPlane } = require("../../lib/three-runtime/camera-clipping");
+const { sceneFarPlane } = require("../../../miniprogram/lib/three-runtime/camera-clipping");
 
 Page({
   data: { enabled: false, sceneId: "", organizationId: "", busy: false, loaded: false, status: "初始化…", report: "", playback: "" },

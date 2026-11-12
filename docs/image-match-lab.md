@@ -1,5 +1,7 @@
 # MediaPipe 本地图像相似度实验
 
+> 归档说明（2026-11-12）：实验源码已集中到 `ignore/labs/`，主项目不再注册实验页面。下文页面路径与设备操作是历史验证记录，不能直接在当前主项目打开；构建和诊断脚本位于 `ignore/scripts/`。
+
 实验页：`labs/image-match/index`，仅 `develop` 环境启用。使用 MediaPipe Image Embedder 的原始 MobileNet V3 Small 模型输出 1024 维特征，对预设参考图做余弦相似度排序。参考特征在载入时计算一次；相机帧按需计算。识别算法在客户端执行，不向后端上传相机图片。
 
 这是独立实验页，正式 AR 页面仍使用现行识别流程。实验页通过已有 VisionKit v2 会话取图，因而相机接入仍依赖微信；MediaPipe 特征计算不依赖 OSD。取图不会等待 `session.state === 1`，也不会创建第二个 OSD 会话。
@@ -16,7 +18,7 @@
 
 页面先用两张不同合成图做输入自检，相似度超过 0.99 时阻止测试，避免把失效的推理计入性能结果。该检查只能发现明显的特征塌缩，不能证明建筑识别准确率。
 
-完成报告自动保存到本机 `.cache/image-match/report-*.json`，也可点击「复制完整报告」。初始化阶段和错误回传到 `events-*.jsonl`，用于定位仅真机出现的兼容问题。回传内容为设备信息、计时、特征相似度、像素统计摘要和参考图名称/ID，不包含图片像素或 GPS。服务器仅提供固定模型、报告和初始化诊断接口；关闭终端即可停止。测试需要保持前台；切后台会取消测试并释放模型和相机。
+完成报告自动保存到本机 `ignore/cache/image-match/report-*.json`，也可点击「复制完整报告」。初始化阶段和错误回传到 `events-*.jsonl`，用于定位仅真机出现的兼容问题。回传内容为设备信息、计时、特征相似度、像素统计摘要和参考图名称/ID，不包含图片像素或 GPS。服务器仅提供固定模型、报告和初始化诊断接口；关闭终端即可停止。测试需要保持前台；切后台会取消测试并释放模型和相机。
 
 ## 对照口径
 
@@ -106,7 +108,7 @@ Apple M1 Pro，微信开发者工具，基础库 3.17.4；实际执行 MediaPipe
 
 - 固定 `@mediapipe/tasks-vision@0.10.21`。新版本 WASM 的压缩体积超过本实验独立分包预算，不能直接替换版本。
 - `npm run build:image-match-lab` 默认生成无 SIMD 版本，并把 JS 内存复制导入替换为 WASM `memory.copy`；图结构、模型和推理数学使用上游实现。生成物与许可证随实验代码保存。
-- `npm run build:image-match-lab:upstream` 保留原始无 SIMD WASM，用于复制优化的 A/B；`npm run build:image-match-lab:simd` 仅用于兼容性诊断。重现最初版本可运行 `node scripts/build-image-match-lab.cjs --simd --upstream`，验证后应重新运行默认构建。
+- `npm run build:image-match-lab:upstream` 保留原始无 SIMD WASM，用于复制优化的 A/B；`npm run build:image-match-lab:simd` 仅用于兼容性诊断。重现最初版本可运行 `node ignore/scripts/build-image-match-lab.cjs --simd --upstream`，验证后应重新运行默认构建。
 - 使用 `WXWebAssembly.instantiate` 加载包内 `vision.wasm.br`；通过 `require.async` 加载独立 WASM 分包。当前 Brotli 文件 2,029,605 字节，解压 9,448,649 字节。测试验证上游与适配后的 WASM SHA-256 和分包体积。
 - MediaPipe 使用页面 `webgl2` Canvas 做输入处理，推理 delegate 为 CPU。微信离屏 `webgl` Canvas 不能替代这里的页面 WebGL2 Canvas。
 - Emscripten 中缺失的 `WebGLRenderingContext` 类型仅在适配器作用域补齐，用于上游 WebGL1 类型判断；页面实际要求 WebGL2。带偏移的 `readPixels` 先读到限定尺寸的缓冲区，再写入 WASM 内存；这不是修复 SIMD 特征异常的措施。

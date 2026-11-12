@@ -1,5 +1,5 @@
 const fs = require('node:fs'), vm = require('node:vm'), path = require('node:path'), zlib = require('node:zlib'), crypto = require('node:crypto');
-const root = path.resolve(__dirname, '../..');
+const root = path.resolve(__dirname, '../../..');
 const file = path.join(root, 'node_modules/@mediapipe/tasks-vision/wasm/vision_wasm_internal');
 async function initialize(external) {
   class FixedDate extends Date { constructor(...args) { super(...(args.length ? args : [0])); } static now() { return 0; } }
@@ -13,7 +13,7 @@ async function initialize(external) {
     imports.a.ic = (...args) => { callbacks++; return external ? copyFunction(...args) : original(...args); };
     WebAssembly.instantiate(fs.readFileSync(file + '.wasm'), imports).then(async ({ instance }) => {
       if (external) {
-        const helper = await WebAssembly.instantiate(zlib.brotliDecompressSync(fs.readFileSync(path.join(root, 'miniprogram/labs/image-match/memory-copy.wasm.br'))), { env: { memory: instance.exports.Xc } });
+        const helper = await WebAssembly.instantiate(zlib.brotliDecompressSync(fs.readFileSync(path.join(root, 'ignore/labs/image-match/memory-copy.wasm.br'))), { env: { memory: instance.exports.Xc } });
         copyFunction = helper.instance.exports.copy;
       }
       receive(instance);

@@ -1,6 +1,6 @@
 # XR-Frame 3D 场景交互示例总结
 
-> **⚠️ 历史文档（xr-frame）**：正式 AR 页 `pages/ar/ar` 自 2026-10-09 起不再使用 xr-frame，已切换为 VisionKit v2 + Three.js（见 [`visionkit-three-migration.md`](visionkit-three-migration.md)）。下文仅适用于实验页 `miniprogram/labs/xr-three/xr-view/` 与参考工程 `xr-frame-demo-master/`。最危险的差异：xr-frame 相机 forward 为 **+Z**（左手系），Three 为 **−Z**（右手系，`camera.getWorldDirection()`）——不要把本文的朝向规则用于生产代码。生产页的点击命中已改为 `components/xr-start/index.js` `onCanvasTap` 内的 `THREE.Raycaster`（命中 `nodeList` 节点触发 `entry.onTap`，否则在光标处种树），不再使用 `*-shape` / `bind:touch-shape`。
+> **⚠️ 历史文档（xr-frame）**：正式 AR 页 `pages/ar/ar` 自 2026-10-09 起不再使用 xr-frame，已切换为 VisionKit v2 + Three.js（见 [`visionkit-three-migration.md`](visionkit-three-migration.md)）。下文仅适用于实验页 `ignore/labs/xr-three/xr-view/` 与参考工程 `ignore/xr-frame-demo-master/`。最危险的差异：xr-frame 相机 forward 为 **+Z**（左手系），Three 为 **−Z**（右手系，`camera.getWorldDirection()`）——不要把本文的朝向规则用于生产代码。生产页的点击命中已改为 `components/xr-start/index.js` `onCanvasTap` 内的 `THREE.Raycaster`（命中 `nodeList` 节点触发 `entry.onTap`，否则在光标处种树），不再使用 `*-shape` / `bind:touch-shape`。
 
 ## 目标
 

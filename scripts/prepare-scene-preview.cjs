@@ -20,14 +20,14 @@ async function main() {
   const config = JSON.parse(fs.readFileSync(file, "utf8"));
   const conditions = ((config.condition ||= {}).miniprogram ||= { list: [] });
   const list = conditions.list ||= [];
-  const name = "Scene 本地全流程验证";
-  const previous = list.find((item) => item.name === name);
+  const name = "Scene 本地预览";
+  const previous = list.find((item) => item.name === name || item.name === "Scene 本地全流程验证");
   const entry = { id: previous?.id ?? Math.max(0, ...list.map((item) => item.id || 0)) + 1,
-    name, pathName: "labs/xr-three/scene-preview", query: new URLSearchParams({ sceneId, organizationId }).toString(), scene: null };
+    name, pathName: "pages/scene/scene", query: new URLSearchParams({ sceneId, organizationId }).toString(), scene: null };
   if (previous) Object.assign(previous, entry);
   else list.push(entry);
   fs.writeFileSync(file, JSON.stringify(config, null, 2) + "\n");
   console.log(`本地接口已确认：${manifest.content.instances.length} 个实例，协议 ${manifest.schemaVersion}`);
-  console.log(`微信开发者工具选择「${name}」并编译，页面会自动加载、验证并播放。`);
+  console.log(`微信开发者工具选择「${name}」并编译，页面会加载场景并启动 AR 相机。`);
 }
 main().catch((error) => { console.error(error.message); process.exitCode = 1; });

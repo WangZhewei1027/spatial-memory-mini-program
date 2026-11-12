@@ -50,45 +50,8 @@
   },
   "libVersion": "3.14.0",
   "packOptions": {
-    "ignore": [
-      {
-        "value": "assets/profile",
-        "type": "folder"
-      },
-      {
-        "value": "assets/bubble",
-        "type": "folder"
-      },
-      {
-        "value": "assets/confetti.png",
-        "type": "file"
-      }
-    ],
+    "ignore": [],
     "include": [
-      {
-        "value": "labs/image-match/memory-copy.wasm.br",
-        "type": "file"
-      },
-      {
-        "value": "labs/image-match/simd-probe.wasm.br",
-        "type": "file"
-      },
-      {
-        "value": "labs/image-match/vendor/MEDIAPIPE-LICENSE.txt",
-        "type": "file"
-      },
-      {
-        "value": "labs/image-match/vendor/TEXT-ENCODING-LICENSE.txt",
-        "type": "file"
-      },
-      {
-        "value": "labs/image-match-wasm/vision.wasm.br",
-        "type": "file"
-      },
-      {
-        "value": "assets/ar-plane-marker.glb",
-        "type": "file"
-      },
       {
         "value": "packages/image-match-runtime/inference.wasm.br",
         "type": "file"

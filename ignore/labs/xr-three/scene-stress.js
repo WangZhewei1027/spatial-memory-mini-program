@@ -1,5 +1,5 @@
 const { visualProbe } = require('./scene-visual-probe');
-const { createCompositionPlayer } = require('../../lib/scene-runtime/composition');
+const { createCompositionPlayer } = require('../../../miniprogram/lib/scene-runtime/composition');
 
 // Development-only GPU/resource soak; uses the same loader and player as AR.
 async function stressScene({ manifest, cache, scene, renderer, camera, canvas, cancelled, progress, cycles = 100 }) {

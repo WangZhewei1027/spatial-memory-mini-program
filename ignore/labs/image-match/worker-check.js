@@ -1,4 +1,4 @@
-const { ImageMatcher } = require('../../lib/image-matcher/client');
+const { ImageMatcher } = require('../../../miniprogram/lib/image-matcher/client');
 const { fixtureFrame } = require('./images');
 const { cosine } = require('./benchmark');
 async function runWorkerCheck(page, current) {
@@ -32,7 +32,7 @@ async function runWorkerCheck(page, current) {
       await new Promise(resolve => setTimeout(resolve, 30));
     }
     const report = { comparisons, distinctImageCosine: cosine(workerVectors[0], workerVectors[1]), timings,
-      heartbeatCount: gaps.length, heartbeatMaxMs: Math.max(0, ...gaps), simd: false, model: require('../../lib/image-matcher/build-info') };
+      heartbeatCount: gaps.length, heartbeatMaxMs: Math.max(0, ...gaps), simd: false, model: require('../../../miniprogram/lib/image-matcher/build-info') };
     page.log('worker-report', report);
     if (comparisons.some(item => item.cosine < 0.999) || report.distinctImageCosine > 0.99) throw new Error('后台识别结果与 MediaPipe 不一致');
     if (current()) page.setData({ status: '后台识别验证完成', report: JSON.stringify(report, null, 2) });

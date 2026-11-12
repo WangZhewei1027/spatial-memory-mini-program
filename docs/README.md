@@ -6,7 +6,7 @@
 
 | 文档 | 用途 |
 | --- | --- |
-| [本地开发](local-development.md) | 后端环境、自动同步开发地址、线上域名配置与不含实验页的上传副本 |
+| [本地开发](local-development.md) | 后端环境、自动同步开发地址、线上域名配置与主项目直接上传 |
 | [扫码参数](scan-config-priority-strategy.md) | 团队/地图/场景入口优先级、Storage 与历史 |
 | [正式 AR 运行时](visionkit-three-migration.md) | VisionKit 与 Three 的职责、资源生命周期和兼容边界 |
 | [场景播放](scene-asset.md) | 当前播放协议、观看位置、媒体同步与跨端验证 |

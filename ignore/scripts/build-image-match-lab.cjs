@@ -5,12 +5,12 @@ const path = require('node:path');
 const zlib = require('node:zlib');
 const crypto = require('node:crypto');
 const esbuild = require('esbuild');
-const { useWasmMemoryCopy } = require('./image-match-wasm.cjs');
-const root = path.resolve(__dirname, '..');
+const { useWasmMemoryCopy } = require('../../scripts/image-match-wasm.cjs');
+const root = path.resolve(__dirname, '../..');
 async function main() {
   const source = path.join(root, 'node_modules/@mediapipe/tasks-vision');
-  const target = path.join(root, 'miniprogram/labs/image-match/vendor');
-  const wasmTarget = path.join(root, 'miniprogram/labs/image-match-wasm');
+  const target = path.join(root, 'ignore/labs/image-match/vendor');
+  const wasmTarget = path.join(root, 'ignore/labs/image-match-wasm');
   const version = JSON.parse(fs.readFileSync(path.join(source, 'package.json'))).version;
   if (version !== '0.10.21') throw new Error('Revalidate the loader adapter before upgrading MediaPipe');
   fs.mkdirSync(target, { recursive: true });

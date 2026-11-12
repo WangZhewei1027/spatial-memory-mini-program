@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
 const zlib = require('node:zlib');
-const base = '../miniprogram/labs/image-match/';
+const base = '../ignore/labs/image-match/';
 const { cosine, rank, dimensions, orderFor, runPair, summarize } = require(base + 'benchmark');
 const { captureVariants } = require(base + 'capture');
 const { createClock } = require(base + 'clock');
@@ -161,7 +161,7 @@ test('cancellation after asynchronous preprocessing prevents inference and subse
   assert.equal(inferred,false);
 });
 test('bundled WASM matches its build manifest and fits its subpackage', () => {
-  const root=path.resolve(__dirname,'../miniprogram/labs/image-match-wasm');
+  const root=path.resolve(__dirname,'../ignore/labs/image-match-wasm');
   const build=require(base+'vendor/build-info');
   assert.equal(build.upstreamWasmSha256, build.simd === false
     ? '3821ea9b1f7fb8c549ef2a064ef5c85750bf375c545a49fd6eea0df44a95f1f4'

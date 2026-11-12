@@ -1,4 +1,4 @@
-const { samplePresentation } = require('../../lib/scene-runtime/vendor/scene-core');
+const { samplePresentation } = require('../../../miniprogram/lib/scene-runtime/vendor/scene-core');
 
 // A scene may begin with silence/black or contain only audio; neither is a rendering failure.
 function visualProbe(manifest) {

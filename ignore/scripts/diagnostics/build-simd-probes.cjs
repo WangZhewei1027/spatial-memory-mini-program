@@ -4,7 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const zlib = require('node:zlib');
 const crypto = require('node:crypto');
-const root = path.resolve(__dirname, '../..');
+const root = path.resolve(__dirname, '../../..');
 async function main() {
   const { default: b } = await import('binaryen');
   const upstream = fs.readFileSync(path.join(root, 'node_modules/@mediapipe/tasks-vision/wasm/vision_wasm_internal.wasm'));
@@ -60,7 +60,7 @@ async function main() {
   if (!module.validate()) throw new Error('Probe module validation failed');
   const binary = Buffer.from(module.emitBinary()); module.dispose();
   const { instance } = await WebAssembly.instantiate(binary);
-  const input = require('../../miniprogram/labs/image-match/simd-probe-input');
+  const input = require('../../labs/image-match/simd-probe-input');
   const cases = probes.map(({ body, ...p }) => {
     const expected = [];
     for (let i = 0; i < input.CASES; i++) {
@@ -70,12 +70,12 @@ async function main() {
     }
     return { ...p, expected };
   });
-  const target = path.join(root, 'miniprogram/labs/image-match');
+  const target = path.join(root, 'ignore/labs/image-match');
   fs.writeFileSync(path.join(target, 'simd-probe.wasm.br'), zlib.brotliCompressSync(binary));
   const info = { sha256: crypto.createHash('sha256').update(binary).digest('hex'), operations: used.length, inputCases: input.CASES, source: 'MediaPipe 0.10.21 SIMD; Node WebAssembly reference', probes: cases };
   fs.writeFileSync(path.join(target, 'simd-probe-cases.js'), `module.exports = ${JSON.stringify(info)};\n`);
-  fs.mkdirSync(path.join(root, '.cache/image-match/simd'), { recursive: true });
-  fs.writeFileSync(path.join(root, '.cache/image-match/simd/probes.wat'), text);
+  fs.mkdirSync(path.join(root, 'ignore/cache/image-match/simd'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'ignore/cache/image-match/simd/probes.wat'), text);
   console.log(JSON.stringify({ operations: used.length, functions: probes.length, cases: probes.length * input.CASES, wasmBytes: binary.length, compressed: fs.statSync(path.join(target, 'simd-probe.wasm.br')).size }));
 }
 main().catch(error => { console.error(error); process.exitCode = 1; });

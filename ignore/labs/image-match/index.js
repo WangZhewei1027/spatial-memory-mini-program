@@ -2,9 +2,9 @@ const { createEngine, now, removeFile } = require('./engine');
 const { createProcessor, fixtureFrame, pixelSummary } = require('./images');
 const { captureVariants } = require('./capture');
 const { orderFor, rank, summarize, runPair, cosine } = require('./benchmark');
-const { VKSessionController } = require('../../lib/three-runtime/vk-session');
-const { createCameraBackground } = require('../../lib/three-runtime/vk-renderer');
-const { CONFIG, fetchAnchorCandidates } = require('../../utils/backend');
+const { VKSessionController } = require('../../../miniprogram/lib/three-runtime/vk-session');
+const { createCameraBackground } = require('../../../miniprogram/lib/three-runtime/vk-renderer');
+const { CONFIG, fetchAnchorCandidates } = require('../../../miniprogram/utils/backend');
 const LABELS = { 'rgba-full': '原尺寸 RGBA', 'rgba-small': '缩小 RGBA', 'jpeg-small': '缩小＋JPEG' };
 const ROUNDS = 18, WARMUP = 3;
 
@@ -65,7 +65,7 @@ Page({
     this.setData({ ready: false, error: '', status: '加载 MediaPipe…' });
     try {
       const dev = this._environment.platform === 'devtools';
-      const host = dev ? '127.0.0.1' : require('../../utils/backend-development-local').apiBaseUrl.replace(/^https?:\/\//, '').split(':')[0];
+      const host = dev ? '127.0.0.1' : require('../../../miniprogram/utils/backend-development-local').apiBaseUrl.replace(/^https?:\/\//, '').split(':')[0];
       this._server = `http://${host}:8787`;
       if (this._options.simdProbe) {
         this.setData({ status: '检查 SIMD 指令数值…' });

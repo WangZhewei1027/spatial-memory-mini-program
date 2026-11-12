@@ -1,7 +1,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
-const folder = path.resolve(__dirname, '../../.cache/image-match');
-const cases = require('../../miniprogram/labs/image-match/simd-probe-cases');
+const folder = path.resolve(__dirname, '../../cache/image-match');
+const cases = require('../../labs/image-match/simd-probe-cases');
 let result;
 for (const file of fs.readdirSync(folder).filter(f => /^events-.*\.jsonl$/.test(f)).sort().reverse()) {
   const rows = fs.readFileSync(path.join(folder, file), 'utf8').trim().split('\n').map(JSON.parse);

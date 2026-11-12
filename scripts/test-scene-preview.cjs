@@ -4,10 +4,11 @@ const path = require("node:path");
 const vm = require("node:vm");
 const { buildSync } = require("esbuild");
 const root = path.resolve(__dirname, "../miniprogram");
-const { THREE, createFixtureGLB } = require(path.join(root, "labs/xr-three/runtime"));
+const lab = path.resolve(__dirname, "../ignore/labs/xr-three");
+const { THREE, createFixtureGLB } = require(path.join(lab, "runtime"));
 const { ModelCache } = require(path.join(root, "lib/three-runtime/resources"));
 const { createCompositionPlayer } = require(path.join(root, "lib/scene-runtime/composition"));
-const { verifyScenePlayer } = require(path.join(root, "labs/xr-three/scene-checks"));
+const { verifyScenePlayer } = require(path.join(lab, "scene-checks"));
 
 async function main() {
   const gltf = await new Promise((resolve, reject) => new THREE.GLTFLoader().parse(createFixtureGLB(), "", resolve, reject));
@@ -38,7 +39,7 @@ async function main() {
   broken.dispose(); cache.dispose();
   console.log("PASS preview assertions use real GLB/mixer/clones, detect broken playback, cover delayed clips and looping");
 
-  const code = buildSync({ entryPoints: [path.join(root, "labs/xr-three/scene-preview.js")], bundle: true, format: "cjs", platform: "neutral", write: false }).outputFiles[0].text;
+  const code = buildSync({ entryPoints: [path.join(lab, "scene-preview.js")], bundle: true, format: "cjs", platform: "neutral", write: false }).outputFiles[0].text;
   function makePage(env, request) {
     let page, requests = 0;
     vm.runInNewContext(code, { module: { exports: {} }, console: { ...console, log() {} }, setTimeout, clearTimeout, Page: (p) => { page = p; },
@@ -62,7 +63,7 @@ async function main() {
   host.onHide();
   assert.equal(disposed, 1); assert.equal(stopped, 1); assert.equal(host._active, false);
   assert.equal(host._player, null); assert.equal(host._generation, 1);
-  for (const match of fs.readFileSync(path.join(root, "labs/xr-three/scene-preview.wxml"), "utf8").matchAll(/bind[\w:]+="(\w+)"/g)) {
+  for (const match of fs.readFileSync(path.join(lab, "scene-preview.wxml"), "utf8").matchAll(/bind[\w:]+="(\w+)"/g)) {
     assert.equal(typeof host[match[1]], "function", match[1]);
   }
   console.log("PASS release/trial blocked before GPU/network, hide invalidates pending loads and disposes player, WXML handlers exist");

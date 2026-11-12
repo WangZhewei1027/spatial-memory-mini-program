@@ -1,18 +1,18 @@
 """
 1. 将 assets/profile/ 下的正方形头像裁剪成圆形（透明背景 PNG）。
 2. 生成多种宽高比的圆角矩形气泡 PNG（半透明紫色 + 发光边框）。
-用法: python3 crop_circle.py
+用法: python3 ignore/tools/crop_circle.py
 """
 import os
 from PIL import Image, ImageDraw, ImageFilter
 
 PROFILE_DIR = os.path.join(
     os.path.dirname(__file__),
-    "miniprogram", "assets", "profile"
+    "..", "assets", "profile"
 )
 BUBBLE_DIR = os.path.join(
     os.path.dirname(__file__),
-    "miniprogram", "assets", "bubble"
+    "..", "assets", "bubble"
 )
 
 

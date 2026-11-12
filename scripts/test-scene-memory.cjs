@@ -1,7 +1,7 @@
 // Run with --expose-gc. Checks actual reachability, not just a dispose counter.
 const assert = require('node:assert/strict');
 const { createSceneCore } = require('../miniprogram/lib/scene-runtime/vendor/scene-core');
-const { THREE, createFixtureGLB } = require('../miniprogram/labs/xr-three/runtime');
+const { THREE, createFixtureGLB } = require('../ignore/labs/xr-three/runtime');
 const { ModelCache } = require('../miniprogram/lib/three-runtime/resources');
 const { createCompositionPlayer } = require('../miniprogram/lib/scene-runtime/composition');
 const turn = () => new Promise(resolve => setImmediate(resolve));

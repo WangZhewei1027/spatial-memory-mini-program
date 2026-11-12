@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
-const base = path.resolve(__dirname, '../miniprogram/labs/xr-three');
+const base = path.resolve(__dirname, '../ignore/labs/xr-three');
 
 // Execute the actual generated bundle in an environment with no window,
 // document, self, navigator, fetch, TextDecoder or requestAnimationFrame.

@@ -70,7 +70,7 @@ async function main() {
   if (hash(upstream) !== 'f1eb42f96ae91e5ef34e2f833f011373ca1c40fdc9d4062ec21eb07b886ea54f') throw new Error('Pinned TFLite WASM changed');
   const wasm = await useWasmMemoryCopy(upstream, 'X');
   const brotli = zlib.brotliCompressSync(wasm, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11 } });
-  const modelPath = path.join(root, '.cache/image-match/model.tflite');
+  const modelPath = path.join(root, 'ignore/cache/image-match/model.tflite');
   if (!fs.existsSync(modelPath)) { const response = await fetch(modelURL); if (!response.ok) throw new Error('Model download failed'); fs.mkdirSync(path.dirname(modelPath), { recursive: true }); fs.writeFileSync(modelPath, Buffer.from(await response.arrayBuffer())); }
   const model = fs.readFileSync(modelPath);
   if (hash(model) !== modelHash) throw new Error('MediaPipe model hash mismatch');
@@ -86,7 +86,7 @@ async function main() {
     fs.writeFileSync(path.join(dir, 'ready.js'), 'module.exports = true;\n');
   }
   const notices = path.join(root, 'miniprogram/packages/image-match-runtime');
-  fs.copyFileSync(path.join(root, 'miniprogram/labs/image-match/vendor/MEDIAPIPE-LICENSE.txt'), path.join(notices, 'APACHE-2.0.txt'));
+  // APACHE-2.0.txt is checked in with the production runtime.
   fs.copyFileSync(path.join(root, 'node_modules/text-encoding/LICENSE.md'), path.join(notices, 'TEXT-ENCODING-LICENSE.txt'));
   fs.writeFileSync(path.join(notices, 'NOTICE.txt'), `TFLite runtime: @tensorflow/tfjs-tflite@0.0.1-alpha.10 (Google, Apache-2.0).\nSource: https://github.com/tensorflow/tfjs/tree/master/tfjs-tflite\nAdaptations: static embind closures, scoped WXWebAssembly loader, WASM memory.copy.\nMediaPipe model (unchanged): ${modelURL}\nModel SHA-256: ${modelHash}\nText encoding: text-encoding@0.7.0; see TEXT-ENCODING-LICENSE.txt.\n`);
   const info = { runtime: '@tensorflow/tfjs-tflite@0.0.1-alpha.10', model: modelURL, modelSha256: modelHash,

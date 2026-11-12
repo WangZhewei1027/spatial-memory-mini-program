@@ -1,5 +1,7 @@
 # VisionKit + Three.js 独立验证（含早期 xr-frame 调研）
 
+> 归档说明（2026-11-12）：实验源码已集中到 `ignore/labs/`，主项目不再注册实验页面。下文页面路径与设备操作是历史验证记录，不能直接在当前主项目打开；构建和诊断脚本位于 `ignore/scripts/`。
+
 ## 当前实现：VisionKit v2 + Three.js
 
 2026-10-08 根据方案选择，将 `labs/xr-three/index` 改为 **VisionKit v2 + Three.js 单画布渲染**。本页不再创建 xr-frame 场景。之前的桥接实验保留在 `labs/xr-three/bridge`，可从验证页按钮进入。原 `XR-Three-Lab` 编译模式仍可直接打开新入口。随后正式 `pages/ar/ar` 也迁移至同一共享运行时；当前业务状态见 [迁移文档](visionkit-three-migration.md)。本页其余内容保留独立验证阶段的边界与历史记录。
@@ -34,7 +36,7 @@
 
 ### 验证记录与操作
 
-已通过 `npm run build:xr-three-lab`、`npm run test:xr-three-lab`、JS 语法检查、`git diff --check`。测试覆盖实际 bundle / GLTFLoader、相机 6DoF 矩阵与投影往返、放置后局部动画、无效矩阵拒绝、会话取消与晚回调、30 FPS 取帧上限、授权失败和渲染错误的资源清理。
+已通过 `npm run build:three-runtime`、`npm run test:xr-three-lab`、JS 语法检查、`git diff --check`。测试覆盖实际 bundle / GLTFLoader、相机 6DoF 矩阵与投影往返、放置后局部动画、无效矩阵拒绝、会话取消与晚回调、30 FPS 取帧上限、授权失败和渲染错误的资源清理。
 
 **尚未通过真实相机 / 真机验收。** 本轮尝试打开微信开发者工具时 Mac 锁屏，无法完成模拟器视觉检查。旧 Three 独立渲染在开发者工具通过的结论不能代替这次 VisionKit 链路验收。
 
@@ -176,7 +178,7 @@ CLI 尝试被“服务端口关闭”阻止；没有开启安全设置。之后�
 
 ```sh
 npm ci
-npm run build:xr-three-lab
+npm run build:three-runtime
 npm run test:xr-three-lab
 ```
 

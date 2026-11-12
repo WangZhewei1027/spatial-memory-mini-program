@@ -57,6 +57,6 @@ Core 提供 `play/pause/seek/advance/sync/sample/subscribe/observe/bind/dispose`
 
 播放 schema 10 支持完整 `content.lighting`，可同时包含 `viewerPosition`。在分配资源前校验颜色、枚举、数值范围和完整字段；旧版本不能携带灯光设置。现有 4/5/7/8/9 场景继续播放并使用共用默认灯光。
 
-生产 Three 固定为 0.183.2，与 Web 相同。`@spatial-memory/scene-lighting` 的固定本地包随 `build:xr-three-lab` 打入 runtime，共用 sRGB、无色调映射、曝光 1、无阴影、无 MSAA、RoomEnvironment 和 PMREM 参数。灯光与环境方向随 Scene 放置旋转，多场景分次绘制且共享深度缓冲，独立灯光不会串扰；相机背景仍由 VisionKit 绘制。环境 render target 由 ARRuntime 拥有并释放。Web 新灯光配置上线前先发布此播放器。
+生产 Three 固定为 0.183.2，与 Web 相同。`@spatial-memory/scene-lighting` 的固定本地包随 `build:three-runtime` 打入 runtime，共用 sRGB、无色调映射、曝光 1、无阴影、无 MSAA、RoomEnvironment 和 PMREM 参数。灯光与环境方向随 Scene 放置旋转，多场景分次绘制且共享深度缓冲，独立灯光不会串扰；相机背景仍由 VisionKit 绘制。环境 render target 由 ARRuntime 拥有并释放。Web 新灯光配置上线前先发布此播放器。
 
 Web `test:cross-runtime` 包含相同 GPU 和投影下的实际两端 renderer 像素对比；真机还需验证 PMREM 初始化、相机背景、反光/粗糙模型与多 Scene 同屏。Node 替身和浏览器 GPU 对比不替代原生手机验收。

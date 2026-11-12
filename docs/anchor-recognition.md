@@ -61,7 +61,7 @@
 
 `npm run build:image-matcher` 生成生产 CPU 适配器、WASM 与模型分包；升级运行器或模型前重新验证哈希、预处理、数值、包大小与目标手机。`npm run build:image-match-lab` 只生成实验基线，默认无 SIMD。SIMD 调查已暂停，见[诊断记录](simd-investigation.md)。
 
-`npm test` 覆盖真实标量 TFLite 与上游逐图数值一致性、包完整性、单任务调度、降频、迟到结果、超时、进程退出、参考图释放、全量候选排名、GPS 移动与抖动过滤、慢定位不阻塞推理、LRU 缓存换版、内容锁定、SLAM 前取帧与位姿就绪后放置。`labs/image-match/index?worker=1` 在微信运行同图 SDK/Worker 数值对照与主线程定时器响应检查，报告不包含相机图像。
+`npm test` 覆盖真实标量 TFLite 与上游逐图数值一致性、包完整性、单任务调度、降频、迟到结果、超时、进程退出、参考图释放、全量候选排名、GPS 移动与抖动过滤、慢定位不阻塞推理、LRU 缓存换版、内容锁定、SLAM 前取帧与位姿就绪后放置。历史同图 SDK/Worker 数值对照与主线程响应探针归档在 `ignore/labs/image-match/`，已退出主项目页面注册；相关报告不包含相机图像。
 
 2026-11-09 模拟器中，两张同图特征余弦相似度分别 0.999999999997 / 0.999999999998；12 次 Worker 推理 22–32ms。证据见[Worker 模拟器报告](benchmarks/image-match-worker-simulator-2026-11-09.json)。这不是手机性能或真实建筑准确率结果。历史手机 SDK 测量与输入有效性说明见[实验记录](image-match-lab.md)。
 

@@ -1,5 +1,7 @@
 # MediaPipe SIMD 真机兼容性调查
 
+> 归档说明（2026-11-12）：实验源码已集中到 `ignore/labs/`，主项目不再注册实验页面。下文页面路径与设备操作是历史验证记录，不能直接在当前主项目打开；构建和诊断脚本位于 `ignore/scripts/`。
+
 2026-11-09。用户决定暂停排查，生产与默认实验构建使用无 SIMD。稳定基线提交：`bc1d725`。测试机：iPhone 15 Pro、iOS 26.6.2、微信 8.0.80、基础库 3.17.6。
 
 ## 已复现的故障
@@ -8,7 +10,7 @@
 
 原始 SIMD 与无 SIMD 包来自 `@mediapipe/tasks-vision@0.10.21`。现有构建把 Emscripten JS memcpy 替换为 WASM `memory.copy`，两版真实初始化内存均已与上游做固定时钟 SHA-256 一致性回归；该回归不等于已证明真机所有推理计算正确。
 
-复核已回传的故障记录：`node scripts/diagnostics/check-embedding-result.cjs .cache/image-match/events-1794195519462-33cad8.jsonl` 返回 `pass:false`、相似度 `0.9999996624751116`、退出码 1。该命令是保存记录的判定器；实际复测仍须在手机重新运行两图自检，不能拿旧记录当新版本结果。
+复核已回传的故障记录：`node ignore/scripts/diagnostics/check-embedding-result.cjs ignore/cache/image-match/events-1794195519462-33cad8.jsonl` 返回 `pass:false`、相似度 `0.9999996624751116`、退出码 1。该命令是保存记录的判定器；实际复测仍须在手机重新运行两图自检，不能拿旧记录当新版本结果。
 
 ## 联网核对
 
@@ -23,11 +25,11 @@
 
 ## 最小指令探针
 
-`node scripts/diagnostics/build-simd-probes.cjs` 从固定 MediaPipe 二进制提取用到的 90 种 SIMD 指令及 shuffle 掩码，生成 183 个 WASM 函数、2,196 个数值用例。覆盖不同输入、非对齐读、lane 读写、数值转换、浮点运算和整数运算。探针不运行优化器，以保留被测指令；Node WebAssembly 产生期望结果。
+`node ignore/scripts/diagnostics/build-simd-probes.cjs` 从固定 MediaPipe 二进制提取用到的 90 种 SIMD 指令及 shuffle 掩码，生成 183 个 WASM 函数、2,196 个数值用例。覆盖不同输入、非对齐读、lane 读写、数值转换、浮点运算和整数运算。探针不运行优化器，以保留被测指令；Node WebAssembly 产生期望结果。
 
 入口：`labs/image-match/index?simdProbe=1`。不加载模型、不打开相机，只实例化约 5.6 KB 的测试模块。结果回传至本地 `events-*.jsonl`。
 
-读取最近且哈希匹配的真机结果：`node scripts/diagnostics/read-simd-result.cjs`；模拟器加 `--simulator`。有数值差异时退出码为 1，无报告为 2，通过为 0。Node 与微信模拟器目前全部通过。探针覆盖指令样例，不是完整的 WebAssembly 一致性认证；复杂调用、长循环和寄存器压力仍可能需要进一步缩小复现。
+读取最近且哈希匹配的真机结果：`node ignore/scripts/diagnostics/read-simd-result.cjs`；模拟器加 `--simulator`。有数值差异时退出码为 1，无报告为 2，通过为 0。Node 与微信模拟器目前全部通过。探针覆盖指令样例，不是完整的 WebAssembly 一致性认证；复杂调用、长循环和寄存器压力仍可能需要进一步缩小复现。
 
 ## 暂停前的最终证据（2026-11-09）
 

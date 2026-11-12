@@ -2,8 +2,8 @@ const http = require('node:http');
 const fs = require('node:fs');
 const path = require('node:path');
 const crypto = require('node:crypto');
-const root = path.resolve(__dirname, '..');
-const folder = path.join(root, '.cache/image-match');
+const root = path.resolve(__dirname, '../..');
+const folder = path.join(root, 'ignore/cache/image-match');
 const file = path.join(folder, 'model.tflite');
 const source = 'https://storage.googleapis.com/mediapipe-models/image_embedder/mobilenet_v3_small/float32/1/mobilenet_v3_small.tflite';
 async function main() {
