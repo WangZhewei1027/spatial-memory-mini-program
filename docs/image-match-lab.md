@@ -4,7 +4,7 @@
 
 实验页：`labs/image-match/index`，仅 `develop` 环境启用。使用 MediaPipe Image Embedder 的原始 MobileNet V3 Small 模型输出 1024 维特征，对预设参考图做余弦相似度排序。参考特征在载入时计算一次；相机帧按需计算。识别算法在客户端执行，不向后端上传相机图片。
 
-这是独立实验页，正式 AR 页面仍使用现行识别流程。实验页通过已有 VisionKit v2 会话取图，因而相机接入仍依赖微信；MediaPipe 特征计算不依赖 OSD。取图不会等待 `session.state === 1`，也不会创建第二个 OSD 会话。
+这是独立实验页，正式 AR 页面仍使用现行识别流程。实验页通过已有 VisionKit v2 会话取图，因而相机接入仍依赖微信；MediaPipe 特征计算在 Worker 中完成，不依赖 VisionKit 的识别能力。取图不会等待 `session.state === 1`，也不会创建第二个 VisionKit 会话。
 
 ## 运行
 
@@ -129,7 +129,7 @@ Apple M1 Pro，微信开发者工具，基础库 3.17.4；实际执行 MediaPipe
 
 `labs/image-match/index?worker=1` 自动做同图 SDK/Worker 对照、两张不同图片检查、12 次 Worker 推理与主线程 16ms 定时器探针。模拟器推理 22–32ms，探针记录 55 次、最大间隔 43ms；[完整报告](benchmarks/image-match-worker-simulator-2026-11-09.json)。定时器用于观察 JS 响应，不是实际渲染 FPS；模拟器结果不能当作手机或相机实测。新流程直接读取 224×224 RGBA，与前述 480×640 SDK 测试属于不同运行链路，耗时不能拼接比较。
 
-生产默认每秒一帧、单任务在途、慢帧自适应降频、旧帧丢弃、命中后终止 Worker。单个 SLAM 会话同时提供扫描像素与展示位姿，取消 OSD→SLAM 重启。代码分包提供模型与 WASM，只有实验报告仍依赖本机 8787 服务。构建生产路径：`npm run build:image-matcher`；数值与生命周期回归：`npm run test:image-matcher`。
+生产默认每秒一帧、单任务在途、慢帧自适应降频、旧帧丢弃、命中后终止 Worker。单个 SLAM 会话同时提供扫描像素与展示位姿，识别命中后无需重启会话。代码分包提供模型与 WASM，只有实验报告仍依赖本机 8787 服务。构建生产路径：`npm run build:image-matcher`；数值与生命周期回归：`npm run test:image-matcher`。
 
 ### Worker 真机结果（2026-11-09）
 

@@ -41,7 +41,7 @@ GPS、巨大模型、商户及识别点接口返回地图 Placement，返回值�
 
 Core 提供 `play/pause/seek/advance/sync/sample/subscribe/observe/bind/dispose`，不依赖 DOM、全局 RAF、定时器或项目注册表。压缩 bundle 的大小由构建产物记录；`miniprogram/lib/scene-runtime/vendor/build-info.json` 记录版本和源码哈希。更新 npm pack 快照及构建步骤见相邻 Web 仓库 `packages/scene-core/README.md`。旧 schema 4/5 编辑文档与 Theatre 状态只在后端标准数据库迁移中转换和归档，小程序没有旧协议运行时分支。
 
-`npm test` 覆盖实际 Three 播放器、地图队列、手动放置、重复点击、跟踪间断、后台取消、异步资源释放和错误重试。开发者工具的无相机联调见 [场景自动联调](scene-auto-debug.md)；VisionKit 相机背景、OSD 识别及实际展示效果需真机验证。
+`npm test` 覆盖实际 Three 播放器、地图队列、手动放置、重复点击、跟踪间断、后台取消、异步资源释放和错误重试。开发者工具的无相机联调见 [场景自动联调](scene-auto-debug.md)；VisionKit 相机背景、图像识别及实际展示效果需真机验证。
 
 `npm run test:scene-memory` 检查反复装载后的对象回收与堆内存平台期；开发者工具可在联调页 query 加 `stressCycles=100` 检查实际 WebGL 资源计数。两端模型矩阵与媒体/文字比对脚本位于相邻 Web 仓库，通过 `npm run test:cross-runtime` 一起执行。媒体适配器独立测试为 `npm run test:scene-media`；当前模拟器与测试边界见 [自动联调](scene-auto-debug.md)。
 
