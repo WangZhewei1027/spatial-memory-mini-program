@@ -1,4 +1,5 @@
 import { fetchActivityProgress, submitActivityRecord } from "../../utils/backend";
+import { reportError } from "../../utils/report-error";
 import { activityDistance, activityParticipantId, activityRequestKey, validActivityLocation, withinActivityScope } from "../../utils/activity-state";
 
 /** Haversine bearing: north = 0, clockwise, degrees. */
@@ -105,6 +106,7 @@ Component({
       } catch (error) {
         if (this._detached || requestId !== this._progressRequest) return;
         console.error("[活动打卡] 进度加载失败:", error);
+        reportError("checkin.progress", error);
         this.setData({ progressError: "打卡进度加载失败，点击重试" });
       } finally {
         if (!this._detached && requestId === this._progressRequest) this.setData({ shopsLoading: false });
@@ -167,6 +169,7 @@ Component({
         this._showReward(point);
       } catch (error) {
         console.error("[活动打卡] 提交失败:", error);
+        reportError("checkin.submit", error);
         if (!this._detached) wx.showToast({ title: "打卡失败，请重试", icon: "none" });
       } finally {
         if (!this._detached) this.setData({ submittingPointId: "", shopsLoading: false });

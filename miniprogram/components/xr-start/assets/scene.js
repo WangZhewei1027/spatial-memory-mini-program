@@ -1,4 +1,5 @@
 const { CONFIG, backendRpc } = require("../../../utils/backend");
+const { reportError } = require("../../../utils/report-error");
 const { THREE } = require("../../../lib/three-runtime/runtime");
 const { createCompositionPlayer } = require("../../../lib/scene-runtime/composition");
 const { scenePlacementFromCamera } = require("../../../lib/scene-runtime/vendor/scene-core");
@@ -13,6 +14,9 @@ module.exports = {
       modelCache: this._modelCache, canvas: this._canvas,
       getListenerCamera: () => this.getCamTransform(),
       onState: (state, message, current) => this._scenePlayerState(asset, state, message, current),
+      // A lost soundtrack keeps the scene playing; tell the viewer and report it.
+      onWarning: error => { if (!this._disposed && this._isAssetPlacementCurrent(asset)) this.reportAssetError(asset, error); },
+      onDiagnostic: event => reportError(`scene.${event.event || "diagnostic"}`, event.message || event.event, { ...event, assetId: asset.id }),
     });
     try {
       await player.load();
@@ -32,6 +36,7 @@ module.exports = {
         this._destroyNode(entry);
       }
       if (this._scenePreviewMode) {
+        reportError("scene.preview", message || "场景媒体播放失败", { assetId: asset?.id });
         this._scenePreviewPlaced = false;
         this._scenePreviewStatus("error", message || "场景媒体播放失败，请重试");
       } else this.reportAssetError(asset, new Error(message || "场景媒体播放失败"));

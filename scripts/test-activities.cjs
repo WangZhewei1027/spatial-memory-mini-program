@@ -12,7 +12,7 @@ const activity = (n, type = "danmaku", points = []) => ({ id: uuid(n), activity_
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
 function launch(storage = new Map()) {
-  const calls = { requests: [], toasts: [], writes: [], navigation: [], danmaku: [] };
+  const calls = { requests: [], toasts: [], writes: [], navigation: [], danmaku: [], reports: [] };
   const wx = {
     getAccountInfoSync: () => ({ miniProgram: { envVersion: "develop" } }),
     getDeviceInfo: () => ({ platform: "devtools" }),
@@ -26,6 +26,8 @@ function launch(storage = new Map()) {
     Page(value) { pageDefinition = value; }, Component(value) { componentDefinition = value; } });
   const modules = new Map();
   modules.set(path.join(root, "utils/backend-environment.ts"), { exports: { resolveBackendBaseUrl: () => "https://example.test" } });
+  // Error reports are covered by test-backend-environment; record them here.
+  modules.set(path.join(root, "utils/report-error.ts"), { exports: { reportError: (source, error) => calls.reports.push({ source, message: error?.message || String(error) }) } });
   function load(file) {
     if (!path.extname(file)) file += fs.existsSync(file + ".ts") ? ".ts" : ".js";
     if (modules.has(file)) return modules.get(file).exports;
@@ -106,6 +108,7 @@ async function main() {
   assert.match(app.calls.requests[0].url, /\/activity-records$/);
   assert.equal("p_workspace_id" in firstBody, false);
   app.calls.requests.shift().fail(new Error("connection lost after commit")); await failed;
+  assert.ok(app.calls.reports.some(report => report.source === "activities.submit" && /connection lost/.test(report.message)), "a failed submission is reported");
   assert.equal(page.data.textContent, "Hello");
   assert.equal(page.data.isSubmitting, false);
   page.data.location = { latitude: 31.201, longitude: 121.501 };

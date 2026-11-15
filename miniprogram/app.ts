@@ -1,4 +1,6 @@
 // app.ts
+import { reportError } from "./utils/report-error";
+
 App<IAppOption>({
   globalData: {},
   onLaunch() {
@@ -15,6 +17,12 @@ App<IAppOption>({
         });
       });
     }
-
+  },
+  // 未捕获异常与未处理的 Promise 拒绝统一上报到 /api/errors。
+  onError(message: string) {
+    reportError("app.onError", message);
+  },
+  onUnhandledRejection({ reason }: { reason: unknown }) {
+    reportError("app.unhandledRejection", reason);
   },
 })

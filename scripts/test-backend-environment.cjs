@@ -118,8 +118,15 @@ async function main() {
 
   const { backend, calls } = loadBackend("develop", true);
   await assert.rejects(backend.submitActivityRecord({ placement_id: "placement" }), /unavailable/);
-  assert.equal(calls.length, 1, "failed local writes must not retry against production");
+  assert.equal(calls.length, 2, "failed local writes must not retry against production");
   assert.equal(calls[0].url, `${testLanUrl}/api/miniapp/activity-records`);
+  // The only follow-up is a best-effort error report to the same local backend.
+  assert.equal(calls[1].url, `${testLanUrl}/api/errors`);
+  assert.equal(calls[1].method, "POST");
+  assert.equal(calls[1].data.method, "miniprogram:backend.request");
+  assert.match(calls[1].data.message, /unavailable/);
+  assert.equal(calls[1].data.context.endpoint, `${testLanUrl}/api/miniapp/activity-records`);
+  console.log("PASS failed requests are reported once to the same backend's /api/errors");
   for (const errMsg of ["request:fail url not in domain list", "request:fail ssl hand shake error", "request:fail timeout"]) {
     const { backend, diagnostics } = loadBackend("trial", (options) => options.fail({ errMsg }), "ios");
     for (const request of [

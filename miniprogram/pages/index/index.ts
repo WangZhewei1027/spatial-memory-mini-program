@@ -12,6 +12,7 @@ import {
   ScanHistoryEntry,
   WorkspaceSummary,
 } from "../../utils/backend";
+import { reportError } from "../../utils/report-error";
 
 /** 历史记录在下拉菜单中的展示形态 */
 interface HistoryItem extends ScanHistoryEntry {
@@ -179,6 +180,7 @@ Page({
       this.refreshHistory();
     } catch (err) {
       console.error("[index] fetchNames error:", err);
+      reportError("index.fetchNames", err);
       this.setData({ loaded: true });
       this.refreshHistory();
     }
@@ -280,6 +282,7 @@ Page({
       }
     } catch (err) {
       console.error("[index] refreshHistoryNames error:", err);
+      reportError("index.refreshHistoryNames", err);
     }
   },
 

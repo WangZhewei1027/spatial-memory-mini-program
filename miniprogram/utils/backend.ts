@@ -2,6 +2,7 @@
 // （服务端文档：spatial-memory/docs/miniapp-api.md），不再直连数据库。
 // 素材发现与活动参与使用独立接口；只有最终的 AR 渲染复用现有展示器。
 import { resolveBackendBaseUrl } from "./backend-environment";
+import { reportError } from "./report-error";
 import type { ActivityLocation, ActivitySubmission } from "./activity-state";
 
 // 开发版连接本地 Web；体验版／正式版保留线上后端。识别参考图和内容查询也使用此地址。
@@ -70,6 +71,7 @@ function loadPersistedScanConfig(): ScanConfig {
     return {};
   } catch (e) {
     console.error("[storage] config read failed", e);
+    reportError("storage", e, { operation: "config read failed" });
     return {};
   }
 }
@@ -80,6 +82,7 @@ function persistScanConfig(config: ScanConfig) {
     wx.setStorageSync(SCAN_CONFIG_STORAGE_KEY, config);
   } catch (e) {
     console.error("[storage] config write failed", e);
+    reportError("storage", e, { operation: "config write failed" });
   }
 }
 
@@ -95,6 +98,7 @@ export function loadScanHistory(): ScanHistoryEntry[] {
     return [];
   } catch (e) {
     console.error("[storage] history read failed", e);
+    reportError("storage", e, { operation: "history read failed" });
     return [];
   }
 }
@@ -111,6 +115,7 @@ export function saveScanHistory(list: ScanHistoryEntry[]): void {
     );
   } catch (e) {
     console.error("[storage] history save failed", e);
+    reportError("storage", e, { operation: "history save failed" });
   }
 }
 
@@ -153,6 +158,7 @@ export function recordScanHistory(entry: {
     );
   } catch (e) {
     console.error("[storage] history write failed", e);
+    reportError("storage", e, { operation: "history write failed" });
   }
 }
 
@@ -221,11 +227,9 @@ function request<T>(
       fail: (error: { errMsg?: string; message?: string }) => {
         // wx.request rejects with errMsg, while scene UI consumes Error.message.
         const message = error.errMsg || error.message || "网络请求失败，请稍后重试";
-        console.error("[backend] request failed", {
-          method,
-          endpoint: `${API_BASE_URL}${API_PREFIX}${path.split("?")[0]}`,
-          message,
-        });
+        const endpoint = `${API_BASE_URL}${API_PREFIX}${path.split("?")[0]}`;
+        console.error("[backend] request failed", { method, endpoint, message });
+        reportError("backend.request", message, { method: method, endpoint });
         reject(Object.assign(new Error(message), error));
       },
     });

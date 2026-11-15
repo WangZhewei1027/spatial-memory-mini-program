@@ -1,4 +1,5 @@
 import { CONFIG, fetchActivities, submitActivityRecord } from "../../utils/backend";
+import { reportError } from "../../utils/report-error";
 import {
   acceptActivityDiscovery, activityParticipantId, activityRequestKey, danmakuMaxLength, nextActivityDiscoverySequence, parseActivityPlacements, withinActivityScope,
   type ActivityPlacement, type ActivitySubmission,
@@ -193,6 +194,7 @@ Page({
       if ((this as any)._unloaded || requestId !== (this as any)._activityRequest) return;
       if (!this.applyActivities([], discoverySequence)) return;
       console.error("[活动] 加载失败:", error);
+      reportError("activities.load", error);
       this.setData({ shopActivities: [], danmakuActivities: [], activeDanmaku: null, shopCheckinEnabled: false, showShopPanel: false, canSubmit: false, activitiesError: "活动加载失败，点击重试" });
       this.selectComponent("#main-frame")?.setNavigationTarget(null);
     } finally {
@@ -326,6 +328,7 @@ Page({
       if ((this as any)._activityVisible !== false && this.data.activeDanmaku?.id === intent.placement_id) this.selectComponent("#main-frame")?.showDanmakuInXR(sendText, response.data);
     } catch (err) {
       console.error("[活动留言] 发送失败:", err);
+      reportError("activities.submit", err);
       if (!(this as any)._unloaded) wx.showToast({ title: "发送失败，内容已保留", icon: "none" });
     } finally {
       if (!(this as any)._unloaded) {

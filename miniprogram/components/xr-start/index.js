@@ -1,4 +1,5 @@
 const XR_CONFIG = require("./config");
+const { reportError } = require("../../utils/report-error");
 const scenePreview = require("./scene-preview");
 const gps = require("./gps");
 const navigation = require("./navigation");
@@ -316,6 +317,7 @@ Component({
         type: asset?.file_type,
         message: error?.message || error?.errMsg || String(error),
       });
+      reportError("asset", error, { assetId: asset?.id, type: asset?.file_type, alias: error?.alias, instanceId: error?.instanceId });
       this.triggerEvent("asseterror", {
         assetId: asset?.id,
         type: asset?.file_type,

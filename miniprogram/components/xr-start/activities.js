@@ -1,4 +1,5 @@
 const { CONFIG, fetchActivities, fetchActivityRecords } = require("../../utils/backend");
+const { reportError } = require("../../utils/report-error");
 const { acceptActivityDiscovery, isCurrentActivityDiscovery, nextActivityDiscoverySequence, parseActivityPlacements, validActivityLocation, withinActivityScope } = require("../../utils/activity-state");
 
 const REFRESH_MS = 10000;
@@ -42,6 +43,7 @@ module.exports = (XR_CONFIG) => ({
               record.activity_id === activity.activity_id && record.file_type === "text" && typeof record.text_content === "string" && validActivityLocation(record.metadata));
           } catch (error) {
             console.error("[活动留言] 读取失败:", error);
+            reportError("activities.records", error, { activityId: activity.id });
             return [];
           }
         }));
@@ -53,6 +55,7 @@ module.exports = (XR_CONFIG) => ({
       if (!current()) return;
       acceptActivityDiscovery(request.discoverySequence);
       console.error("[活动] 刷新失败:", error);
+      reportError("activities.refresh", error);
       // A stale cached record must not stay visible after an activity is paused or hidden.
       this._replaceActivityRecords([]);
       this.triggerEvent("activitiesload", { activities: [], error: true, discoverySequence: request.discoverySequence });
