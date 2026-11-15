@@ -109,6 +109,11 @@ Page({
     if (wx.startLocationUpdate) {
       wx.startLocationUpdate({
         success: () => {
+          // 页面已卸载时，onUnload 的 stopLocationUpdate 早于本回调，需补停并跳过注册。
+          if ((this as any)._unloaded) {
+            wx.stopLocationUpdate?.();
+            return;
+          }
           (this as any)._locationListener = (
             res: WechatMiniprogram.OnLocationChangeCallbackResult,
           ) => {
@@ -353,12 +358,18 @@ Page({
   _startCompassWatch() {
     wx.startCompass({
       success: () => {
+        // 页面可能在异步回调前已卸载，此时不再注册监听。
+        if ((this as any)._unloaded) {
+          wx.stopCompass({});
+          return;
+        }
         // 罗盘传感器 10-60Hz，每 tick setData+selectComponent 会与 XR 渲染争用主线程。
         // 节流：变化 <2° 或距上次 <200ms 时跳过；组件引用只解析一次。
         let lastHeading = -Infinity;
         let lastTime = 0;
         let xrComp: any = null;
-        wx.onCompassChange((res: any) => {
+        // 保存监听引用，卸载时注销；否则重复进入 AR 页会累积指向旧页面的回调。
+        (this as any)._compassListener = (res: any) => {
           const heading: number = res.direction ?? res.heading ?? 0;
           const now = Date.now();
           let delta = Math.abs(heading - lastHeading);
@@ -369,12 +380,19 @@ Page({
           this.setData({ compassHeading: heading });
           if (!xrComp) xrComp = this.selectComponent("#main-frame");
           if (xrComp) xrComp.updateCompassHeading(heading);
-        });
+        };
+        wx.onCompassChange((this as any)._compassListener);
       },
     });
   },
 
   _stopCompassWatch() {
+    if ((this as any)._compassListener && wx.offCompassChange) {
+      try {
+        wx.offCompassChange((this as any)._compassListener);
+      } catch (_) {}
+      (this as any)._compassListener = null;
+    }
     wx.stopCompass({});
   },
 });

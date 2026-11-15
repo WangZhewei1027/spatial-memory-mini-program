@@ -28,7 +28,6 @@
 - [MediaPipe 图像相似度实验](image-match-lab.md)：客户端匹配、SAGE 取帧复用与原图/缩小/JPEG 耗时对照。
 - [VisionKit / xr-frame 调研](xr-frame-threejs-research.md)：实验页与早期方案记录。
 - [XR-Frame 坐标](xr-frame-coordinates.md)、[交互示例](xr-3d-interaction-summary.md)：仅适用于 xr-frame 实验页和上游 demo。
+- [SIMD 兼容调查（暂停）](simd-investigation.md)：已验证的指令探针、完整模型异常与恢复无 SIMD 的决定。
 
 带日期的验收结果只代表当时版本与环境；旧协议、测试数量和截图不能作为当前版本已验收的证据。
-
-- [SIMD 兼容调查（暂停）](simd-investigation.md)：已验证的指令探针、完整模型异常与恢复无 SIMD 的决定。
