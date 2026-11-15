@@ -27,7 +27,7 @@ function tagError(error, fields) {
   return Object.assign(error instanceof Error ? error : new Error(error?.errMsg || String(error)), fields);
 }
 
-function createCompositionPlayer(manifest, { modelCache, canvas = modelCache?.canvas, onState, surfaceFactory, getListenerCamera } = {}) {
+function createCompositionPlayer(manifest, { modelCache, canvas = modelCache?.canvas, onState, onWarning, onDiagnostic, surfaceFactory, getListenerCamera } = {}) {
   const content = manifest && manifest.content;
   const root = new THREE.Group();
   root.name = `scene:${manifest?.assetId || ""}`;
@@ -132,6 +132,16 @@ function createCompositionPlayer(manifest, { modelCache, canvas = modelCache?.ca
           else loaded = { inst, alias, kind, surface: await createSurface(inst, alias ? resources[alias] : undefined, {
             canvas, mediaContext,
             isCancelled: () => cancelled || disposed || generation !== loadGeneration,
+            // Non-fatal media degradation (for example a lost video soundtrack).
+            onWarning(error) {
+              if (disposed || generation !== loadGeneration) return;
+              const warning = tagError(error, { alias, instanceId: inst.id, kind: "media" });
+              try { if (onWarning) onWarning(warning); else console.warn("[scene-runtime] 媒体降级", warning); } catch (_) {}
+            },
+            onDiagnostic(event) {
+              if (disposed || generation !== loadGeneration || typeof onDiagnostic !== "function") return;
+              try { onDiagnostic({ ...event, alias, instanceId: inst.id }); } catch (_) {}
+            },
             onError(error) {
               if (disposed || generation !== loadGeneration) return;
               const failure = tagError(error, { alias, instanceId: inst.id, kind: "media" });

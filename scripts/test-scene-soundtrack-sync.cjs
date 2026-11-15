@@ -189,6 +189,94 @@ test('video pause immediately mutes a pending native start', async () => {
   } finally { audio.dispose(); await state.settle(); }
 });
 
+// Each create returns a fresh native pair, as on device. `hang(kind, method, n)`
+// decides whether the n-th call of that pipeline's method never settles.
+function rebuildPlatform({ hang = () => false } = {}) {
+  const state = owner(), decoders = [], players = [], diagnostics = [];
+  state.options.onDiagnostic = event => diagnostics.push(event);
+  state.options.stepTimeoutMs = 20;
+  const never = () => new Promise(() => {});
+  global.wx = {
+    createVideoDecoder() {
+      const index = decoders.length, listeners = {}, calls = { seek: 0 };
+      const decoder = { index, seeks: [], removed: 0,
+        on(name, callback) { listeners[name] = callback; }, emit(name) { listeners[name]?.(); },
+        start() { return Promise.resolve(); },
+        seek(ms) { calls.seek++; this.seeks.push(ms); return hang('decoder', 'seek', calls.seek, index) ? never() : Promise.resolve(); },
+        stop() { return Promise.resolve(); }, remove() { this.removed++; return Promise.resolve(); },
+      };
+      decoders.push(decoder); return decoder;
+    },
+    createMediaAudioPlayer() {
+      const index = players.length, calls = { start: 0, stop: 0 };
+      const player = { index, volume: 0, starts: 0, destroyed: 0,
+        addAudioSource() { return Promise.resolve(); },
+        start() { calls.start++; this.starts++; return hang('player', 'start', calls.start, index) ? never() : Promise.resolve(); },
+        stop() { calls.stop++; return hang('player', 'stop', calls.stop, index) ? never() : Promise.resolve(); },
+        destroy() { this.destroyed++; return Promise.resolve(); },
+      };
+      players.push(player); return player;
+    },
+  };
+  return { ...state, decoders, players, diagnostics };
+}
+const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+test('video soundtrack replaces an ended decoder at a loop instead of seeking it', async () => {
+  const state = rebuildPlatform();
+  const audio = await createVideoSoundtrack('video.mp4', state.options);
+  try {
+    audio.sync(0, true, .5, transport()); await flush();
+    assert.equal(state.decoders.length, 1); assert.equal(state.players[0].starts, 1);
+    state.decoders[0].emit('ended');
+    audio.sync(0, true, .5, transport(0, 1)); await flush();
+    assert.equal(state.decoders.length, 2, 'a loop after EOF opens a fresh decoder');
+    assert.deepEqual(state.decoders[0].seeks, [0], 'the ended decoder is never sought again');
+    assert.ok(state.decoders[0].removed > 0 && state.players[0].destroyed > 0, 'the ended pair is released');
+    assert.deepEqual(state.decoders[1].seeks, [0]); assert.equal(state.players[1].starts, 1);
+    assert.equal(state.players[1].volume, .5);
+    audio.sync(0, true, .5, transport(0, 2)); await flush();
+    assert.equal(state.decoders.length, 2, 'a loop before EOF still reuses the decoder');
+    assert.deepEqual(state.decoders[1].seeks, [0, 0]);
+  } finally { audio.dispose(); }
+  assert.equal(state.errors.length, 0); assert.equal(state.diagnostics.length, 0); assert.equal(state.cleanups.size, 0);
+});
+
+test('video soundtrack recovers from a native seek that never settles', async () => {
+  // The first decoder hangs on its second seek (the loop boundary).
+  const state = rebuildPlatform({ hang: (kind, method, n, index) => kind === 'decoder' && index === 0 && n === 2 });
+  const audio = await createVideoSoundtrack('video.mp4', state.options);
+  try {
+    audio.sync(0, true, .5, transport()); await flush();
+    audio.sync(0, true, .5, transport(0, 1)); await flush();
+    assert.equal(state.players[0].volume, 0, 'the pending loop is silent');
+    await wait(40); await flush();
+    assert.equal(state.errors.length, 0, 'one hung step is not fatal');
+    assert.equal(state.diagnostics.length, 1);
+    assert.equal(state.diagnostics[0].event, 'soundtrack_recover');
+    assert.match(state.diagnostics[0].message, /视频音轨定位超时/);
+    assert.equal(state.decoders.length, 2); assert.ok(state.decoders[0].removed > 0);
+    assert.deepEqual(state.decoders[1].seeks, [0]); assert.equal(state.players[1].starts, 1);
+    assert.equal(state.players[1].volume, .5);
+  } finally { audio.dispose(); }
+  assert.equal(state.cleanups.size, 0);
+});
+
+test('video soundtrack reports an error only after repeated failed rebuilds', async () => {
+  // Every pipeline after the first hangs on start.
+  const state = rebuildPlatform({ hang: (kind, method, n, index) => kind === 'player' && method === 'start' && index > 0 });
+  const audio = await createVideoSoundtrack('video.mp4', state.options);
+  audio.sync(0, true, .5, transport()); await flush();
+  state.decoders[0].emit('ended');
+  audio.sync(0, true, .5, transport(0, 1));
+  await wait(150); await flush();
+  assert.equal(state.diagnostics.length, 2);
+  assert.equal(state.errors.length, 1);
+  assert.match(state.errors[0].message, /视频音轨播放失败: 视频音轨播放超时/);
+  assert.ok(state.players.every(player => player.destroyed > 0), 'every abandoned pair is released');
+  assert.equal(state.cleanups.size, 0);
+});
+
 (async () => {
   let failures = 0;
   for (const { name, run } of tests) {

@@ -206,8 +206,30 @@ async function main() {
     const a = await createSceneSurface(instance(), resource('video'), { mediaContext: owner }); a.sync(3, true, 20); owner.dispose(); await flush();
     assert.ok(state.decoders.every(d => d.removed === 1)); assert.equal(state.players.length, 0, 'cancelled preload cannot start sound');
   }
+  for (const stage of ['load', 'playback']) {
+    // Losing a video's sound is a warning; the picture keeps playing.
+    const state = platform(), warnings = [], errors = [];
+    const createPlayer = wx.createMediaAudioPlayer;
+    wx.createMediaAudioPlayer = () => {
+      const player = createPlayer();
+      if (stage === 'load') player.addAudioSource = () => Promise.reject(new Error('audio source rejected'));
+      else player.start = () => Promise.reject(new Error('audio start rejected'));
+      return player;
+    };
+    const a = await createSceneSurface(instance(), resource('video'), { onWarning: e => warnings.push(e), onError: e => errors.push(e) });
+    a.sync(3, true, 20); await flush(); await flush();
+    assert.equal(errors.length, 0, `${stage}: soundtrack failure must not fail the scene`);
+    assert.equal(warnings.length, 1, `${stage}: soundtrack failure is reported once as a warning`);
+    assert.match(warnings[0].message, stage === 'load' ? /audio source rejected/ : /视频音轨播放失败: audio start rejected/);
+    assert.equal(a.audio, null, `${stage}: the failed soundtrack is dropped`);
+    assert.ok(a.video && a.materials[0].map, `${stage}: video keeps rendering`);
+    a.sync(4, true, 20); await flush();
+    near(a.video.sourceTime, 4);
+    assert.ok(state.players.every(p => p.destroyed >= 1), `${stage}: every soundtrack player is released`);
+    a.dispose(); await flush();
+  }
   {
-    const state = platform(); const a = await createSceneSurface({ id: 'text', text: { content: 'AB\nCD', fontSize: 1, width: 2, align: 'left', color: '#ffffff' } });
+    const state = platform(); const a = await createSceneSurface({ id: 'text', text:{ content: 'AB\nCD', fontSize: 1, width: 2, align: 'left', color: '#ffffff' } });
     assert.equal(state.audio.length, 0); assert.equal(a.materials[0].depthWrite, false); a.dispose();
   }
   console.log('scene media: incremental MP4 metadata, streaming, silent lookahead, volume keyframes/spatial gain independent of opacity, 1x trim/fades/seek, cancellation and teardown passed');

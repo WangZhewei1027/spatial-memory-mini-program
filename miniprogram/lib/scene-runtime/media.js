@@ -41,7 +41,11 @@ function textTexture(text) {
 }
 
 async function createSceneSurface(instance, resource, options = {}) {
-  const { canvas, onError = () => {}, isCancelled = () => false } = options;
+  const { canvas, onError = () => {}, onWarning, onDiagnostic = () => {}, isCancelled = () => false } = options;
+  function warn(error) {
+    if (disposed) return;
+    try { if (onWarning) onWarning(error); else console.warn("[scene-runtime] 媒体声音不可用", error); } catch (_) {}
+  }
   const object = new THREE.Group(), materials = [];
   const kind = instance.text ? "text" : resource?.kind;
   const settings = { ...DEFAULT_MEDIA, ...instance.media };
@@ -54,7 +58,7 @@ async function createSceneSurface(instance, resource, options = {}) {
   const unregister = mediaContext.onDispose(dispose);
   const context = {
     onError(error) { dispose(); onError(error); },
-    isCancelled: () => disposed || mediaContext.disposed || isCancelled(), mediaContext,
+    isCancelled: () => disposed || mediaContext.disposed || isCancelled(), mediaContext, onDiagnostic,
   };
   function plane(material, width, height) {
     materials.push(material);
@@ -99,9 +103,22 @@ async function createSceneSurface(instance, resource, options = {}) {
         if (kind === "audio") nextAudio = await createAudioPlayback(resource.url, settings, localContext);
         else {
           nextVideo = await createVideoPlayback(resource.url, videoMaterial, resizeVideo, localContext);
-          if (!settings.muted && nextVideo.hasAudio) nextAudio = nextVideo.path === resource.url
-            ? await createVideoSoundtrack(nextVideo.path, localContext)
-            : await createAudioPlayback(nextVideo.path, settings, { ...localContext, forceBuffered: true });
+          if (!settings.muted && nextVideo.hasAudio) {
+            // A video's sound is secondary: losing it keeps the picture playing
+            // and is reported as a warning instead of failing the whole scene.
+            let soundtrack = null;
+            const soundContext = { ...localContext,
+              onError(error) { if (audio === soundtrack && soundtrack) { audio = null; soundtrack.dispose(); } warn(error); },
+            };
+            try {
+              soundtrack = nextAudio = nextVideo.path === resource.url
+                ? await createVideoSoundtrack(nextVideo.path, soundContext)
+                : await createAudioPlayback(nextVideo.path, settings, { ...soundContext, forceBuffered: true });
+            } catch (error) {
+              if (localContext.isCancelled()) throw error;
+              warn(error); nextAudio = undefined;
+            }
+          }
         }
         if (localContext.isCancelled()) { nextAudio?.dispose(); nextVideo?.dispose(); return; }
         audio = nextAudio || null; video = nextVideo || null; syncMedia();
