@@ -27,7 +27,7 @@ pages/ar/ar（地图配置就绪、识别状态、重新扫描）
 
 | 内容 | 实现 |
 | --- | --- |
-| 文字、气泡、头像 | 原生 Canvas 字形 RGBA、DataTexture 与程序化几何；中文、换行和 emoji 布局，使用当前地图样式 |
+| 文字与气泡 | 原生 Canvas 字形 RGBA、DataTexture 与程序化几何；中文、换行、emoji 与句末标点避头布局，使用当前地图样式。气泡为 60% 不透明的深色底、白色细描边环与底部居中尾巴，单一轮廓避免半透明叠加；白字带柔和阴影，保留 `text_color` / `background_color` 覆盖 |
 | 图片 | 原生下载与 Canvas.createImage 解码，按原比例展示 |
 | 模型 | GLTFLoader、SkeletonUtils 克隆、AnimationMixer；普通模型归一化，Scene 保留保存的局部变换 |
 | 音频 | 原生渐进播放与耳机模型；按 SLAM 相机位置计算距离衰减与近距离聚焦 |

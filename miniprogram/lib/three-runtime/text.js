@@ -19,14 +19,23 @@ function splitGraphemes(text) {
   }
   return result;
 }
+const NO_LINE_START = /^[，。！？、；：）」』》】〉,.!?;:)\]}…—~～]$/;
 function layoutText(text, measure, maxWidth = 560) {
   const lines = [];
   for (const paragraph of String(text).replace(/\r\n?/g, "\n").split("\n")) {
     let line = "";
     for (const char of splitGraphemes(paragraph)) {
       if (line && measure(line + char) > maxWidth) {
-        lines.push(line);
-        line = "";
+        // Closing punctuation never starts a line; it takes the previous
+        // character along instead.
+        const graphemes = splitGraphemes(line);
+        if (NO_LINE_START.test(char) && graphemes.length > 1) {
+          lines.push(graphemes.slice(0, -1).join(""));
+          line = graphemes[graphemes.length - 1];
+        } else {
+          lines.push(line);
+          line = "";
+        }
       }
       line += char;
     }
@@ -49,6 +58,46 @@ function roundedShape(width, height, radius) {
   shape.lineTo(x, y + r);
   shape.quadraticCurveTo(x, y, x + r, y);
   return shape;
+}
+/** Translucent speech bubble: dark glass, white hairline, centred tail. */
+const BUBBLE = {
+  color: "#1d1a2b",
+  opacity: 0.6,
+  borderOpacity: 0.38,
+  border: 0.007,
+  radius: 0.09,
+  tailWidth: 0.12,
+  tailHeight: 0.075,
+};
+/** Rounded rectangle whose bottom edge carries a softly pointed tail. */
+function traceBubble(
+  path,
+  width,
+  height,
+  radius,
+  tailWidth = BUBBLE.tailWidth,
+  tailHeight = BUBBLE.tailHeight,
+) {
+  const x = -width / 2,
+    y = -height / 2,
+    r = Math.min(radius, width / 2, height / 2),
+    tw = Math.max(0, Math.min(tailWidth, width - r * 2)) / 2;
+  path.moveTo(x + r, y);
+  if (tw > 0 && tailHeight > 0) {
+    path.lineTo(-tw, y);
+    path.lineTo(-tw * 0.18, y - tailHeight * 0.86);
+    path.quadraticCurveTo(0, y - tailHeight, tw * 0.18, y - tailHeight * 0.86);
+    path.lineTo(tw, y);
+  }
+  path.lineTo(x + width - r, y);
+  path.quadraticCurveTo(x + width, y, x + width, y + r);
+  path.lineTo(x + width, y + height - r);
+  path.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+  path.lineTo(x + r, y + height);
+  path.quadraticCurveTo(x, y + height, x, y + height - r);
+  path.lineTo(x, y + r);
+  path.quadraticCurveTo(x, y, x + r, y);
+  return path;
 }
 function safeColor(value, fallback) {
   return typeof value === "string" &&
@@ -85,10 +134,13 @@ function createTextAsset(
   ctx.font = `${fontPx}px sans-serif`;
   ctx.textBaseline = "middle";
   ctx.textAlign = "left";
-  ctx.fillStyle = safeColor(
-    config.text_color,
-    style === "plain_white" ? "#ffffff" : "#f7efff",
-  );
+  ctx.fillStyle = safeColor(config.text_color, "#ffffff");
+  if (style !== "plain_white") {
+    // Keeps light text legible where the camera image shows through.
+    ctx.shadowColor = "rgba(0, 0, 0, 0.45)";
+    ctx.shadowBlur = 4;
+    ctx.shadowOffsetY = 1;
+  }
   layout.lines.forEach((line, index) =>
     ctx.fillText(line, padding, padding + lineHeight * (index + 0.5)),
   );
@@ -118,66 +170,50 @@ function createTextAsset(
     height = canvas.height * ratio;
   const root = new THREE.Group();
   if (style !== "plain_white") {
-    const pad = 0.065,
-      bgWidth = width + pad * 2,
-      bgHeight = height + pad * 2;
-    const border = new THREE.Mesh(
+    const padX = 0.08,
+      padY = 0.055,
+      bgWidth = width + padX * 2,
+      bgHeight = height + padY * 2,
+      radius = Math.min(BUBBLE.radius, bgHeight / 2),
+      line = BUBBLE.border;
+    // One outline with an integrated tail: overlapping translucent meshes
+    // would double their alpha at the seams.
+    const body = new THREE.Mesh(
       new THREE.ShapeGeometry(
-        roundedShape(bgWidth + 0.008, bgHeight + 0.008, 0.065),
+        traceBubble(new THREE.Shape(), bgWidth, bgHeight, radius),
       ),
       new THREE.MeshBasicMaterial({
-        color: 0xe6bcff,
+        color: safeColor(config.background_color, BUBBLE.color),
         transparent: true,
-        opacity: 0.8,
+        opacity: BUBBLE.opacity,
         depthWrite: false,
         side: THREE.DoubleSide,
       }),
     );
-    const bg = new THREE.Mesh(
-      new THREE.ShapeGeometry(roundedShape(bgWidth, bgHeight, 0.06)),
+    // The hairline is a ring, so the translucent body never shows it through.
+    const ring = traceBubble(
+      new THREE.Shape(),
+      bgWidth + line * 2,
+      bgHeight + line * 2,
+      radius + line,
+      BUBBLE.tailWidth + line * 2.4,
+      BUBBLE.tailHeight + line * 1.6,
+    );
+    ring.holes.push(traceBubble(new THREE.Shape(), bgWidth, bgHeight, radius));
+    const border = new THREE.Mesh(
+      new THREE.ShapeGeometry(ring),
       new THREE.MeshBasicMaterial({
-        color: safeColor(config.background_color, "#662b7a"),
+        color: 0xffffff,
         transparent: true,
-        opacity: 0.78,
+        opacity: BUBBLE.borderOpacity,
         depthWrite: false,
         side: THREE.DoubleSide,
       }),
     );
-    border.position.z = -0.006;
-    bg.position.z = -0.003;
-    root.add(border, bg);
-    const tail = new THREE.Shape();
-    tail.moveTo(-bgWidth / 2 + 0.09, -bgHeight / 2 + 0.005);
-    tail.lineTo(-bgWidth / 2 + 0.09, -bgHeight / 2 - 0.06);
-    tail.lineTo(-bgWidth / 2 + 0.17, -bgHeight / 2 + 0.005);
-    tail.closePath();
-    root.add(new THREE.Mesh(new THREE.ShapeGeometry(tail), bg.material));
-    // Procedural avatar badge replaces the random pre-baked portrait atlas.
-    const avatar = new THREE.Group();
-    avatar.position.set(-bgWidth / 2 - 0.16, 0, 0);
-    const avatarMaterial = new THREE.MeshBasicMaterial({
-      color: 0x8b65ab,
-      side: THREE.DoubleSide,
-    });
-    avatar.add(
-      new THREE.Mesh(new THREE.CircleGeometry(0.105, 32), avatarMaterial),
-    );
-    const iconMaterial = new THREE.MeshBasicMaterial({
-      color: 0xf7efff,
-      side: THREE.DoubleSide,
-    });
-    const head = new THREE.Mesh(
-      new THREE.CircleGeometry(0.025, 24),
-      iconMaterial,
-    );
-    head.position.set(0, 0.024, 0.002);
-    const body = new THREE.Mesh(
-      new THREE.CircleGeometry(0.047, 24, 0, Math.PI),
-      iconMaterial,
-    );
-    body.position.set(0, -0.047, 0.002);
-    avatar.add(head, body);
-    root.add(avatar);
+    body.position.z = -0.003;
+    border.position.z = -0.002;
+    root.add(body, border);
+    root.userData.bubble = { width: bgWidth, height: bgHeight, opacity: BUBBLE.opacity };
   }
   const mesh = new THREE.Mesh(
     new THREE.PlaneGeometry(width, height),
@@ -202,4 +238,4 @@ function createTextAsset(
   };
   return root;
 }
-module.exports = { createTextAsset, layoutText, splitGraphemes, roundedShape };
+module.exports = { createTextAsset, layoutText, splitGraphemes, roundedShape, traceBubble, BUBBLE };

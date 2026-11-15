@@ -104,6 +104,9 @@ async function main() {
   const wrapped = layoutText("中文测试\nhello", (s) => Array.from(s).length, 3);
   assert.deepEqual(Array.from(wrapped.lines), ["中文测", "试", "hel", "lo"]);
   assert.equal(splitGraphemes("👨‍👩‍👧‍👦👍🏽").length, 2);
+  // Closing punctuation moves to the next line together with its character.
+  const kinsoku = layoutText("留个纪念！再来", (s) => Array.from(s).length, 4);
+  assert.deepEqual(Array.from(kinsoku.lines), ["留个纪", "念！再来"]);
   const short = createTextAsset("Hi", {}, "dialog_decorated"),
     long = createTextAsset(
       "这是一段需要自动换行的文字，用于检查动态气泡尺寸和显式换行。",
@@ -115,6 +118,21 @@ async function main() {
   assert.ok(
     short.children.some((node) => node.geometry.type === "ShapeGeometry"),
   );
+  // The bubble is translucent and its hairline is a ring, so no two translucent
+  // layers overlap inside the body; the tail hangs below the body.
+  const bubbleMeshes = short.children.filter((node) => node.geometry.type === "ShapeGeometry");
+  assert.equal(bubbleMeshes.length, 2);
+  for (const node of bubbleMeshes) {
+    assert.equal(node.material.transparent, true);
+    assert.ok(node.material.opacity > 0.2 && node.material.opacity < 0.8);
+    assert.equal(node.material.depthWrite, false);
+  }
+  short.updateMatrixWorld(true);
+  const bounds = new THREE.Box3().setFromObject(bubbleMeshes[0]);
+  assert.ok(bounds.min.y < -short.userData.bubble.height / 2 - 0.05, "tail extends below the bubble body");
+  const ringArea = bubbleMeshes[1].geometry.index.count / 3;
+  assert.ok(ringArea > 0);
+  assert.equal(short.userData.bubble.opacity, bubbleMeshes[0].material.opacity);
   const plain = createTextAsset(
     "白字",
     { text_color: "#fa0", text_size: 2 },
