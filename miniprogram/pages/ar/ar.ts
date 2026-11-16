@@ -10,6 +10,8 @@ Page({
     ...activityData, ...recognitionData, ...runtimeData, ...sensorData, ...uiData },
   ...activityMethods, ...recognitionMethods, ...runtimeMethods, ...sensorMethods, ...uiMethods,
   onHide() {
+    (this as any)._pageVisible = false;
+    this.clearRecognitionHint();
     this.setData({ keyboardHeight: 0 });
     (this as any)._activityVisible = false;
     (this as any)._activityRequest = ((this as any)._activityRequest || 0) + 1;
@@ -17,6 +19,7 @@ Page({
   },
 
   onShow() {
+    (this as any)._pageVisible = true;
     this.syncUI();
     (this as any)._activityVisible = true;
     void this.refreshActivities();
@@ -48,6 +51,8 @@ Page({
     this.startSensors();
   },
   onUnload() {
+    (this as any)._pageVisible = false;
+    this.clearRecognitionHint();
     (this as any)._unloaded = true;
     (this as any)._activityVisible = false;
     (this as any)._activityRequest = ((this as any)._activityRequest || 0) + 1;

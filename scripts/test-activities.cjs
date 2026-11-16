@@ -111,6 +111,77 @@ async function main() {
   assert.equal(sensorPage.data.compassHeading, 359, "late sensor callbacks cannot update an unloaded page");
   assert.equal(sensors.calls.sensorStops, 1);
 
+  // Recognition hints only decorate navigation; they never take over a panel or
+  // revive after a map/page lifecycle reset, even if status and hint arrive apart.
+  {
+    const hints = launch(), hintPage = hints.page(), activities = [activity(31), activity(32)];
+    let pageWrites = 0;
+    const write = hintPage.setData;
+    hintPage.setData = function(patch) { pageWrites++; write.call(this, patch); };
+    const hint = (active, mode = "anchor") => hintPage.onRecognitionHint({ detail: { mode, active } });
+    const map = (retrievalMode = "anchor", ready = true) => hintPage.onMapConfigLoad({ detail: { ready, retrievalMode } });
+    const status = (phase, locked = false) => hintPage.onRecognitionStatus({ detail: { mode: "anchor", phase, locked, message: phase } });
+    const navigation = () => hintPage.data.bottomNavItems.find(item => item.key === "recognition");
+    map(); hint(true);
+    assert.equal(hintPage.data.recognitionHintActive, false, "events before the page is visible are ignored");
+    hintPage.onShow(); hints.respond(200, activities); await tick();
+    hintPage.onPanelChange({ detail: { id: "recognition" } });
+    assert.equal(hintPage.data.bottomPanelExpanded, false);
+    const originalNavigation = copy(hintPage.data.bottomNavItems);
+    hint(true);
+    assert.equal(hintPage.data.recognitionHintActive, true, "a hint can arrive before its scanning status");
+    assert.deepEqual(copy(hintPage.data.bottomNavItems), originalNavigation, "hints never change navbar icons or badges");
+    assert.equal(hintPage.data.bottomPanelExpanded, false, "a collapsed panel stays collapsed when hinted");
+    status("scanning");
+    assert.equal(hintPage.data.recognitionHintActive, true, "the following scanning status must retain the hint");
+    const writesBeforeRepeat = pageWrites;
+    hint(true); hint(false, "gps");
+    assert.equal(pageWrites, writesBeforeRepeat, "duplicate and other-mode hints do not call setData");
+    hintPage.onPanelChange({ detail: { id: "danmaku" } });
+    hintPage.onDanmakuActivityChange({ detail: { value: "1" } });
+    hintPage.onTextInput({ detail: { value: "unfinished comment" } });
+    hintPage.onKeyboardHeightChange({ detail: { height: 280 } });
+    const selectedActivity = hintPage.data.activeDanmaku.id;
+    const keyboardHides = hints.calls.keyboardHides;
+    hint(false); hint(true); status("reacquiring", true);
+    assert.equal(hintPage.data.recognitionHintActive, true);
+    assert.equal(navigation().badge, "ready", "shown content remains ready while another target is hinted");
+    assert.equal(hintPage.data.activeBottomPanel, "danmaku");
+    assert.equal(hintPage.data.bottomPanelExpanded, true);
+    assert.equal(hintPage.data.activeDanmaku.id, selectedActivity);
+    assert.equal(hintPage.data.textContent, "unfinished comment");
+    assert.equal(hintPage.data.keyboardHeight, 280);
+    assert.equal(hints.calls.keyboardHides, keyboardHides, "a hint cannot interrupt composing");
+    for (const phase of ["loading", "locked", "error", "idle"]) {
+      hint(true); status(phase, phase === "locked");
+      assert.equal(hintPage.data.recognitionHintActive, false, `${phase} clears the hint`);
+    }
+    hint(true); hintPage.onRescan();
+    assert.equal(hints.calls.retrieval.at(-1), "rescan");
+    assert.equal(hintPage.data.recognitionHintActive, false);
+    hint(true); map("anchor", false); hint(true);
+    assert.equal(hintPage.data.recognitionHintActive, false, "loading maps cannot accept hints");
+    assert.equal(navigation(), undefined);
+    map();
+    assert.equal(hintPage.data.recognitionHintActive, false, "loaded maps never restore a previous hint");
+    hint(true); map("gps"); hint(true);
+    assert.equal(hintPage.data.recognitionHintActive, false, "GPS mode ignores anchor hints");
+    assert.equal(navigation(), undefined);
+    map(); hint(true); hintPage.onHide();
+    assert.equal(hintPage.data.recognitionHintActive, false);
+    const hiddenWrites = pageWrites;
+    hint(true);
+    assert.equal(pageWrites, hiddenWrites, "late hidden-page hints are ignored");
+    hintPage.onShow(); hints.respond(200, activities); await tick();
+    assert.equal(hintPage.data.recognitionHintActive, false);
+    hint(true); hintPage.onUnload();
+    assert.equal(hintPage.data.recognitionHintActive, false);
+    const unloadedWrites = pageWrites;
+    hint(true);
+    assert.equal(pageWrites, unloadedWrites, "unloaded-page hints are ignored");
+    console.log("PASS recognition hints preserve panel selection/drafts and reset across status, map, rescan and page lifecycles");
+  }
+
   const app = launch();
   const page = app.page();
   page.data.location = { ...at };

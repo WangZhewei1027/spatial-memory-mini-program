@@ -22,6 +22,7 @@ interface ArPageMethods {
   onKeyboardHeightChange(event: DetailEvent): void;
   onComposerBlur(): void;
   onRescan(): void;
+  clearRecognitionHint(): void;
   startSensors(): void;
   stopSensors(): void;
   getLocation(): void;

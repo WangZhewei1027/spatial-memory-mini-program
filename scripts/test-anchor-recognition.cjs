@@ -39,7 +39,7 @@ function loadTree(mocks, globals = {}) {
 function fixture(overrides = {}) {
   let now = 1000, closed = 0, embedded = 0, loaded = 0, captures = 0, candidateCalls = 0;
   let gps = { latitude: 31, longitude: 121, accuracy: 10 };
-  const calls = [], statuses = [], progress = [], logs = [], diagnosticTimers = new Map();
+  const calls = [], statuses = [], progress = [], hints = [], logs = [], diagnosticTimers = new Map(), hintTimers = new Map();
   let diagnosticTimerId = 0;
   const clock = { Date: class extends Date { static now() { return now; } } };
   const diagnostics = load('components/xr-start/matching/diagnostics.js', { './config': config }, { ...clock,
@@ -61,12 +61,17 @@ function fixture(overrides = {}) {
     'utils/backend': api, 'lib/image-matcher/client': { ImageMatcher: Matcher }, 'lib/image-matcher/policy': policy,
     [`${matching}/reference`]: { async loadReferencePixels(url, current) { loaded++; return overrides.loadReference ? overrides.loadReference(url, current) : new ArrayBuffer(4); } },
   }, { Date: class extends Date { static now() { return now; } },
+    setTimeout(fn, delay) {
+      if (delay !== config.hintStaleMs) return setTimeout(fn, delay);
+      const timer = { fn, dueAt: now + delay }; hintTimers.set(timer, timer); return timer;
+    },
+    clearTimeout(timer) { if (!hintTimers.delete(timer)) clearTimeout(timer); },
     wx: { uploadFile() { throw Error('camera upload forbidden'); }, getLocation({ success, fail }) { if (overrides.locate) overrides.locate({ success, fail }); else success(gps); } } });
   const methods = loadModule(`${matching}/index`);
   const host = { ...methods, ...loadModule(`${matching}/state`).initialRecognitionState(), retrievalMode: 'anchor', _arReady: true, _cameraReady: true, _sessionActive: true,
     _modeEpoch: 0, _contentEpoch: 0, _nextRecognitionAt: 0, _matchPhase: 'idle', _allowedAssetIds: new Set(),
     _seenAssets: new Map(), nodeList: [], displayed: [],
-    setData() {}, triggerEvent(name, value) { (name === 'matchprogress' ? progress : statuses).push(value); },
+    setData() {}, triggerEvent(name, value) { (name === 'recognitionhint' ? hints : name === 'matchprogress' ? progress : statuses).push(value); },
     displayAssets(assets) { this.displayed.push(assets); }, _destroyNode() {}, fetchNearbyAssets() {}, fetchHugeAssets() {},
     // Asset-module boundary; its resource release is covered by test-ar-runtime.
     _clearRemoteAssets() { this._contentEpoch++; this._allowedAssetIds.clear(); this.nodeList = []; this._matchedAnchorId = null; },
@@ -76,7 +81,8 @@ function fixture(overrides = {}) {
   for (let i=0;i<pixels.length;i++) pixels[i] = Math.floor(i/4)%251;
   const frame = { getCameraBuffer(w,h) { captures++; assert.equal(w,224); assert.equal(h,224); return pixels.buffer; } };
   const sample = async () => { host.handleRecognitionFrame(frame); await new Promise(resolve => setTimeout(resolve, 5)); await settle(); };
-  return { host, api, calls, statuses, progress, logs, pixels, frame, sample, diagnosticTimers,
+  return { host, api, calls, statuses, progress, hints, logs, pixels, frame, sample, diagnosticTimers, hintTimers,
+    expireHints() { for (const [id, timer] of [...hintTimers]) if (timer.dueAt <= now) { hintTimers.delete(id); timer.fn(); } },
     heartbeat() { for (const [id, fn] of [...diagnosticTimers]) { diagnosticTimers.delete(id); fn(); } }, tick(ms=1000) { now += ms; }, now: () => now,
     move(meters, accuracy = 10) { gps = { latitude: 31 + meters / 6371000 * 180 / Math.PI, longitude: 121, accuracy }; host.currentGPS = { ...gps, sampledAt: now }; },
     counts: () => ({ closed, embedded, loaded, captures, candidateCalls }) };
@@ -898,5 +904,124 @@ test('a retired background inference cannot release a newer Worker request', asy
     assert.equal(f.host._matchFrameBusy, false); assert.equal(f.host._matchEvidence.id, 'b');
     assert.equal(f.host._matchPhase, 'reacquiring'); assert.equal(f.host.displayed.length, 1);
     f.host.pauseRetrieval();
+  }
+});
+
+test('recognition hints use raw scores and hysteresis without changing confirmation or sampling', async t => {
+  const best = score => ({ reference: { id: 'a' }, score });
+  assert.equal(policy.hintActive(false, best(.29), null, config), false);
+  assert.equal(policy.hintActive(false, best(.30), null, config), true);
+  assert.equal(policy.hintActive(true, best(.26), null, config), true);
+  assert.equal(policy.hintActive(true, best(.259), null, config), false);
+  assert.equal(policy.hintActive(true, best(.9), 'a', config), false);
+  assert.equal(policy.hintActive(true, null, null, config), false);
+  assert.equal(policy.hintActive(true, best(NaN), null, config), false);
+  const f = shownContent(); t.after(() => f.host.pauseRetrieval());
+  await f.host.recognizeAnchor();
+  const sampleScores = async (a, b) => {
+    f.seen.vector = [a, b, Math.sqrt(1 - a * a - b * b)]; f.tick(); await f.sample();
+    assert.equal(f.host._nextMatchFrameAt - f.now(), config.frameIntervalMs, 'a hint alone never speeds up inference');
+    assert.equal(f.host._matchEvidence.count, 0); assert.equal(f.host.displayed.length, 0);
+    assert.equal(f.contentCalls().length, 0, 'a hint alone does not prefetch content');
+  };
+  await sampleScores(.32, .31);
+  assert.equal(f.host._matchHintActive, true, 'low scores can hint even with an insufficient margin');
+  await sampleScores(.28, .27); assert.equal(f.host._matchHintActive, true);
+  await sampleScores(.25, .24); assert.equal(f.host._matchHintActive, false, 'raw scores release while the average still exceeds the hint threshold');
+  assert.ok(f.host._matchEvidence.scores.a > config.hintReleaseScore);
+  await sampleScores(.28, .27); assert.equal(f.host._matchHintActive, false, 'enter and exit have different thresholds');
+  await sampleScores(.31, .30); assert.equal(f.host._matchHintActive, true);
+  await sampleScores(.60, .59); assert.equal(f.host._matchHintActive, true, 'high but ambiguous scores still only hint');
+  assert.equal(JSON.stringify(f.hints), JSON.stringify([
+    { mode: 'anchor', active: true }, { mode: 'anchor', active: false }, { mode: 'anchor', active: true },
+  ]), 'only state changes emit an independent hint event');
+});
+
+test('recognition hints expire without camera frames and invalid results turn them off immediately', async t => {
+  const f = shownContent(); t.after(() => f.host.pauseRetrieval());
+  f.seen.vector = [.35, .1, Math.sqrt(1 - .35 ** 2 - .1 ** 2)];
+  await f.host.recognizeAnchor(); await f.sample();
+  const oldTimer = [...f.hintTimers.values()][0];
+  f.tick(); await f.sample();
+  assert.equal(f.hintTimers.size, 1); oldTimer.fn();
+  assert.equal(f.host._matchHintActive, true, 'a refreshed hint ignores its old timer in the same Worker');
+  f.tick(config.hintStaleMs - 1); f.expireHints(); assert.equal(f.host._matchHintActive, true);
+  f.tick(1); f.expireHints(); assert.equal(f.host._matchHintActive, false, 'time alone expires the hint');
+  assert.equal(f.hintTimers.size, 0); assert.equal(f.host._matchHintTimer, null);
+  await f.sample(); assert.equal(f.host._matchHintActive, true);
+  const sharp = f.pixels.slice(); f.pixels.fill(0); f.tick(); await f.sample();
+  assert.equal(f.host._matchHintActive, false); assert.equal(f.hintTimers.size, 0);
+  f.pixels.set(sharp); f.tick(); await f.sample(); assert.equal(f.host._matchHintActive, true);
+  const inference = deferred(); f.host._imageMatcher.embed = () => inference.promise;
+  f.tick(); await f.sample(); f.tick(config.maxResultAgeMs + 1);
+  inference.resolve({ vector: f.seen.vector, inferenceMs: config.maxResultAgeMs + 1 }); await settle();
+  assert.equal(f.host._matchHintActive, false, 'an expired result cannot refresh a still-active hint');
+  assert.equal(f.hintTimers.size, 0);
+});
+
+test('a blurred frame keeps a recognition hint briefly without extending its lifetime', async t => {
+  const f = shownContent(); t.after(() => f.host.pauseRetrieval());
+  f.seen.vector = [.35, .1, Math.sqrt(1 - .35 ** 2 - .1 ** 2)];
+  await f.host.recognizeAnchor(); await f.sample();
+  const timer = f.host._matchHintTimer, embedded = f.counts().embedded;
+  for (let i = 0; i < f.pixels.length; i++) f.pixels[i] = Math.floor(i / 4 / 224) % 251;
+  f.tick(); await f.sample();
+  assert.equal(f.counts().embedded, embedded); assert.equal(f.host._matchHintActive, true);
+  assert.equal(f.host._matchHintTimer, timer, 'skipped blur is not a fresh valid result');
+  f.tick(config.hintStaleMs - config.frameIntervalMs); f.expireHints();
+  assert.equal(f.host._matchHintActive, false); assert.equal(f.hintTimers.size, 0);
+});
+
+test('recognition hints end on confirmation and every scan cancellation path', async t => {
+  const content = deferred(), confirming = shownContent({ fetchAnchorContent: () => content.promise });
+  t.after(() => confirming.host.pauseRetrieval());
+  await confirming.host.recognizeAnchor(); await confirming.sample();
+  assert.equal(confirming.host._matchHintActive, true);
+  confirming.host._arReady = false; confirming.tick(); await confirming.sample();
+  assert.equal(confirming.host._matchPhase, 'loading'); assert.equal(confirming.host._matchHintActive, false);
+  assert.equal(confirming.hintTimers.size, 0); assert.deepEqual(confirming.hints.map(h => h.active), [true, false]);
+  content.resolve({ statusCode: 200, data: { anchor: { id: 'a' }, assets: [] } }); await settle();
+  assert.equal(confirming.host._matchPhase, 'tracking'); assert.equal(confirming.host._matchHintActive, false);
+  for (const action of ['rescan', 'pause', 'mode', 'exit', 'failure']) {
+    const f = shownContent(); t.after(() => f.host.pauseRetrieval());
+    f.seen.vector = [.35, .1, Math.sqrt(1 - .35 ** 2 - .1 ** 2)];
+    await f.host.recognizeAnchor(); await f.sample();
+    const timer = [...f.hintTimers.values()][0];
+    if (action === 'rescan') f.host.rescan();
+    else if (action === 'pause') f.host.pauseRetrieval();
+    else if (action === 'mode') f.host.setRetrievalMode('gps');
+    else if (action === 'failure') f.host._failFrameRecognition(Error('Worker failed'), f.host._modeEpoch);
+    else { f.host.pauseRetrieval(); f.host._disposed = true; }
+    await settle();
+    assert.equal(f.host._matchHintActive, false, action); assert.equal(f.hintTimers.size, 0, action);
+    assert.deepEqual(f.hints.map(h => h.active), [true, false]);
+    timer.fn(); assert.deepEqual(f.hints.map(h => h.active), [true, false], 'cancelled timers cannot revive a hint');
+  }
+});
+
+test('background recognition hints suppress the raw shown target and ignore retired timers and results', async t => {
+  for (const late of ['resolve', 'reject']) {
+    const f = shownContent(); t.after(() => f.host.pauseRetrieval());
+    await f.lock(); f.turn(120); f.attend(config.awayDelayMs + 200); await settle();
+    await f.sample(); assert.equal(f.host._matchHintActive, false, 'even a strong current-target result has no background hint');
+    f.seen.vector = [.1, .35, Math.sqrt(1 - .1 ** 2 - .35 ** 2)]; f.tick(); await f.sample();
+    assert.equal(f.host._matchHintActive, true, 'the raw new target hints while the smoothed old target still leads');
+    assert.equal(f.host._matchEvidence.scores.a > f.host._matchEvidence.scores.b, true);
+    f.seen.vector = [.35, .34, Math.sqrt(1 - .35 ** 2 - .34 ** 2)]; f.tick(); await f.sample();
+    assert.equal(f.host._matchHintActive, false, 'a raw shown-target lead suppresses hints without a formal match');
+    f.seen.vector = [.1, .35, Math.sqrt(1 - .1 ** 2 - .35 ** 2)]; f.tick(); await f.sample();
+    const oldTimer = [...f.hintTimers.values()][0], oldInference = deferred();
+    f.host._imageMatcher.embed = () => oldInference.promise; f.tick(); await f.sample();
+    f.turn(0); f.attend(config.returnDelayMs + 400); await settle();
+    assert.equal(f.host._matchHintActive, false); assert.equal(f.hintTimers.size, 0);
+    f.turn(120); f.attend(config.awayDelayMs + 200); await settle(); await f.sample();
+    assert.equal(f.host._matchHintActive, true); const newTimer = f.host._matchHintTimer, events = f.hints.length;
+    oldTimer.fn();
+    if (late === 'resolve') oldInference.resolve({ vector: [1, 0, 0], inferenceMs: 100 });
+    else oldInference.reject(Error('retired inference failed'));
+    await settle();
+    assert.equal(f.host._matchHintActive, true); assert.equal(f.host._matchHintTimer, newTimer); assert.equal(f.hints.length, events);
+    f.host._failFrameRecognition(Error('background Worker failed'), f.host._modeEpoch);
+    assert.equal(f.host._matchPhase, 'locked'); assert.equal(f.host._matchHintActive, false); assert.equal(f.hintTimers.size, 0);
   }
 });

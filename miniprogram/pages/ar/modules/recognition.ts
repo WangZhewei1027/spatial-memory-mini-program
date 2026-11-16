@@ -1,12 +1,28 @@
 import type { ArPageContext, DetailEvent } from "./context";
 import type { createUiRegistry } from "../../../utils/ar-ui/registry";
-export const recognitionData = { recognitionStatus: "等待 AR 相机就绪", matchProgress: "", recognitionLocked: false, recognitionDiagnostic: "", recognitionPhase: "idle" };
+export const recognitionData = { recognitionStatus: "等待 AR 相机就绪", matchProgress: "", recognitionLocked: false, recognitionDiagnostic: "", recognitionPhase: "idle", recognitionHintActive: false };
 export const recognitionMethods = {
   onRecognitionStatus(event: DetailEvent) {
     if (event.detail.mode === this.data.retrievalMode) {
-      this.setData({ recognitionStatus: event.detail.message, recognitionLocked: event.detail.locked === true, recognitionDiagnostic: event.detail.diagnostic || "", recognitionPhase: event.detail.phase || "idle" });
+      const phase = event.detail.phase || "idle";
+      this.setData({ recognitionStatus: event.detail.message, recognitionLocked: event.detail.locked === true, recognitionDiagnostic: event.detail.diagnostic || "", recognitionPhase: phase,
+        ...(!["scanning", "reacquiring"].includes(phase) ? { recognitionHintActive: false } : {}) });
       this.syncUI();
     }
+  },
+
+  onRecognitionHint(event: DetailEvent) {
+    if ((this as any)._unloaded || (this as any)._pageVisible !== true || !this.data.mapConfigReady ||
+        this.data.retrievalMode !== "anchor" || event.detail.mode !== "anchor") return;
+    // Hints may precede the matching status event; the producer owns the phase gate.
+    const active = event.detail.active === true;
+    if (active === this.data.recognitionHintActive) return;
+    this.setData({ recognitionHintActive: active });
+  },
+
+  clearRecognitionHint() {
+    if (!this.data.recognitionHintActive) return;
+    this.setData({ recognitionHintActive: false });
   },
 
   onMatchProgress(event: DetailEvent) {
@@ -18,6 +34,7 @@ export const recognitionMethods = {
 
   onRescan() {
     if (this.data.retrievalMode !== "anchor") return;
+    this.clearRecognitionHint();
     this.selectComponent("#main-frame")?.rescan();
   },
 } satisfies ThisType<ArPageContext>;

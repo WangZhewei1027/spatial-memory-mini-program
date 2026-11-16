@@ -1,6 +1,6 @@
 <ar-shell items="{{bottomNavItems}}" active="{{activeBottomPanel}}" expanded="{{bottomPanelExpanded}}" keyboard-height="{{keyboardHeight}}" bind:panelchange="onPanelChange">
   <xr-start slot="scene" disable-scroll id="main-frame" width="{{renderWidth}}" height="{{renderHeight}}" style="width:{{width}}px;height:{{height}}px;"
-    bind:mapconfigload="onMapConfigLoad" bind:activitiesload="onActivitiesLoad" bind:recognitionstatus="onRecognitionStatus"
+    bind:mapconfigload="onMapConfigLoad" bind:activitiesload="onActivitiesLoad" bind:recognitionstatus="onRecognitionStatus" bind:recognitionhint="onRecognitionHint"
     bind:matchprogress="onMatchProgress" bind:renderstatus="onRenderStatus" bind:asseterror="onAssetError" bind:renderlayers="onRenderLayers" />
 
   <ar-debug-bar slot="top" items="{{debugItems}}" />
@@ -8,7 +8,7 @@
   <image slot="overlay" wx:if="{{footerEnabled}}" class="ar-top-logo" src="/assets/DHL-Outlined.png" mode="aspectFit" />
   <ar-shop-overlays slot="overlay" navigation="{{shopNavigation}}" reward="{{shopReward}}" bind:moduleaction="onModuleAction" />
 
-  <ar-recognition-panel slot="bottom" active="{{bottomPanelExpanded && activeBottomPanel === 'recognition'}}" status="{{recognitionStatus}}" bind:moduleaction="onModuleAction" />
+  <ar-recognition-panel slot="bottom" active="{{bottomPanelExpanded && activeBottomPanel === 'recognition'}}" status="{{recognitionStatus}}" hint-active="{{recognitionHintActive}}" bind:moduleaction="onModuleAction" />
   <ar-danmaku-panel slot="bottom" active="{{bottomPanelExpanded && activeBottomPanel === 'danmaku'}}"
     activity="{{activeDanmaku}}" activities="{{danmakuActivities}}" selected="{{selectedDanmakuIdx}}" submitting="{{isSubmitting}}"
     text="{{textContent}}" limit="{{danmakuLimit}}" loading="{{activitiesLoading}}" error="{{activitiesError}}"

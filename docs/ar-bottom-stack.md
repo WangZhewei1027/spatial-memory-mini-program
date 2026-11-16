@@ -27,6 +27,8 @@
 
 注册表输出 `bottomNavItems`、`activeBottomPanel`、`bottomPanelExpanded`。未手动选择时默认第一个可用入口；手动选择仍可用时保留，否则回到第一个可用入口。没有可用业务时不绘制底栏，顶部诊断仍可显示。
 
+图像识别的低阈值线索只在识别面板内沿显示呼吸边框，并提示“画面中可能有目标”。navbar 保持原样，图标和标签不闪烁；提示不会改变当前入口或展开状态，面板不显示时不绘制边框。具体相似度门槛与失效规则见[识别流程](anchor-recognition.md#调度与释放)。
+
 shell 的 `panelchange` 经 `onPanelChange()` 转给注册表 `select()`：切换入口时展开对应面板，再次点击当前入口可收起或展开。标签切换不会关闭业务模块或重新挂载 `xr-start`。留言草稿和所选活动继续保留；打卡组件在启用期间保持挂载，首次打开后保留 `visible`，`panelCollapsed` 只隐藏详情列表。`onActivate` 在重新打开打卡面板时刷新服务端进度。
 
 打卡业务组件通过 `shop` 模块发布 `target`、`compass`、`reward` 动作：目标转给 XR，罗盘与奖励状态转给独立的 `ar-shop-overlays`。覆层再发送 `closeReward`、`saveReward`，由注册动作调用打卡组件。覆层不占底部面板高度，切换标签不丢失当前导航、奖励或在途请求。

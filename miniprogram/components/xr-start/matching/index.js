@@ -2,7 +2,7 @@ const config = require("./config");
 const { CONFIG, fetchAnchorCandidates, fetchAnchorContent } = require("../../../utils/backend");
 const { loadReferencePixels } = require("./reference");
 const { ImageMatcher } = require("../../../lib/image-matcher/client");
-const { track, intervalFor, inspectPixels, blurState, candidateMovement, contentView, attention } = require("../../../lib/image-matcher/policy");
+const { track, intervalFor, inspectPixels, blurState, candidateMovement, contentView, attention, hintActive } = require("../../../lib/image-matcher/policy");
 const { RGBA_BYTES, INPUT_EDGE } = require("../../../lib/image-matcher/spec");
 const matchLog = require("./log");
 const diagnostics = require("./diagnostics");
@@ -45,6 +45,7 @@ module.exports = {
     if (!canTransition(this._matchPhase, next))
       this._matchLog('非法识别状态切换', { from: this._matchPhase, to: next }, 'error');
     this._matchPhase = next;
+    if (!SCANNING_PHASES.includes(next)) this._clearRecognitionHint();
     // Keep the last scores visible after a confirmed match; errors replace them.
     if (next === PHASES.ERROR) this._matchProgress('');
   },
@@ -66,11 +67,37 @@ module.exports = {
     this._lastMatchProgress = text;
     this.triggerEvent('matchprogress', { mode: this.retrievalMode, text });
   },
+  _setRecognitionHint(active) {
+    if (this._matchHintActive === active) return;
+    this._matchHintActive = active;
+    if (!this._disposed) this.triggerEvent('recognitionhint', { mode: this.retrievalMode, active });
+  },
+  _clearRecognitionHint() {
+    clearTimeout(this._matchHintTimer);
+    this._matchHintTimer = null; this._matchHintToken = null;
+    this._setRecognitionHint(false);
+  },
+  _refreshRecognitionHint(best, matcher, epoch) {
+    if (!matcher || this._imageMatcher !== matcher || !this._recognitionCurrent(epoch) || !SCANNING_PHASES.includes(this._matchPhase)) return;
+    const shownId = this._matchPhase === PHASES.REACQUIRING ? this._matchedAnchorId : null;
+    const active = hintActive(this._matchHintActive, best, shownId, config);
+    if (!active) { this._clearRecognitionHint(); return; }
+    clearTimeout(this._matchHintTimer);
+    const token = this._matchHintToken = {};
+    this._setRecognitionHint(true);
+    // Expire even if camera frames stop. A refreshed hint and a restarted Worker
+    // both invalidate this callback, independently of the scan's mode epoch.
+    this._matchHintTimer = setTimeout(() => {
+      if (this._matchHintToken !== token || this._imageMatcher !== matcher || !this._recognitionCurrent(epoch) ||
+          !SCANNING_PHASES.includes(this._matchPhase)) return;
+      this._clearRecognitionHint();
+    }, config.hintStaleMs);
+  },
   _recognitionCurrent(epoch) {
     return this._modeEpoch === epoch && !this._disposed && !this._retrievalPaused &&
       this.retrievalMode === 'anchor' && this._sessionActive && this._cameraReady;
   },
-  _stopMatcher() { this._imageMatcher?.close(); this._imageMatcher = null; },
+  _stopMatcher() { this._clearRecognitionHint(); this._imageMatcher?.close(); this._imageMatcher = null; },
   _cancelRetrieval(reason = 'cancel') {
     this._stopMatchDiagnostics(reason);
     this._modeEpoch++;
@@ -272,6 +299,7 @@ module.exports = {
       if (d) d.captured++;
       if (!stats.usable) {
         if (d) d.invalidPixels++;
+        this._clearRecognitionHint();
         this._matchEvidence = null; this._matchFrameBusy = false;
         this._recordMatchDecision({ reason: 'invalid_pixels', pixelMin: +stats.min.toFixed(1),
           pixelMax: +stats.max.toFixed(1), pixelStddev: +stats.stddev.toFixed(1), captureMs });
@@ -314,12 +342,14 @@ module.exports = {
       this._nextMatchFrameAt = capturedAt + intervalFor(elapsed, config);
       if (elapsed > config.maxResultAgeMs) {
         if (d) d.staleResults++;
+        this._clearRecognitionHint();
         this._matchEvidence = null;
         this._recordMatchDecision({ reason: 'stale_result', frame: this._matchFrameCount, elapsedMs: elapsed, inferenceMs });
         this._matchProgress(`${clockTime(now)} #${this._matchFrameCount} 结果过期（${elapsed}ms）已丢弃 · 等待下一帧`);
         return;
       }
       const result = track(this._matchEvidence, vector, this._matchReferences, capturedAt, config);
+      this._refreshRecognitionHint(result.frame.best, matcher, epoch);
       // While its content is shown, the same target leading again changes nothing.
       const shown = this._matchPhase === PHASES.REACQUIRING && result.match?.reference.id === this._matchedAnchorId;
       const match = shown ? null : result.match;

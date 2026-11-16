@@ -39,6 +39,13 @@ function evaluateMatch(vector, references, config) {
   const reason = decide(ranking, config);
   return { ...ranking, reason, match: reason === 'eligible' ? ranking.best : null };
 }
+// The raw first-place score can guide the viewer before confirmation is possible.
+// This signal has its own hysteresis and never contributes matching evidence.
+function hintActive(active, best, shownId, config) {
+  return !!best && Number.isFinite(best.score) &&
+    (shownId == null || best.reference.id !== shownId) &&
+    best.score >= (active ? config.hintReleaseScore : config.hintScore);
+}
 // Temporal evidence across frames, with two ways to confirm.
 // Slow path: each target keeps a time-weighted moving average of its per-frame
 // (best-image) score. Threshold and margin are applied to the averages; a step is
@@ -173,5 +180,5 @@ function attention(state, view, now, config) {
   const flipped = since != null && now - since >= (away ? config.returnDelayMs : config.awayDelayMs);
   return { away: flipped ? !away : away, since: flipped ? null : since, lastAt: now, flipped };
 }
-module.exports = { similarity, referenceScore, evaluateMatch, track, intervalFor, inspectPixels, blurState, candidateMovement,
+module.exports = { similarity, referenceScore, evaluateMatch, hintActive, track, intervalFor, inspectPixels, blurState, candidateMovement,
   contentView, attention };

@@ -32,6 +32,10 @@ module.exports = {
   // Trial threshold for validating matched content placement; field calibration is pending.
   minimumScore: 0.4,
   minimumMargin: 0.08,
+  // A visual hint only: raw first place may be a target before a match is eligible.
+  hintScore: 0.30,
+  hintReleaseScore: 0.26,
+  hintStaleMs: 4500,
   // Time constant of the per-target score average (about half weight on a new frame at 1 fps).
   scoreSmoothingMs: 1500,
   // A frame score this far above the target's average is adopted directly (camera turned onto it).

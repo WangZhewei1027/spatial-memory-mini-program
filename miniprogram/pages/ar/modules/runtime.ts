@@ -17,7 +17,7 @@ export const runtimeMethods = {
   },
   onMapConfigLoad(e: DetailEvent) {
     const { ready, retrievalMode, footerEnabled } = e.detail;
-    this.setData({ mapConfigReady: ready === true, footerEnabled: ready === true && footerEnabled === true,
+    this.setData({ mapConfigReady: ready === true, footerEnabled: ready === true && footerEnabled === true, recognitionHintActive: false,
       ...(ready === true ? { retrievalMode, recognitionLocked: false, recognitionStatus: "等待 AR 相机就绪", matchProgress: "", recognitionDiagnostic: "", recognitionPhase: "idle" } : {}) });
     this.refreshCanSubmit();
     this.syncUI();
