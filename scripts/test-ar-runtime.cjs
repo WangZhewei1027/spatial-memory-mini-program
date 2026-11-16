@@ -22,7 +22,7 @@ const wx = {
     readFile({ filePath, success, fail }) {
       try {
         const data = fs.readFileSync(
-          /^\/?assets\//.test(filePath) ? path.join(root, filePath) : filePath,
+          /^\/?(?:assets|packages)\//.test(filePath) ? path.join(root, filePath) : filePath,
         );
         success({
           data: data.buffer.slice(
@@ -76,6 +76,7 @@ const context = vm.createContext({
   },
 });
 const modules = new Map();
+let importPackage = async (file) => load(file);
 function load(file) {
   if (file.endsWith("/backend-development-local")) {
     return { apiBaseUrl: "http://192.168.20.5:3000" };
@@ -88,10 +89,12 @@ function load(file) {
   let code = fs.readFileSync(file, "utf8");
   if (file.endsWith(".ts"))
     code = transformSync(code, { loader: "ts", format: "cjs" }).code;
+  const localRequire = (name) => load(path.resolve(path.dirname(file), name));
+  localRequire.async = (name) => importPackage(path.resolve(path.dirname(file), name));
   vm.runInContext(`(function(require,module,exports){${code}\n})`, context, {
     filename: file,
   })(
-    (name) => load(path.resolve(path.dirname(file), name)),
+    localRequire,
     module,
     module.exports,
   );
@@ -164,7 +167,8 @@ async function main() {
     },
   };
   const resources = lib("resources");
-  const gltf = await resources.loadGLTF(canvas, "/assets/headphone.glb");
+  const { headphonePath } = load(path.join(root, "packages/audio-assets/ready.js"));
+  const gltf = await resources.loadGLTF(canvas, headphonePath);
   let meshes = 0,
     maps = 0;
   gltf.scene.traverse((node) => {
@@ -185,6 +189,62 @@ async function main() {
   console.log(
     "PASS actual business GLB: geometry + embedded image via native resource adapter, no browser globals/temp leaks",
   );
+
+  for (const scenario of ["ready", "failed", "cancelled"]) {
+    let finishImport, failImport, current = true, imports = 0, acquisitions = 0, audioCreated = 0, entry;
+    const packageReady = new Promise((resolve, reject) => { finishImport = resolve; failImport = reject; });
+    importPackage = async (file) => {
+      imports++;
+      assert.equal(file, path.join(root, "packages/audio-assets/ready.js"));
+      await packageReady;
+      return load(file);
+    };
+    const audioMethods = load(path.join(root, "components/xr-start/assets/audio.js"))({ maxDistanceMeters: 5 });
+    assert.equal(imports, 0, "loading the audio module must not download its resource package");
+    wx.downloadFile = ({ success }) => {
+      virtualFiles.set("/tmp/audio-test.m4a", new ArrayBuffer(1));
+      success({ statusCode: 200, tempFilePath: "/tmp/audio-test.m4a" });
+    };
+    wx.createInnerAudioContext = () => {
+      audioCreated++;
+      return { onError() {}, play() {}, pause() {}, stop() {}, destroy() {} };
+    };
+    const cache = new resources.ModelCache(canvas);
+    const host = {
+      ...audioMethods,
+      _modelCache: { acquire(url) { acquisitions++; return cache.acquire(url); } },
+      _isAssetPlacementCurrent: () => current,
+      _calcForwardPos: () => ({ x: 0, y: 0, z: -1 }),
+      shadowRoot: new THREE.Group(),
+      _registerNode(id, node, billboard, options) { return entry = { node, ...options }; },
+    };
+    const placement = host._placeAudioAsset({ id: "audio", file_url: "https://example.com/audio.webm" });
+    await Promise.resolve();
+    assert.equal(imports, 1);
+    assert.equal(acquisitions, 0, "do not read the model until its package has downloaded");
+    assert.equal(audioCreated, 0);
+    if (scenario === "cancelled") current = false;
+    if (scenario === "failed") failImport(new Error("package download failed"));
+    else finishImport();
+    await placement;
+    if (scenario === "cancelled") {
+      assert.equal(entry, undefined, "leaving during package loading must not place or play audio");
+      assert.equal(acquisitions, 0);
+      assert.equal(audioCreated, 0);
+    } else {
+      assert.equal(audioCreated, 1, "package failure retains audio playback with the existing marker fallback");
+      assert.equal(acquisitions, scenario === "ready" ? 1 : 0);
+      if (scenario === "failed") assert.equal(entry.node.children[0].geometry.type, "BoxGeometry");
+      else assert.equal([...cache.items.values()][0].refs, 1);
+      entry.dispose();
+      resources.disposeTree(entry.node);
+      if (scenario === "ready") assert.equal([...cache.items.values()][0].refs, 0);
+    }
+    cache.dispose();
+    assert.equal(virtualFiles.size, 0, "audio temp files are released on exit and cancellation");
+  }
+  importPackage = async (file) => load(file);
+  console.log("PASS audio asset package: lazy load, actual model, download fallback and cancellation cleanup");
 
   const { ARRuntime } = lib("ar-runtime");
   {

@@ -13,14 +13,15 @@ const { similarity: cosine } = require('../miniprogram/lib/image-matcher/policy'
 const { createEngine, normalize } = require('../miniprogram/workers/image-matcher/engine');
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const hash = data => crypto.createHash('sha256').update(data).digest('hex');
-const model = Buffer.concat(spec.MODEL_PATHS.map(file => fs.readFileSync(path.join(root, file))));
+const modelParts = spec.MODEL_PATHS.map(file => fs.readFileSync(path.join(root, file)));
+const model = Buffer.concat(modelParts);
 const wasm = zlib.brotliDecompressSync(fs.readFileSync(path.join(root, spec.WASM_PATH)));
 
 test('bundled production model and scalar WASM are pinned and each subpackage fits', () => {
   assert.equal(info.simd,false); assert.equal(info.threads,1);
   assert.equal(hash(model),info.modelSha256);assert.equal(hash(wasm),info.wasmSha256);
-  assert.ok(info.brotliBytes < 2*1024*1024-4096);
-  for(const file of spec.MODEL_PATHS)assert.ok(fs.statSync(path.join(root,file)).size<2*1024*1024-4096);
+  assert.ok(info.brotliBytes < 1.5*1024*1024-4096);
+  for(const file of spec.MODEL_PATHS)assert.ok(fs.statSync(path.join(root,file)).size<1.5*1024*1024-4096);
   assert.ok(!/new Function\(|new_\(Function/.test(fs.readFileSync(path.join(root,'workers/image-matcher/vendor/tflite.js'),'utf8')));
 });
 test('client package loads, app.json subpackages and spec paths describe the same files', () => {
@@ -32,9 +33,26 @@ test('client package loads, app.json subpackages and spec paths describe the sam
   for(const pkg of expected)assert.ok(roots.includes(pkg),`${pkg} must be a subpackage`);
   assert.equal(spec.RGBA_BYTES,info.input[1]*info.input[2]*4);assert.equal(spec.DIMENSIONS,info.output);
 });
+test('production Worker codecs support UTF without legacy encoding tables or native text globals', () => {
+  const code = fs.readFileSync(path.join(root, 'workers/image-matcher/vendor/text-codec.js'), 'utf8');
+  assert.ok(Buffer.byteLength(code) < 32 * 1024, 'unused legacy encoding tables must stay out of the Worker');
+  const context = { module: { exports: {} }, Uint8Array, ArrayBuffer };
+  vm.runInNewContext(code, context);
+  const { TextDecoder: Decoder, TextEncoder: Encoder } = context.module.exports;
+  const value = '中文与耳机 🎧';
+  const bytes = new Encoder().encode(value);
+  assert.deepEqual([...bytes], [...new TextEncoder().encode(value)]);
+  assert.equal(new Decoder('utf-8').decode(bytes), value);
+  const stream = new Decoder('utf-8');
+  assert.equal(stream.decode(bytes.slice(0, 2), { stream: true }) + stream.decode(bytes.slice(2)), value);
+  const utf16 = Buffer.from(value, 'utf16le');
+  assert.equal(new Decoder('utf-16le').decode(utf16), value);
+  assert.equal(new Decoder('utf-16be').decode(Buffer.from(utf16).swap16()), value);
+  assert.throws(() => new Decoder('utf-8', { fatal: true }).decode(Uint8Array.of(0xff)));
+});
 test('actual adapted scalar interpreter matches upstream inference and distinguishes images', async () => {
   await assert.rejects(createEngine({wasm:WebAssembly,wasmPath:wasm,modelParts:[model]}),e=>e.code==='INVALID_INPUT');
-  const engine=await createEngine({wasm:WebAssembly,wasmPath:wasm,modelParts:[model],edge:spec.INPUT_EDGE,dimensions:spec.DIMENSIONS});
+  const engine=await createEngine({wasm:WebAssembly,wasmPath:wasm,modelParts,edge:spec.INPUT_EDGE,dimensions:spec.DIMENSIONS});
   const pkg=path.dirname(require.resolve('@tensorflow/tfjs-tflite/package.json'));
   const upstream=await require(path.join(pkg,'wasm/tflite_web_api_cc.js'))({wasmBinary:fs.readFileSync(path.join(pkg,'wasm/tflite_web_api_cc.wasm'))});
   const pointer=upstream._malloc(model.length);upstream.HEAPU8.set(model,pointer);
@@ -64,7 +82,7 @@ function clientFixture({ delayPackage = false }={}) {
   const timers=new Map(),sent=[];let timerId=0;
   const worker={onMessage(fn){onMessage=fn;},onProcessKilled(fn){onKilled=fn;},postMessage(msg){sent.push(msg);if(msg.type==='init')queueMicrotask(()=>onMessage({id:msg.id,ok:true}));},terminate(){terminate++;}};
   const api={createWorker(){created++;return worker;},preDownloadSubpackage(o){if(delayPackage)finishPackage=o.success;else o.success();},getFileSystemManager:()=>({readFile(o){o.success({data:new ArrayBuffer(3)});}})};
-  const deps={'./spec':{...spec,MODEL_BYTES:6},'./errors':errors};
+  const deps={'./spec':{...spec,MODEL_BYTES:3*spec.MODEL_PATHS.length},'./errors':errors};
   const requireMock=name=>{assert.ok(name in deps,`unexpected dependency: ${name}`);return deps[name];};requireMock.async=async()=>true;
   const module={exports:{}};
   vm.runInNewContext(fs.readFileSync(path.join(root,'lib/image-matcher/client.js'),'utf8'),{module,require:requireMock,Float32Array,ArrayBuffer,Error,

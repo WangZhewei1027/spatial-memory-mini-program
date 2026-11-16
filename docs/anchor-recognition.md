@@ -9,7 +9,8 @@
 - 模型沿用实验中固定的 MediaPipe MobileNet V3 Small float32/1，输出 1024 维 L2 归一化特征。**生产运行器是 CPU TFLite Worker，实验页仍保留 MediaPipe Tasks Vision SDK 作基线。**微信 Worker 没有 Canvas/wx API，无法原样搬入依赖 WebGL 输入的浏览器 SDK，因此直接执行同一模型并核对特征一致性。
 - 固定 `@tensorflow/tfjs-tflite@0.0.1-alpha.10` 的无 SIMD、单线程解释器；只打包 CPU 运行器，不引入 TensorFlow.js 张量框架。构建适配把 Emscripten 动态函数生成改成闭包，并保留已验证的 WASM `memory.copy` 优化。模型权重、网络结构不变。
 - 模型元数据为 224×224 RGB、mean=0、std=255，即 `RGB / 255`；不能套用其他 MobileNet 常见的 [-1,1] 归一化。参考图和相机都缩放整张图片至 224×224；透明参考图铺白。参考图短边至少 224 像素。
-- WASM、模型两段和 Worker 均从小程序代码分包载入，无本机模型服务器、Google 下载域名或新增后端接口依赖。模型与运行器哈希、输入输出形状和分包路径由构建脚本写入 `lib/image-matcher/build-info.js`；每包小于 2 MiB。
+- WASM、模型三段和 Worker 均从小程序代码分包载入，无本机模型服务器、Google 下载域名或新增后端接口依赖。模型与运行器哈希、输入输出形状和分包路径由构建脚本写入 `lib/image-matcher/build-info.js`；每包小于 1.5 MiB，三段按顺序拼接后的模型哈希不变。
+- Worker 的 `text-encoding` 保留 TFLite 使用的 UTF-8、UTF-16LE/BE 编解码，构建时省略无关的传统字符集索引表。该裁剪是上游支持的用法，见 [text-encoding 编码说明](https://github.com/inexorabletash/text-encoding#encodings)；不改变模型输入和推理数值。
 
 ## 代码结构
 

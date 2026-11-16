@@ -2,6 +2,8 @@
 const fs = require("node:fs");
 const path = require("node:path");
 const readJSON = file => JSON.parse(fs.readFileSync(file, "utf8"));
+// Conservative source budget; DevTools still verifies the compiled package.
+const PACKAGE_SOURCE_BUDGET = 1.5 * 1024 * 1024;
 const isArchivePath = value => /(^|\/)(labs|ignore)(\/|$)/.test(value);
 const within = (parent, child) => {
   const relative = path.relative(parent, child);
@@ -42,6 +44,14 @@ function uploadProblems(root) {
     if (isArchivePath(relative)) problems.push(`实验或临时文件应移到项目根目录 ignore/：${relative}`);
     else if (/\.(js|ts|json|wxml|wxss|wxs)$/.test(relative) && /(^|[^\w-])(?:labs|ignore)\//.test(fs.readFileSync(full, "utf8"))) problems.push(`${relative} 仍引用实验或临时目录`);
   });
+  const sizes = packageSizes(root);
+  for (const [name, bytes] of Object.entries(sizes)) {
+    if (bytes >= PACKAGE_SOURCE_BUDGET) problems.push(`${name} 包源文件 ${(bytes / 1024 / 1024).toFixed(2)} MB，必须小于 1.5 MB；请拆分按需资源并在开发者工具复核实际包体积`);
+  }
+  // DevTools 2.02.2609250's quality scanner groups Worker files into main.
+  if (app.workers?.isSubpackage && sizes.main + sizes[workerPath] >= PACKAGE_SOURCE_BUDGET) {
+    problems.push(`开发者工具兼容统计（main + ${workerPath}）必须小于 1.5 MB`);
+  }
   return problems;
 }
 

@@ -16,7 +16,13 @@ module.exports = (XR_CONFIG) => ({
     }
     let handle, instance;
     try {
-      handle = await this._modelCache.acquire("/assets/headphone.glb");
+      // Keep the built-in model out of the startup package; load it only for audio.
+      const { headphonePath } = await require.async("../../../packages/audio-assets/ready.js");
+      if (!this._isAssetPlacementCurrent(asset)) {
+        if (path !== url) removeFile(path);
+        return;
+      }
+      handle = await this._modelCache.acquire(headphonePath);
       instance = instantiateModel(handle, 0.3, asset.config);
     } catch (error) {
       if (handle) {

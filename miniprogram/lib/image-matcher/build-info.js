@@ -21,6 +21,7 @@ module.exports = {
   "wasmPath": "packages/image-match-runtime/inference.wasm.br",
   "modelPaths": [
     "packages/image-match-model-a/model.bin",
-    "packages/image-match-model-b/model.bin"
+    "packages/image-match-model-b/model.bin",
+    "packages/image-match-model-c/model.bin"
   ]
 };

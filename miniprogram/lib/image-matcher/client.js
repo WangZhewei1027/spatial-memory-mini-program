@@ -7,6 +7,7 @@ const loadPackages = () => Promise.all([
   require.async('../../packages/image-match-runtime/ready.js'),
   require.async('../../packages/image-match-model-a/ready.js'),
   require.async('../../packages/image-match-model-b/ready.js'),
+  require.async('../../packages/image-match-model-c/ready.js'),
 ]);
 const INIT_TIMEOUT_MS = 30000;
 const EMBED_TIMEOUT_MS = 10000;

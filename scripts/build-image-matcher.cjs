@@ -65,7 +65,13 @@ async function main() {
     ${loader}
     return module.exports;
   };`, resolveDir: root }, outfile: path.join(vendor, 'tflite.js'), minify: true, target: 'es2020', format: 'cjs', legalComments: 'eof' });
-  esbuild.buildSync({ entryPoints: [require.resolve('text-encoding')], bundle: true, outfile: path.join(vendor, 'text-codec.js'), minify: true, target: 'es2020', format: 'cjs', legalComments: 'eof' });
+  // TFLite uses UTF-8 / UTF-16 only. The upstream library explicitly allows
+  // omitting the large legacy-encoding indexes for these codecs.
+  await esbuild.build({ entryPoints: [require.resolve('text-encoding')], bundle: true, outfile: path.join(vendor, 'text-codec.js'), minify: true, target: 'es2020', format: 'cjs', legalComments: 'eof',
+    plugins: [{ name: 'utf-codecs-only', setup(build) {
+      build.onLoad({ filter: /[/\\]encoding-indexes\.js$/ }, () => ({ contents: 'module.exports = { "encoding-indexes": {} };', loader: 'js' }));
+    } }],
+  });
   const upstream = fs.readFileSync(path.join(pkg, 'wasm/tflite_web_api_cc.wasm'));
   if (hash(upstream) !== 'f1eb42f96ae91e5ef34e2f833f011373ca1c40fdc9d4062ec21eb07b886ea54f') throw new Error('Pinned TFLite WASM changed');
   const wasm = await useWasmMemoryCopy(upstream, 'X');
@@ -74,10 +80,14 @@ async function main() {
   if (!fs.existsSync(modelPath)) { const response = await fetch(modelURL); if (!response.ok) throw new Error('Model download failed'); fs.mkdirSync(path.dirname(modelPath), { recursive: true }); fs.writeFileSync(modelPath, Buffer.from(await response.arrayBuffer())); }
   const model = fs.readFileSync(modelPath);
   if (hash(model) !== modelHash) throw new Error('MediaPipe model hash mismatch');
+  // DevTools' 1.5 MiB quality rule also checks ordinary subpackages.
+  const chunkSize = Math.ceil(model.length / 3);
   const packages = [ ['image-match-runtime', 'inference.wasm.br', brotli],
-    ['image-match-model-a', 'model.bin', model.subarray(0, 2058835)], ['image-match-model-b', 'model.bin', model.subarray(2058835)] ];
+    ...['a', 'b', 'c'].map((suffix, index) => [
+      `image-match-model-${suffix}`, 'model.bin', model.subarray(index * chunkSize, (index + 1) * chunkSize),
+    ]) ];
   for (const [name, filename, data] of packages) {
-    if (data.length > 2*1024*1024-4096) throw new Error(name + ' exceeds package budget');
+    if (data.length > 1.5*1024*1024-4096) throw new Error(name + ' exceeds package budget');
     const dir = path.join(root, 'miniprogram/packages', name); fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, filename), data);
     fs.writeFileSync(path.join(dir, 'index.js'), 'Page({});\n');

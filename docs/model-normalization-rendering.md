@@ -117,7 +117,7 @@ const configured = Number(config.scale_multiplier),
 
 关键逻辑：
 
-- `handle = await this._modelCache.acquire("/assets/headphone.glb")`（与普通模型共用 `ModelCache`）
+- 先通过 `require.async` 加载 `packages/audio-assets/ready.js`，再用其 `headphonePath`（`/packages/audio-assets/headphone.glb`）取得 `ModelCache` handle；与普通模型共用缓存，下载分包后再次检查当前内容代次。
 - `instantiateModel(handle, 0.3, asset.config)`
 
 说明：

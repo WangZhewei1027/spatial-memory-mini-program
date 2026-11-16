@@ -53,6 +53,10 @@
     "ignore": [],
     "include": [
       {
+        "value": "packages/audio-assets/headphone.glb",
+        "type": "file"
+      },
+      {
         "value": "packages/image-match-runtime/inference.wasm.br",
         "type": "file"
       },
@@ -62,6 +66,10 @@
       },
       {
         "value": "packages/image-match-model-b/model.bin",
+        "type": "file"
+      },
+      {
+        "value": "packages/image-match-model-c/model.bin",
         "type": "file"
       },
       {

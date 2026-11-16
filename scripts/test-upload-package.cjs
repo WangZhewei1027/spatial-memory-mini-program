@@ -15,13 +15,16 @@ test('the main project uploads directly with all production models and Worker fi
   const included = config.packOptions.include.map(item => item.value);
   const build = require('../miniprogram/lib/image-matcher/build-info');
   for (const file of [build.wasmPath, ...build.modelPaths]) assert.ok(included.includes(file), file);
+  const { headphonePath } = require('../miniprogram/packages/audio-assets/ready');
+  assert.ok(included.includes(headphonePath.replace(/^\//, '')), 'the audio model must survive unused-file filtering');
   const app = readJSON(path.join(root, 'miniprogram/app.json'));
   assert.deepEqual(app.subpackages.map(pkg => pkg.root), [
-    'packages/image-match-runtime', 'packages/image-match-model-a', 'packages/image-match-model-b',
+    'packages/audio-assets',
+    'packages/image-match-runtime', 'packages/image-match-model-a', 'packages/image-match-model-b', 'packages/image-match-model-c',
   ]);
   assert.deepEqual(app.workers, { path: 'workers', isSubpackage: true });
   const sizes = packageSizes(root);
-  assert.equal(Object.keys(sizes).length, 5);
+  assert.equal(Object.keys(sizes).length, 7);
   assert.ok(Object.values(sizes).every(bytes => bytes > 0));
   const guard = spawnSync(process.execPath, [path.join(__dirname, 'check-upload-package.cjs')], { encoding: 'utf8' });
   assert.equal(guard.status, 0, guard.stderr);
@@ -56,6 +59,19 @@ test('archive contents are outside the upload root and do not affect package siz
   assert.match(uploadProblems(project).join('\n'), /与 ignore\/ 目录分离/);
 });
 
+test('upload rejects both main and subpackage source growth at the quality budget', t => {
+  const { project, write } = fixture(t);
+  const initialBytes = packageSizes(project).main;
+  write('miniprogram/assets/large.bin', 'x'.repeat(1.5 * 1024 * 1024 - initialBytes - 1));
+  assert.deepEqual(uploadProblems(project), []);
+  fs.appendFileSync(path.join(project, 'miniprogram/assets/large.bin'), 'x');
+  assert.match(uploadProblems(project).join('\n'), /main 包源文件.*必须小于 1.5 MB/);
+  write('miniprogram/app.json', { pages: ['pages/index/index'], subpackages: [{ root: 'assets', pages: [] }] });
+  assert.deepEqual(uploadProblems(project), []);
+  fs.appendFileSync(path.join(project, 'miniprogram/assets/large.bin'), 'x'.repeat(initialBytes));
+  assert.match(uploadProblems(project).join('\n'), /assets 包源文件.*必须小于 1.5 MB/);
+});
+
 test('upload catches broken page files, assets and imports after a move', t => {
   const { project, write } = fixture(t);
   fs.rmSync(path.join(project, 'miniprogram/pages/index/index.wxml'));
@@ -65,6 +81,15 @@ test('upload catches broken page files, assets and imports after a move', t => {
   assert.match(problems, /页面文件缺失：pages\/index\/index.wxml/);
   assert.match(problems, /强制打包的文件缺失：packages\/missing.bin/);
   assert.match(problems, /仍引用实验或临时目录/);
+});
+
+test('upload budgets Worker files with main for the current DevTools quality scanner', t => {
+  const { project, write } = fixture(t);
+  write('miniprogram/app.json', { pages: ['pages/index/index'], workers: { path: 'workers', isSubpackage: true } });
+  write('miniprogram/workers/index.js', '');
+  const mainBytes = packageSizes(project).main;
+  write('miniprogram/workers/index.js', ' '.repeat(1.5 * 1024 * 1024 - mainBytes));
+  assert.match(uploadProblems(project).join('\n'), /兼容统计（main \+ workers）必须小于 1.5 MB/);
 });
 
 test('upload catches restored experimental subpackages or forced archive files', t => {

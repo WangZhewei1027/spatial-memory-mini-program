@@ -6,6 +6,13 @@
   ],
   "subpackages": [
     {
+      "root": "packages/audio-assets",
+      "name": "audio-assets",
+      "pages": [
+        "index"
+      ]
+    },
+    {
       "root": "packages/image-match-runtime",
       "name": "image-match-runtime",
       "pages": [
@@ -22,6 +29,13 @@
     {
       "root": "packages/image-match-model-b",
       "name": "image-match-model-b",
+      "pages": [
+        "index"
+      ]
+    },
+    {
+      "root": "packages/image-match-model-c",
+      "name": "image-match-model-c",
       "pages": [
         "index"
       ]
