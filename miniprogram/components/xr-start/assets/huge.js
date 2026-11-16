@@ -37,14 +37,16 @@ module.exports = (XR_CONFIG) => ({
       this._isFetchingHuge
     )
       return;
-    const epoch = this._modeEpoch;
+    const epoch = this._modeEpoch, current = this._getRenderLayer?.("world")?.capture();
+    if (current && !current()) return;
+    const request = this._hugeFetchRequest = {};
     this._isFetchingHuge = true;
     try {
       const { statusCode, data } = await backendRpc("get_huge_assets", {
         p_organization_id: CONFIG.organizationId,
         p_workspace_id: CONFIG.workspaceId ?? null,
       });
-      if (epoch !== this._modeEpoch || this._disposed) return;
+      if (epoch !== this._modeEpoch || this._disposed || (current && !current())) return;
       if (statusCode === 200 && Array.isArray(data)) {
         this._pendingHugeAssets = data.filter(
           (a) =>
@@ -57,7 +59,7 @@ module.exports = (XR_CONFIG) => ({
     } catch (error) {
       console.warn("[huge] 请求失败", error);
     } finally {
-      if (epoch === this._modeEpoch) this._isFetchingHuge = false;
+      if (this._hugeFetchRequest === request) { this._hugeFetchRequest = null; this._isFetchingHuge = false; }
     }
   },
   async _placeHugeAssets() {
@@ -68,16 +70,19 @@ module.exports = (XR_CONFIG) => ({
       this.retrievalMode === "anchor"
     )
       return;
+    const drain = this._hugeDrain = {};
     this._hugePlacingBusy = true;
     try {
       while (
-        this._pendingHugeAssets.length &&
+        this._hugeDrain === drain && this._pendingHugeAssets.length &&
         !this._disposed &&
         !this._retrievalPaused &&
         this.retrievalMode === "gps"
       ) {
         const asset = this._pendingHugeAssets.shift(),
           epoch = this._contentEpoch;
+        const layer = this._getRenderLayer?.("world"), current = layer?.capture();
+        if (current && !current()) break;
         if (this._hugeNodeList.some((e) => e.assetId === asset.id)) continue;
         let handle;
         try {
@@ -91,7 +96,7 @@ module.exports = (XR_CONFIG) => ({
           handle = await this._hugeModelCache.acquire(asset.file_url);
           if (
             this._disposed ||
-            epoch !== this._contentEpoch ||
+            epoch !== this._contentEpoch || (current && !current()) ||
             !this._arReady
           ) {
             disposeTree(handle.object);
@@ -122,16 +127,18 @@ module.exports = (XR_CONFIG) => ({
             camera.position.y,
             camera.position.z - Math.cos(yaw) * radius,
           );
-          this.shadowRoot.add(instance.root);
-          this._hugeNodeList.push({
-            assetId: asset.id,
-            node: instance.root,
-            mixer: instance.mixer,
-            dispose: instance.dispose,
-            lat: asset.latitude,
-            lng: asset.longitude,
-            type: "model",
-          });
+          const entry = {
+            assetId: asset.id, node: instance.root, mixer: instance.mixer,
+            dispose: instance.dispose, lat: asset.latitude, lng: asset.longitude, type: "model", layer,
+          };
+          if (layer) {
+            if (!layer.mount(instance.root, { current, dispose: () => {
+              const index = this._hugeNodeList.indexOf(entry);
+              if (index >= 0) this._hugeNodeList.splice(index, 1);
+              this._disposeNode(entry);
+            } })) continue;
+          } else this.shadowRoot.add(instance.root);
+          this._hugeNodeList.push(entry);
         } catch (error) {
           if (handle) {
             disposeTree(handle.object);
@@ -144,14 +151,14 @@ module.exports = (XR_CONFIG) => ({
         );
       }
     } finally {
-      this._hugePlacingBusy = false;
+      if (this._hugeDrain === drain) { this._hugeDrain = null; this._hugePlacingBusy = false; }
     }
   },
   tickHugeModels() {
     if (this._pendingHugeAssets.length) this._placeHugeAssets();
     if (!this.currentGPS || this.currentGPS === this._lastHugeTickGPS) return;
     this._lastHugeTickGPS = this.currentGPS;
-    this._hugeNodeList = this._hugeNodeList.filter((entry) => {
+    this._hugeNodeList = [...this._hugeNodeList].filter((entry) => {
       const near =
         gpsRelative(
           this.currentGPS.latitude,

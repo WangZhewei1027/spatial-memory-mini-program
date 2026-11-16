@@ -94,6 +94,8 @@ async _placeAsset(asset) {
 
 ---
 
+Scene 已迁入 `render-modules/scene.js` 的独立加载队列，不等待普通模型/图片加载；弹幕使用独立的帧驱动队列。上面的分发代码用于说明普通素材串行机制，实际模块分流与生命周期以 [AR 渲染模块](ar-render-modules.md) 为准。
+
 ## 配置参数
 
 位于 `config.js`：

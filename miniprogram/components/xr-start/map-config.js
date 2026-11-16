@@ -22,6 +22,7 @@ module.exports = {
       const config = parseMapConfig(row.config);
       this._textAssetStyle = config.text_asset_miniapp_style;
       this._confettiEnabled = config.confetti_enabled;
+      this._syncRenderModules();
       this._mapConfigReady = true;
       this.triggerEvent("mapconfigload", { ready: true, retrievalMode: config.retrieval_mode, footerEnabled: config.footer_enabled });
       this.setRetrievalMode(config.retrieval_mode);

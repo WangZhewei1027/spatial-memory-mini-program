@@ -254,6 +254,26 @@ test("GPS-originated placement stays silent even if old recognition timing remai
   assert.equal(context.logs.length, 0);
 });
 
+
+test("resetting one loading generation immediately starts the next queue without old-finally interference", async () => {
+  const context = harness(), { instance, pending, placements } = context;
+  instance._seenAssets = new Map();
+  startOne(context);
+  const old = pending.get("image"), oldDrain = instance.drainPromise;
+  instance._clearRemoteAssets();
+  instance._matchedAnchorId = "next-anchor";
+  instance.displayAssets([{ id: "model", file_type: "model", _contentEpoch: instance._contentEpoch }]);
+  assert.deepEqual(placements.map(item => item.id), ["image", "model"], "old IO cannot block the new generation");
+  const newDrain = instance.drainPromise;
+  old.resolve({ register: false }); await flush();
+  await context.nextTimer(); await oldDrain;
+  assert.equal(instance._placingBusy, true);
+  assert.equal(instance._placingAssetId, "model", "old finally leaves the current request identity intact");
+  pending.get("model").resolve(); await flush(); await context.nextTimer(); await newDrain;
+  assert.equal(instance._placingBusy, false);
+  assert.deepEqual(instance.nodeList.map(entry => entry.assetId), ["model"]);
+});
+
 (async () => {
   for (const [name, run] of tests) {
     await run();

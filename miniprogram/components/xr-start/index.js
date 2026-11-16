@@ -13,8 +13,7 @@ const {
   disposeTree,
 } = require("../../lib/three-runtime/resources");
 const assetsMethods = require("./assets/index")(XR_CONFIG);
-const activityMethods = require("./activities")(XR_CONFIG);
-const danmakuMethods = require("./effects/danmaku")(XR_CONFIG);
+const renderModuleMethods = require("./render-modules/index")(XR_CONFIG);
 const repulsionMethods = require("./effects/repulsion")(XR_CONFIG);
 const hugeMethods = require("./assets/huge")(XR_CONFIG);
 const confettiMethods = require("./effects/confetti")(XR_CONFIG);
@@ -38,23 +37,20 @@ function buildInitialState() {
     // 首轮限量揭示是否已消耗（首轮 revealFirstFetch 加量，仅在实际放置过内容后置位）
     _firstRevealDone: false,
     spatialAudioList: [],
-    flyingDanmakus: [],
     // Three 渲染器初始化完成后即可放置；文字无需背景图预加载。
     _preloadDone: false,
     _pendingDisplayAssets: [],
+    _placeQueue: [],
+    _placeDrain: null,
+    _placingBusy: false,
+    _placingAssetId: null,
     // 上次触发 fetchNearbyAssets 的时间戳（用于冷却判断）
     _lastFetchTime: 0,
     gpsReady: false,
     firstFetchDone: false,
     currentGPS: null,
     isFetchingAssets: false,
-    _activityEpoch: 0,
-    _activityRecordIds: new Set(),
-    _activityRecordPlacements: new Map(),
-    _activityNextFetch: 0,
-    _activityRevision: 0,
-    _activityFetch: null,
-    _activityFetchEpoch: null,
+    _worldFetchRequest: null,
     // 导航状态
     _navTarget: null,
     _navActive: false,
@@ -68,6 +64,9 @@ function buildInitialState() {
     _hugeNodeList: [],
     _pendingHugeAssets: [],
     _isFetchingHuge: false,
+    _hugeFetchRequest: null,
+    _hugeDrain: null,
+    _hugePlacingBusy: false,
     // 随机彩带
     _confettiBursts: [],
     _confettiTimer: null,
@@ -129,9 +128,10 @@ Component({
               onCameraFrame: (frame) => this.handleRecognitionFrame(frame),
               requireTracking: () => this._scenePreviewMode || this.retrievalMode !== "anchor" || ["tracking", "locked"].includes(this._matchPhase),
               debugTimings: XR_CONFIG.debugLog,
+              onLayersChange: layers => this.onRenderLayersChange(layers),
+              onLayerError: event => this.onRenderLayerError(event),
             });
-            this.scene = this._runtime.scene;
-            this.shadowRoot = this._runtime.content;
+            this._attachRenderModules();
             this._modelCache = new ModelCache(
               canvas,
               XR_CONFIG.maxCachedModelUrls || 8,
@@ -188,8 +188,7 @@ Component({
     ...gps,
     ...matching,
     ...assetsMethods,
-    ...activityMethods,
-    ...danmakuMethods,
+    ...renderModuleMethods,
     ...repulsionMethods,
     ...navigation,
     ...hugeMethods,
@@ -276,21 +275,9 @@ Component({
       this._frameDelta = dt;
       if (this._scenePreviewMode) {
         this._tickScenePreview();
-        this.tickModelAnimation();
         return;
       }
-      const camPos = this._runtime.camera.position;
-      this.tickFlyingDanmakus();
-      if (this.retrievalMode !== "anchor") this.tickRepulsion();
-      this.tickAudioVolume();
-      this.tickModelAnimation();
-      this.tickHugeModels();
-      this.tickConfetti();
-      for (const entry of this.nodeList)
-        if (entry.billboardEl) entry.billboardEl.lookAt(camPos);
       if (this._retrievalPaused) return;
-      // Activities are independent of how ordinary assets are discovered.
-      if (this.currentGPS) void this.refreshActivityContent?.();
       if (this.retrievalMode === "anchor") return;
       // Refresh nearby data periodically while spatial placement uses SLAM poses.
       const now = Date.now();

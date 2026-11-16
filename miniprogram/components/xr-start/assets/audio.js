@@ -75,7 +75,7 @@ module.exports = (XR_CONFIG) => ({
     let playing = meta.autoPlay !== false;
     const entry = this._registerNode(asset.id, root, null, {
       type: "audio",
-      contentEpoch: asset._contentEpoch,
+      contentEpoch: asset._contentEpoch, current: asset._layerCurrent,
       audioRefs: { ctx, baseVolume },
       onTap() {
         playing = !playing;

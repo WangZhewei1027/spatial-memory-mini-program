@@ -4,6 +4,7 @@ module.exports = () => ({
   startRandomConfetti() {
     if (
       this._confettiTimer ||
+      !this._renderModules?.confetti.active ||
       !this._arReady ||
       this._retrievalPaused ||
       this.retrievalMode === "anchor"
@@ -66,7 +67,7 @@ module.exports = () => ({
         vz: (Math.random() - 0.5) * 0.15,
       });
     }
-    this._runtime.scene.add(root);
+    this._renderModules.confetti.mount(root, { dispose: () => disposeTree(root) });
     this._confettiBursts.push({ node: root, particles, age: 0 });
   },
   tickConfetti() {
@@ -93,8 +94,8 @@ module.exports = () => ({
     });
   },
   _destroyConfettiBurst(entry) {
-    entry?.node.removeFromParent();
-    disposeTree(entry?.node);
+    if (!entry) return;
+    if (!this._renderModules?.confetti.remove(entry.node)) { entry.node.removeFromParent(); disposeTree(entry.node); }
   },
   stopRandomConfetti() {
     clearTimeout(this._confettiTimer);

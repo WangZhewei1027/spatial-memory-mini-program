@@ -61,7 +61,7 @@ module.exports = {
     if (!this._wouldSurvive(root.position, "scene")) { player.dispose(); return false; }
     this.shadowRoot.add(root);
     const entry = this._registerNode(asset.id, root, null, {
-      type: "scene", contentEpoch: asset._contentEpoch, repulsionEnabled: false,
+      type: "scene", contentEpoch: asset._contentEpoch, current: asset._layerCurrent, repulsionEnabled: false,
       dispose: () => {
         if (this._mountedScenePreviewPlayer === player) this._mountedScenePreviewPlayer = null;
         player.dispose();

@@ -71,7 +71,7 @@ function launch(storage = new Map()) {
     request.success({ statusCode, data });
     return request;
   }
-  return { backend, state, calls, page, component, uiComponent, storage, respond, compass: (heading, ms = 0) => { sensorTime += ms; compassCallback({ direction: heading }); }, activityMethods: () => load(path.join(root, "components/xr-start/activities.js"))({ maxDistanceMeters: 100 }) };
+  return { backend, state, calls, page, component, uiComponent, storage, respond, compass: (heading, ms = 0) => { sensorTime += ms; compassCallback({ direction: heading }); }, activitySource: options => load(path.join(root, "components/xr-start/render-modules/activity-source.js")).createActivitySource(options) };
 }
 
 async function main() {
@@ -291,71 +291,55 @@ async function main() {
   console.log("PASS multi-point check-in, server-only progress, deployment isolation, race handling and directory points");
 
   for (const mode of ["gps", "anchor"]) {
-  const runtime = launch();
-  runtime.backend.setConfig({ organizationId: uuid(901) });
-  const removed = [], events = [];
-  const ordinary = { assetId: uuid(700), node: {} };
-  const renderer = { ...runtime.activityMethods(), _modeEpoch: 1, _activityEpoch: 1, _activityRevision: 0, _arReady: true, retrievalMode: mode, currentGPS: at,
-    _allowedAssetIds: new Set([ordinary.assetId]), _activityRecordIds: new Set(), _seenAssets: new Map(), nodeList: [ordinary],
-    _pendingDisplayAssets: [], _placeQueue: [], flyingDanmakus: [],
-    triggerEvent(name, detail) { events.push({ name, detail }); },
-    _destroyNode(entry) { removed.push(entry.assetId); },
-    displayAssets(records) { for (const record of records) { this._allowedAssetIds.add(record.id); if (!this.nodeList.some((entry) => entry.assetId === record.id)) this.nodeList.push({ assetId: record.id, node: {} }); } },
-  };
-  const record = (id, deployment) => ({ id: uuid(id), activity_id: deployment.activity_id, activity_placement_id: deployment.id,
-    file_type: "text", text_content: `Record ${id}`, metadata: at });
-  const d1 = activity(1), d2 = activity(2), outOfRange = { ...activity(3), location: { latitude: 30, longitude: 120 }, radius_meters: 20 };
-  const initial = renderer.refreshActivityContent();
-  assert.match(runtime.calls.requests[0].url, /\/activities\?organization_id=/);
-  await renderer.refreshActivityContent();
-  assert.equal(runtime.calls.requests.length, 1, "frame polling cannot start parallel discovery requests");
-  runtime.respond(200, [d1, d2, outOfRange]); await tick();
-  assert.equal(runtime.calls.requests.length, 2, "fetch only the in-range activity record streams");
-  assert.ok(runtime.calls.requests.every((request) => request.url.includes("/activity-records?placement_id=")));
-  renderer._modeEpoch++; // A scan restart must not cancel independent activity data.
-  runtime.respond(200, [record(710, d1), record(711, d2)]); // Wrong placement is ignored.
-  runtime.respond(200, [record(712, d2)]); await initial;
-  assert.deepEqual(renderer.nodeList.map((entry) => entry.assetId), [ordinary.assetId, `activity:${uuid(710)}`, `activity:${uuid(712)}`]);
-  assert.equal(events[0].name, "activitiesload");
-  await renderer.refreshActivityContent(); assert.equal(runtime.calls.requests.length, 0, "successful discovery is throttled while stationary");
-  renderer._pendingDisplayAssets = [{ id: `activity:${uuid(710)}` }, { id: ordinary.assetId }];
-  renderer._placeQueue = [{ id: `activity:${uuid(710)}` }, { id: ordinary.assetId }];
-  renderer.flyingDanmakus = [{ node: renderer.nodeList[1].node }];
-  renderer._activityNextFetch = 0;
-  const paused = renderer.refreshActivityContent();
-  runtime.respond(200, [d2]); await tick(); runtime.respond(200, [record(712, d2)]); await paused;
-  assert.deepEqual(removed, [`activity:${uuid(710)}`]);
-  assert.equal(renderer.flyingDanmakus.length, 0, "paused activity cannot leave a flying message behind");
-  assert.deepEqual(renderer._placeQueue.map((entry) => entry.id), [ordinary.assetId]);
-  assert.deepEqual(renderer._pendingDisplayAssets.map((entry) => entry.id), [ordinary.assetId]);
-  renderer._activityNextFetch = 0;
-  const moderated = renderer.refreshActivityContent();
-  runtime.respond(200, [d2]); await tick(); runtime.respond(200, []); await moderated;
-  assert.deepEqual(renderer.nodeList.map((entry) => entry.assetId), [ordinary.assetId], "hidden records are removed without touching ordinary assets");
-  renderer._activityNextFetch = 0;
-  const staleRecords = renderer.refreshActivityContent();
-  runtime.respond(200, [d1]); await tick(); renderer._activityEpoch++;
-  runtime.respond(200, [record(710, d1)]); await staleRecords;
-  assert.equal(renderer.nodeList.length, 1, "late response from another activity session cannot resurrect activity records");
-  renderer._activityNextFetch = 0;
-  renderer._replaceActivityRecords([record(710, d1)]);
-  const supersededRecords = renderer.refreshActivityContent();
-  runtime.respond(200, [d1]); await tick();
-  const oldRecordResponse = runtime.calls.requests.shift();
-  const newerPage = runtime.page();
-  renderer.setNavigationTarget = () => {};
-  newerPage.selectComponent = () => renderer;
-  const newDiscovery = newerPage.refreshActivities();
-  runtime.respond(200, []); await newDiscovery;
-  assert.equal(renderer.nodeList.length, 1, "the newer pause list immediately removes already displayed activity records");
-  oldRecordResponse.success({ statusCode: 200, data: [record(710, d1)] }); await supersededRecords;
-  assert.equal(renderer.nodeList.length, 1, "a newer page pause result must also cancel older XR record responses");
-  renderer._activityNextFetch = 0;
-  const offline = renderer.refreshActivityContent();
-  runtime.calls.requests.shift().fail(new Error("offline")); await offline;
-  assert.equal(events.at(-1).detail.error, true);
-  assert.equal(renderer.nodeList[0], ordinary);
-  console.log(`PASS ${mode}: independent activities, rescan coexistence, stationary refresh, moderation and session cleanup`);
+    const runtime = launch();
+    runtime.backend.setConfig({ organizationId: uuid(901) });
+    const removed = [], events = [], displayed = new Map();
+    let generation = 1;
+    const source = runtime.activitySource({
+      capture() { const initial = generation; return () => generation === initial; }, getLocation: () => at,
+      onDiscovery(detail) { events.push(detail); },
+      onRemove(ids) { for (const id of ids) { removed.push(id); displayed.delete(id); } },
+      onRecords(records) { for (const record of records) displayed.set(record.id, record); },
+    });
+    const record = (id, deployment) => ({ id: uuid(id), activity_id: deployment.activity_id, activity_placement_id: deployment.id,
+      file_type: "text", text_content: `Record ${id}`, metadata: at });
+    const d1 = activity(1), d2 = activity(2), outOfRange = { ...activity(3), location: { latitude: 30, longitude: 120 }, radius_meters: 20 };
+    const initial = source.refresh();
+    assert.match(runtime.calls.requests[0].url, /\/activities\?organization_id=/);
+    await source.refresh();
+    assert.equal(runtime.calls.requests.length, 1, "frame polling cannot start parallel discovery requests");
+    runtime.respond(200, [d1, d2, outOfRange]); await tick();
+    assert.equal(runtime.calls.requests.length, 2, "fetch only in-range activity streams");
+    assert.ok(runtime.calls.requests.every(request => request.url.includes("/activity-records?placement_id=")));
+    runtime.respond(200, [record(710, d1), record(711, d2)]); // Wrong placement is ignored.
+    runtime.respond(200, [record(712, d2)]); await initial;
+    assert.deepEqual([...displayed.keys()], [uuid(710), uuid(712)]);
+    await source.refresh(); assert.equal(runtime.calls.requests.length, 0, "stationary refresh is throttled");
+    const paused = source.refresh(true);
+    runtime.respond(200, [d2]); await tick(); runtime.respond(200, [record(712, d2)]); await paused;
+    assert.deepEqual(removed, [uuid(710)]);
+    const moderated = source.refresh(true);
+    runtime.respond(200, [d2]); await tick(); runtime.respond(200, []); await moderated;
+    assert.equal(displayed.size, 0, "hidden records are removed from their owner");
+    const staleRecords = source.refresh(true);
+    runtime.respond(200, [d1]); await tick(); generation++; source.reset();
+    runtime.respond(200, [record(710, d1)]); await staleRecords;
+    assert.equal(displayed.size, 0, "late responses cannot revive a cleared layer");
+    source.replace([record(710, d1)]);
+    const supersededRecords = source.refresh(true);
+    runtime.respond(200, [d1]); await tick();
+    const oldRecordResponse = runtime.calls.requests.shift();
+    const newerPage = runtime.page();
+    newerPage.selectComponent = () => ({ setNavigationTarget() {}, applyActivityAvailability: source.applyAvailability });
+    const newDiscovery = newerPage.refreshActivities();
+    runtime.respond(200, []); await newDiscovery;
+    assert.equal(displayed.size, 0, "newer page availability immediately removes hidden activity content");
+    oldRecordResponse.success({ statusCode: 200, data: [record(710, d1)] }); await supersededRecords;
+    assert.equal(displayed.size, 0, "newer page discovery also invalidates older record responses");
+    const offline = source.refresh(true);
+    runtime.calls.requests.shift().fail(new Error("offline")); await offline;
+    assert.equal(events.at(-1).error, true);
+    console.log(`PASS ${mode}: independent discovery, throttling, moderation, scope and layer cancellation`);
   }
 
   const presentations = ["ar-shell", "ar-debug-bar", "ar-recognition-panel", "ar-danmaku-panel", "ar-shop-overlays"];

@@ -12,7 +12,7 @@ module.exports = {
     this.shadowRoot.add(root);
     this._registerNode(asset.id, root, root, {
       type: "text",
-      contentEpoch: asset._contentEpoch,
+      contentEpoch: asset._contentEpoch, current: asset._layerCurrent,
     });
   },
 };

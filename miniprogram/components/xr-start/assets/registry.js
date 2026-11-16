@@ -6,12 +6,4 @@ module.exports = {
   model: { bucket: "heavy", async: true },
   video: { bucket: "heavy", async: true },
   audio: { bucket: "audio" },
-  danmaku: {
-    bucket: "transient",
-    dispose(entry) {
-      this.flyingDanmakus = (this.flyingDanmakus || []).filter(
-        (item) => item.node !== entry.node,
-      );
-    },
-  },
 };

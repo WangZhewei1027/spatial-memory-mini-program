@@ -12,6 +12,7 @@
 | [场景播放](scene-asset.md) | 当前播放协议、观看位置、媒体同步与跨端验证 |
 | [场景自动联调](scene-auto-debug.md) | 本地 Web 到小程序的准备、自动检查与画面取证 |
 | [AR 页面 Slots 与功能导航](ar-bottom-stack.md) | 模块注册、顶部调试接口、业务面板、覆层与键盘避让 |
+| [AR 渲染模块与独立 Layer](ar-render-modules.md) | 3D 模块注册、合成、生命周期、异步取消与扩展 |
 | [活动](activities.md) | 店铺打卡、弹幕、参与记录与刷新清理 |
 | [识别流程](anchor-recognition.md) | 本机识别、参考图、内容锁定与重新扫描 |
 | [错误上报](error-reporting.md) | 上报通道、去重限额与各来源接入点 |

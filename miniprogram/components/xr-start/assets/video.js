@@ -21,7 +21,7 @@ module.exports = {
     this.shadowRoot.add(root);
     const entry = this._registerNode(asset.id, root, root, {
       type: "video",
-      contentEpoch: asset._contentEpoch,
+      contentEpoch: asset._contentEpoch, current: asset._layerCurrent,
       dispose: video.dispose,
       onTap: video.toggle,
       tick: video.tick,

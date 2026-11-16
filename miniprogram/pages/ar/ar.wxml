@@ -1,7 +1,7 @@
 <ar-shell items="{{bottomNavItems}}" active="{{activeBottomPanel}}" expanded="{{bottomPanelExpanded}}" keyboard-height="{{keyboardHeight}}" bind:panelchange="onPanelChange">
   <xr-start slot="scene" disable-scroll id="main-frame" width="{{renderWidth}}" height="{{renderHeight}}" style="width:{{width}}px;height:{{height}}px;"
     bind:mapconfigload="onMapConfigLoad" bind:activitiesload="onActivitiesLoad" bind:recognitionstatus="onRecognitionStatus"
-    bind:matchprogress="onMatchProgress" bind:renderstatus="onRenderStatus" bind:asseterror="onAssetError" />
+    bind:matchprogress="onMatchProgress" bind:renderstatus="onRenderStatus" bind:asseterror="onAssetError" bind:renderlayers="onRenderLayers" />
 
   <ar-debug-bar slot="top" items="{{debugItems}}" />
 

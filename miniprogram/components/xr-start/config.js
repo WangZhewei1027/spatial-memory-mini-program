@@ -9,7 +9,6 @@ const XR_CONFIG = {
   //   - heavy（model/video）：加载昂贵、渲染重，独立小桶，文本洪水永远挤不掉。
   //   - light（text/image）  ：轻量同步素材，桶大一些。
   //   - audio                ：空间音频源。
-  //   - transient（直发弹幕）：短命飞行动画，FIFO 驱逐最旧。
   // 归属由 assets/registry.js 的 descriptor.bucket 声明；加新类型无需改本文件。
   // evict 策略：
   //   - 'farthest'：离用户【位置】最远的先踢。距离在转头时不变，只有走远才变，
@@ -20,8 +19,9 @@ const XR_CONFIG = {
     heavy: { cap: 6, evict: "farthest" },
     light: { cap: 20, evict: "farthest" },
     audio: { cap: 6, evict: "farthest" },
-    transient: { cap: 8, evict: "fifo" },
   },
+  // Activity rendering has its own queue, capacity and spatial layout.
+  danmaku: { historyCapacity: 20, liveCapacity: 8, placeStaggerMs: 40, minDistance: 1.5, maxDistance: 5 },
   // 最小停留时间（毫秒）：节点出现后此窗口内不参与驱逐，防止"刚淡入就被挤掉"的一闪。
   // 某桶找不到已过龄的可驱逐节点时，回退到无视此保护以保证 cap 是硬上限。
   minLifetimeMs: 1500,
@@ -44,7 +44,7 @@ const XR_CONFIG = {
   //   - revealPerFetch  ：之后每轮 GPS 刷新逐步加入新内容。
   revealFirstFetch: 20,
   revealPerFetch: 10,
-  // 斥力参数：nodeList 中所有已落位素材节点（文本/模型/图片/音频/视频/弹幕）之间的互斥推力。
+  // 斥力参数：nodeList 中所有已落位素材节点（文本/模型/图片/音频/视频）之间的互斥推力。
   // repulsionRadius   : 斥力开始生效的距离（米），节点间距小于此值才会被推开。
   // repulsionStrength : 每帧最大位移量，值越大节点分散越快。
   repulsionRadius: 1.5,

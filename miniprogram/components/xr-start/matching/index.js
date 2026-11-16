@@ -80,6 +80,7 @@ module.exports = {
     if (!['gps', 'anchor'].includes(mode) || mode === this.retrievalMode || this._disposed) return;
     this._cancelRetrieval('mode_change'); this._clearRemoteAssets();
     this.retrievalMode = mode; this.setData({ retrievalMode: mode });
+    this._syncRenderModules?.();
     if (mode === 'anchor') this._startMatchDiagnostics('enter');
     this._recognitionStatus(mode === 'anchor' ? '请将镜头对准目标' : '根据附近位置直接显示素材');
     this._ensureARSession();
@@ -89,10 +90,12 @@ module.exports = {
   pauseRetrieval() {
     this._cancelScenePreview?.(); this._retrievalPaused = true;
     this._cancelRetrieval('pause'); this._clearRemoteAssets();
+    this._runtime?.layers?.pause();
   },
   resumeRetrieval() {
     if (!this._retrievalPaused || this._disposed) return;
     this._retrievalPaused = false;
+    this._runtime?.layers?.start();
     this._ensureARSession();
     if (this._scenePreviewMode) { if (this._arReady) this._beginScenePreview(); return; }
     if (this.retrievalMode === 'anchor') { this._startMatchDiagnostics('resume'); void this.recognizeAnchor(); return; }

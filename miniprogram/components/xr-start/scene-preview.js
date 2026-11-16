@@ -18,7 +18,7 @@ module.exports = {
   async _beginScenePreview() {
     this._cancelScenePreview();
     const request = this._scenePreviewRequest;
-    const asset = { id: this.data.sceneId, file_type: "scene", _contentEpoch: this._contentEpoch };
+    const asset = { id: this.data.sceneId, file_type: "scene", _contentEpoch: this._contentEpoch, _layerCurrent: this._getRenderLayer?.("scene")?.capture() };
     this._allowedAssetIds.add(asset.id);
     this._scenePreviewAsset = asset;
     this._scenePreviewStatus("loading", "正在加载场景…");

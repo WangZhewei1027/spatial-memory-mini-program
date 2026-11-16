@@ -27,10 +27,12 @@ module.exports = function (XR_CONFIG) {
 
     async fetchNearbyAssets() {
       if (this._disposed || this._retrievalPaused) return;
-      void this.refreshActivityContent?.();
       if (this.retrievalMode === "anchor") return this.recognizeAnchor();
       if (this.isFetchingAssets || !this.currentGPS) return;
       const epoch = this._modeEpoch;
+      const current = this._getRenderLayer?.("world")?.capture();
+      if (current && !current()) return;
+      const request = this._worldFetchRequest = {};
       this.isFetchingAssets = true;
 
       try {
@@ -42,7 +44,7 @@ module.exports = function (XR_CONFIG) {
           p_organization_id: CONFIG.organizationId,
         });
 
-        if (this._disposed || epoch !== this._modeEpoch) return;
+        if (this._disposed || epoch !== this._modeEpoch || (current && !current())) return;
         if (statusCode === 200 && Array.isArray(data)) {
           this.displayAssets(
             data.filter(
@@ -60,14 +62,13 @@ module.exports = function (XR_CONFIG) {
       } catch (err) {
         console.error("[fetch] 请求失败:", err);
       } finally {
-        if (epoch === this._modeEpoch) this.isFetchingAssets = false;
+        if (this._worldFetchRequest === request) { this._worldFetchRequest = null; this.isFetchingAssets = false; }
       }
     },
 
     /**
-     * 容量桶策略（所有节点共享 nodeList 数组，靠 entry.bucket 区分，见 registry.js / config.js）：
-     *   - heavy（model/video）、light（text/image，含历史弹幕）、audio：按【位置距离】最远先踢。
-     *   - transient（直发弹幕）：FIFO 驱逐最旧。
+     * 容量桶策略（普通素材共享 nodeList 索引，靠 entry.bucket 区分，见 registry.js / config.js）：
+     *   - heavy（model/video）、light（text/image）、audio：按【位置距离】最远先踢。
      * 各桶独立限容、互不驱逐 —— 文本洪水只挤 light 桶，永远碰不到 heavy 里的模型。
      *
      * 拉取生命周期（不再有 new/old 轮次翻转）：
@@ -82,11 +83,12 @@ module.exports = function (XR_CONFIG) {
         (a) =>
           a &&
           (a._contentEpoch == null || a._contentEpoch === this._contentEpoch) &&
-          (this._activityRecordIds?.has(a.id) || this.retrievalMode !== "anchor" ||
+          (this.retrievalMode !== "anchor" ||
             (this._matchedAnchorId && this._allowedAssetIds.has(a.id))),
       );
       if (!assets.length) return;
-      assets = assets.map((a) => ({ ...a, _contentEpoch: this._contentEpoch }));
+      assets = assets.map((a) => ({ ...a, _contentEpoch: this._contentEpoch,
+        _layerCurrent: a._layerCurrent || this._getRenderLayer?.(a.file_type)?.capture() }));
       for (const a of assets) this._allowedAssetIds.add(a.id);
       // 预加载（VisionKit + Three）未就绪时，先暂存，等 flushPendingDisplayAssets 调用
       if (!this._preloadDone) {
@@ -107,6 +109,7 @@ module.exports = function (XR_CONFIG) {
         if (entry.assetId !== null) cachedIds.add(entry.assetId);
       }
       for (const queued of this._placeQueue || []) cachedIds.add(queued.id);
+      for (const id of this._renderModules?.scene.pendingIds() || []) cachedIds.add(id);
       if (this._placingAssetId != null) cachedIds.add(this._placingAssetId);
       const newAssets = assets.filter(
         (a) =>
@@ -143,6 +146,10 @@ module.exports = function (XR_CONFIG) {
      * 多次调用（如 GPS 触发的连续 fetch）会自然排队，不会并发爆发。
      */
     _enqueueDisplayAssets(assets) {
+      if (this._renderModules) {
+        this._renderModules.scene.enqueue(assets.filter(asset => asset.file_type === "scene"));
+        assets = assets.filter(asset => asset.file_type !== "scene");
+      }
       if (!this._placeQueue) this._placeQueue = [];
       for (const a of assets) this._placeQueue.push(a);
 
@@ -161,14 +168,15 @@ module.exports = function (XR_CONFIG) {
     },
 
     async _drainPlaceQueue() {
+      const drain = this._placeDrain = {};
       this._placingBusy = true;
       const baseStagger = XR_CONFIG.placeStaggerMs || 40;
-      while (this._placeQueue && this._placeQueue.length > 0) {
+      while (this._placeDrain === drain && this._placeQueue && this._placeQueue.length > 0) {
         if (this._runtime?.session?.mode === "slam" && !this._arReady) break;
         const asset = this._placeQueue.shift();
         // 关联匹配请求，而非素材加载完成时碰巧处于活动状态的另一轮请求。
         const timing =
-          this.retrievalMode === "anchor" && !this._activityRecordIds?.has(asset.id) &&
+          this.retrievalMode === "anchor" &&
           this._recognitionTiming?.contentEpoch === asset._contentEpoch
             ? this._recognitionTiming
             : null;
@@ -199,7 +207,7 @@ module.exports = function (XR_CONFIG) {
           console.warn("[assets] 放置失败", error);
           this.reportAssetError?.(asset, error);
         } finally {
-          this._placingAssetId = null;
+          if (this._placeDrain === drain) this._placingAssetId = null;
         }
         // An async load can finish while SLAM is unavailable. The placer releases
         // that result; retain the request so recovery can place it with a fresh pose.
@@ -282,7 +290,7 @@ module.exports = function (XR_CONFIG) {
             : baseStagger;
         await new Promise((r) => setTimeout(r, stagger));
       }
-      this._placingBusy = false;
+      if (this._placeDrain === drain) { this._placeDrain = null; this._placingBusy = false; }
     },
 
     /**
@@ -318,7 +326,8 @@ module.exports = function (XR_CONFIG) {
         !this._retrievalPaused &&
         asset._contentEpoch === this._contentEpoch &&
         this._allowedAssetIds.has(asset.id) &&
-        (this._activityRecordIds?.has(asset.id) || this.retrievalMode !== "anchor" || !!this._matchedAnchorId)
+        (!asset._layerCurrent || asset._layerCurrent()) &&
+        (this.retrievalMode !== "anchor" || !!this._matchedAnchorId)
       );
     },
 
@@ -334,50 +343,51 @@ module.exports = function (XR_CONFIG) {
       else if (asset.file_type === "scene") await this._placeSceneAsset(asset);
     },
 
-    // Scan changes preserve activity text in the same SLAM space. Session exits
-    // clear both sources. Old asynchronous ordinary placements always expire.
+    // Discovery resets its own modules. Activity modules retain their own scope.
     _clearRemoteAssets({ preserveActivities = false } = {}) {
-      const keep = (id) => preserveActivities && this._activityRecordIds?.has(id);
       this._recognitionTiming = null;
       this._contentEpoch++;
-      for (const ctx of this._pendingAudioContexts || []) {
-        try {
-          ctx.stop();
-          ctx.destroy();
-        } catch (_) {}
-      }
-      this._pendingAudioContexts?.clear();
-      this._allowedAssetIds = new Set([...this._allowedAssetIds].filter(keep));
-      const keepPending = (assets) => (assets || []).filter(asset => keep(asset.id))
-        .map(asset => ({ ...asset, _contentEpoch: this._contentEpoch }));
-      this._placeQueue = keepPending(this._placeQueue);
-      this._pendingDisplayAssets = keepPending(this._pendingDisplayAssets);
-      const cleared = this.nodeList.filter(entry => !keep(entry.assetId));
-      const clearedNodeCount = cleared.length;
-      for (const entry of cleared) this._destroyNode(entry);
-      this.nodeList = this.nodeList.filter(entry => keep(entry.assetId));
-      const keptNodes = new Set(this.nodeList.map(entry => entry.node));
-      this.flyingDanmakus = this.flyingDanmakus.filter(entry => keptNodes.has(entry.node));
-      if (!preserveActivities) {
-        this._activityEpoch = (this._activityEpoch || 0) + 1;
-        this._activityRecordIds?.clear();
-        this._activityRecordPlacements?.clear();
-        this._activityNextFetch = 0;
-      }
-      this.stopRandomConfetti?.();
-      if (clearedNodeCount || this._hugeNodeList?.length)
-        matchLog("清空场景素材", { run: this._modeEpoch, clearedNodeCount, hugeNodeCount: this._hugeNodeList?.length || 0 });
-      for (const entry of this._hugeNodeList || []) this._destroyNode(entry);
-      this._hugeNodeList = [];
-      this._pendingHugeAssets = [];
-      this._hugePlaceQueue = [];
-      for (const id of this._seenAssets.keys()) if (!keep(id)) this._seenAssets.delete(id);
-      this._firstRevealDone = false;
       this._matchedAnchorId = null;
-      // 兜底回收此前构建异常留下的、未能登记的动态根节点。
-      const orphans = [...(this.shadowRoot?.children || [])].filter(node => !keptNodes.has(node));
-      for (const node of orphans) this._destroyNode({ node });
-      if (orphans.length) matchLog("清理未登记场景节点", { count: orphans.length });
+      if (this._renderModules) {
+        if (preserveActivities) {
+          this._renderModules.world.clear("discovery");
+          this._renderModules.scene.layer.clear("discovery");
+        } else this._runtime.layers.clear("retrieval");
+      } else {
+        this._clearAssetState(false); this._clearAssetState(true);
+      }
+    },
+
+    // Called by a layer's reset hook. Other layers keep their nodes and queues.
+    _clearAssetState(sceneOnly) {
+      const selected = type => (type === "scene") === sceneOnly;
+      const ids = new Set();
+      for (const asset of [...(this._placeQueue || []), ...(this._pendingDisplayAssets || [])])
+        if (selected(asset.file_type)) ids.add(asset.id);
+      this._placeQueue = (this._placeQueue || []).filter(asset => !selected(asset.file_type));
+      this._pendingDisplayAssets = (this._pendingDisplayAssets || []).filter(asset => !selected(asset.file_type));
+      const cleared = this.nodeList.filter(entry => selected(entry.type));
+      for (const entry of cleared) { ids.add(entry.assetId); this._destroyNode(entry); }
+      this.nodeList = this.nodeList.filter(entry => !selected(entry.type));
+      for (const id of ids) { this._allowedAssetIds.delete(id); this._seenAssets.delete(id); }
+      if (!sceneOnly) {
+        this._placeDrain = null; this._placingBusy = false; this._placingAssetId = null;
+        this._worldFetchRequest = null; this.isFetchingAssets = false;
+        this._hugeFetchRequest = null; this._isFetchingHuge = false;
+        this._hugeDrain = null; this._hugePlacingBusy = false;
+        for (const ctx of this._pendingAudioContexts || []) {
+          try { ctx.stop(); ctx.destroy(); } catch (_) {}
+        }
+        this._pendingAudioContexts?.clear();
+        for (const entry of [...(this._hugeNodeList || [])]) this._destroyNode(entry);
+        this._hugeNodeList = []; this._pendingHugeAssets = []; this._hugePlaceQueue = [];
+        if (this._repTrs) this._repTrs.length = 0;
+        this._seenAssets.clear(); this._firstRevealDone = false;
+        if (!this._renderModules) {
+          for (const node of [...(this.shadowRoot?.children || [])]) this._destroyNode({ node });
+        }
+      }
+      if (cleared.length) matchLog("清空模块素材", { moduleId: sceneOnly ? "scene" : "world", count: cleared.length });
     },
   };
 };

@@ -50,7 +50,7 @@ module.exports = {
     this.shadowRoot.add(root);
     const entry = this._registerNode(asset.id, root, null, {
       type: "model",
-      contentEpoch: asset._contentEpoch,
+      contentEpoch: asset._contentEpoch, current: asset._layerCurrent,
       dispose: instance.dispose,
     });
     entry.mixer = instance.mixer;
@@ -61,8 +61,9 @@ module.exports = {
         baseY: handle.object.position.y,
       };
   },
-  tickModelAnimation() {
+  tickModelAnimation(moduleId) {
     for (const entry of this.nodeList.concat(this._hugeNodeList || [])) {
+      if (moduleId && (entry.type === "scene") !== (moduleId === "scene")) continue;
       entry.mixer?.update(this._frameDelta || 0);
       if (entry.modelAnim) {
         const anim = entry.modelAnim;

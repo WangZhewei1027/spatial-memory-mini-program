@@ -900,8 +900,11 @@ async function main() {
         onState: (state, message) => host.onARState(state, message),
         onReady: () => host.handleARReady(), onTick: dt => host.handleTick(dt),
       });
-      runtime.scene.add(runtime.content);
-      host._runtime = runtime; host.scene = runtime.scene; host.shadowRoot = runtime.content;
+      const { RenderLayers } = loader.lib("three-runtime/render-layers");
+      runtime.layers = new RenderLayers({ renderer: runtime.renderer, camera: runtime.camera,
+        createLighting: () => ({ apply() {}, dispose() {} }),
+      });
+      host._runtime = runtime; host._attachRenderModules();
       for (const previousState of ["playing", "paused", "ended"]) {
         component.pageLifetimes.show.call(host);
         assert.equal(runtime.lastFrameAt, null, "AR restarts its frame clock");

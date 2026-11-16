@@ -311,6 +311,11 @@ async function main() {
   console.log("PASS audio asset package: lazy load, actual model, download fallback and cancellation cleanup");
 
   const { ARRuntime } = lib("ar-runtime");
+  const { RenderLayers } = lib("render-layers");
+  const attachLayers = (runtime) => runtime.layers = new RenderLayers({ renderer: runtime.renderer,
+    camera: runtime.camera, onError: ({ error }) => { throw error; },
+    createLighting: () => ({ apply() {}, dispose() {} }),
+  });
   {
     let captured = 0, needsPose = false;
     const scanning = Object.assign(Object.create(ARRuntime.prototype), {
@@ -319,6 +324,7 @@ async function main() {
       onCameraFrame() { captured++; }, requireTracking: () => needsPose,
       startedAt: Date.now() - 60000, trackingWaitAt: Date.now() - 60000,
     });
+    attachLayers(scanning); scanning.layers.start();
     scanning.frame({}, { now: 1000, acquireMs: 0 });
     assert.equal(captured, 1, 'recognition receives pixels without a SLAM pose');
     assert.equal(scanning.trackingWaitAt, null, 'scanning does not time out waiting for a pose');
@@ -355,6 +361,7 @@ async function main() {
     const pose = new THREE.PerspectiveCamera(60, 320 / 480, .01, 300); pose.updateMatrixWorld(true);
     const frame = { camera: { viewMatrix: pose.matrixWorldInverse.toArray(), getProjectionMatrix(near, far) {
       pose.near = near; pose.far = far; pose.updateProjectionMatrix(); return pose.projectionMatrix.toArray(); } } };
+    attachLayers(clockRuntime);
     clockRuntime.start(); core.play();
     for (const now of [1000, 1350, 1750, 2050]) clockRuntime.frame(frame, { now, acquireMs: 0 });
     assert.ok(Math.abs(core.time - 1.05) < 1e-9, 'slow render frames must preserve elapsed scene time, matching native audio');
@@ -421,13 +428,13 @@ async function main() {
   host._mapConfigReady = true;
   host._runtime = {
     camera: new THREE.PerspectiveCamera(),
-    scene: new THREE.Scene(),
+    renderer: { render() {}, clearDepth() {} },
   };
   host._runtime.camera.updateMatrixWorld();
   host._runtime.session = { mode: "slam" };
-  host.scene = host._runtime.scene;
-  host.shadowRoot = new THREE.Group();
-  host.scene.add(host.shadowRoot);
+  attachLayers(host._runtime);
+  host._attachRenderModules();
+  host._runtime.layers.start();
   host._arReady = true;
   host._preloadDone = true;
   host._allowedAssetIds.add("t");
@@ -484,50 +491,59 @@ async function main() {
     "PASS production component dependencies/handlers, -Z placement, full text cleanup, stale async rejection, anchor whitelist and queue dedup",
   );
 
-  // Compose the real activity source, asset queue, renderer and matching lifecycle.
+  // Compose the registered activity module with the real matching lifecycle.
   host.retrievalMode = "anchor";
   host._matchedAnchorId = null;
   const activityRecord = { id: "coexist-history", activity_placement_id: "activity-placement",
     file_type: "text", text_content: "Visible before matching", metadata: { latitude: 31, longitude: 121 } };
+  const danmaku = host._renderModules.danmaku;
   host._placingBusy = true;
-  host._replaceActivityRecords([activityRecord]);
-  assert.equal(host._placeQueue.length, 1, "history queues before an anchor has matched");
-  await host._drainPlaceQueue();
-  const history = host.nodeList.find(entry => entry.assetId === "activity:coexist-history");
-  assert.ok(history && !history._destroyed, "real text renderer accepts activity history while scanning");
+  danmaku.replaceRecords([activityRecord]);
+  assert.equal(host._placeQueue.length, 0, "history never enters the ordinary asset queue");
+  host._runtime.layers.update(1000, true);
+  const history = danmaku.layer.root.children[0];
+  assert.ok(history, "real text renderer accepts activity history while scanning");
   host.showDanmakuInXR("Live while scanning", { id: "coexist-live", placement_id: "activity-placement" });
-  const live = host.nodeList.find(entry => entry.assetId === "activity:coexist-live");
-  assert.ok(live && !live._destroyed, "acknowledged messages render while scanning");
-  const activityEpoch = host._activityEpoch;
+  const live = danmaku.layer.root.children[1];
+  assert.ok(live, "acknowledged messages render while scanning");
+  const activityCurrent = danmaku.layer.capture();
   host._sessionActive = true; host._cameraReady = true;
   const recognize = host.recognizeAnchor;
   host.recognizeAnchor = () => {};
   host.rescan();
-  assert.equal(host._activityEpoch, activityEpoch, "rescan preserves activity requests");
-  assert.ok(host.nodeList.includes(history) && host.nodeList.includes(live));
-  assert.equal(history.node.parent, host.shadowRoot, "orphan cleanup must retain activity nodes");
+  assert.equal(activityCurrent(), true, "rescan preserves the activity lifecycle");
+  assert.equal(history.parent, danmaku.layer.root);
+  assert.equal(live.parent, danmaku.layer.root);
+  assert.equal(host.nodeList.length, 0, "activity has its own node index and capacity");
+  host._placingBusy = false;
   host._matchPhase = "tracking";
   host._pendingMatchPlacement = { epoch: host._modeEpoch, matchedAt: Date.now(), candidate: { id: "coexist-anchor" },
     assets: [{ id: "coexist-content", file_type: "text", text_content: "Matched content" }] };
   host._finishMatchPlacement();
   assert.ok(host.nodeList.some(entry => entry.assetId === "coexist-content"));
-  assert.ok(host.nodeList.includes(history) && host.nodeList.includes(live), "matching cannot erase messages");
+  assert.equal(history.parent, danmaku.layer.root, "matching cannot erase messages");
   await host._drainPlaceQueue();
-  host._placingBusy = true;
-  host._replaceActivityRecords([activityRecord, { ...activityRecord, id: "queued-activity" }]);
+  danmaku.replaceRecords([activityRecord, { ...activityRecord, id: "queued-activity" }]);
   host.restartRecognitionAfterMovement(host.currentGPS, { distanceMeters: 30, thresholdMeters: 20 });
   assert.equal(host.nodeList.some(entry => entry.assetId === "coexist-content"), false);
-  assert.ok(host.nodeList.includes(history));
-  await host._drainPlaceQueue();
-  assert.ok(host.nodeList.some(entry => entry.assetId === "activity:queued-activity"), "pending activity text survives scan content epochs");
+  host._runtime.layers.update(1100, true);
+  assert.ok(danmaku.snapshot().records.includes("queued-activity"), "activity queue survives scan reset");
+  // Turning off only the activity module leaves ordinary scene content untouched.
+  host._matchedAnchorId = "coexist-anchor"; host._allowedAssetIds.add("ordinary-survivor");
+  host._placeTextAsset({ id: "ordinary-survivor", file_type: "text", text_content: "World", _contentEpoch: host._contentEpoch });
+  danmaku.layer.setEnabled(false);
+  assert.equal(danmaku.layer.root.children.length, 0);
+  assert.equal(host.nodeList.length, 1);
+  danmaku.layer.setEnabled(true);
   host.pauseRetrieval();
   assert.equal(host.nodeList.length, 0);
   assert.equal(host.shadowRoot.children.length, 0);
-  assert.equal(host._activityRecordIds.size, 0);
-  assert.equal(host._activityEpoch, activityEpoch + 1, "backgrounding cancels activity requests");
+  assert.equal(activityCurrent(), false, "backgrounding invalidates the activity generation");
+  assert.equal(danmaku.snapshot().queued.length, 0);
   host.recognizeAnchor = recognize;
   host._retrievalPaused = false;
-  console.log("PASS matching + activity history/live rendering, rescan/match/movement preservation, full session cleanup");
+  host._runtime.layers.start();
+  console.log("PASS independent activity queue/nodes, rescan/match/movement preservation, module disable and session cleanup");
 
   // Exercise real async placement, including switching away and back to the same anchor/id.
   const allow = (id) => {
@@ -620,6 +636,7 @@ async function main() {
     onReady: () => host.handleARReady(), onTick: dt => host.handleTick(dt),
     onState: (state, message) => { trackingStates.push(state); host.onARState(state, message); },
   });
+  host._runtime.layers.renderer = host._runtime.renderer;
   await host._acceptImageMatch({ id: "matched-place", name: "Place", reference_version: "v1" });
   assert.equal(host._matchPhase, 'tracking');
   assert.equal(host.nodeList.length, 0);
@@ -760,7 +777,7 @@ async function main() {
     "assets/video.js",
     "assets/text.js",
     "assets/huge.js",
-    "effects/danmaku.js",
+    "render-modules/danmaku.js",
     "effects/confetti.js",
   ]) {
     assert.doesNotMatch(

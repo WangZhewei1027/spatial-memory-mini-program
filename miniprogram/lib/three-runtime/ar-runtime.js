@@ -1,15 +1,14 @@
 const { THREE, probeWebGL2, createCanvasFacade, disposeRenderer } = require("./runtime");
 const { VKSessionController } = require("./vk-session");
-const { sceneFarPlane } = require("./camera-clipping");
+const { RenderLayers } = require("./render-layers");
 const {
   createCameraBackground,
   syncVKCamera,
 } = require("./vk-renderer");
-const { disposeTree } = require("./resources");
 class ARRuntime {
   constructor(
     canvas,
-    { width, height, onReady, onTick, onState, onCameraFrame, requireTracking, debugTimings = false },
+    { width, height, onReady, onTick, onState, onCameraFrame, requireTracking, onLayersChange, onLayerError, debugTimings = false },
   ) {
     this.canvas = canvas;
     this.onReady = onReady;
@@ -38,13 +37,13 @@ class ARRuntime {
         this.shaderError =
           context.getProgramInfoLog(program) || "Three shader 编译失败";
       };
-      this.scene = new THREE.Scene();
-      // Content uses native v2 camera poses; pixel recognition runs in a Worker.
+      // Modules share the native camera, renderer and frame clock, not a content tree.
       this.camera = new THREE.PerspectiveCamera(60, 1, 0.01, 300);
-      this.content = new THREE.Group();
-      this.scene.add(this.content);
-      this.lighting = THREE.createSceneLighting(this.renderer, this.scene);
-      this.lighting.apply();
+      this.layers = new RenderLayers({ renderer: this.renderer, camera: this.camera,
+        onChange: onLayersChange, onError: onLayerError,
+        getRenderError: () => { const message = this.shaderError; this.shaderError = null; return message ? new Error(message) : null; },
+      });
+      this.renderer.info.autoReset = false;
       this.background = createCameraBackground(gl);
       this.renderer.resetState();
       this.resize(width, height);
@@ -58,13 +57,13 @@ class ARRuntime {
         onState: (state, message) => {
           if (state === "error") {
             this.ready = false;
+            this.layers.pause();
           }
           this.onState(state, message);
         },
       });
     } catch (error) {
-      this.lighting?.dispose();
-      disposeTree(this.scene);
+      this.layers?.dispose();
       this.background?.dispose();
       disposeRenderer(this.renderer);
       throw error;
@@ -74,6 +73,7 @@ class ARRuntime {
     width = Math.max(16, width);
     height = Math.max(16, height);
     this.renderer.setSize(width, height, false);
+    this.layers?.resize(width, height);
     // Before the first native pose; afterwards VisionKit supplies the projection.
     if (!this.session) {
       this.camera.aspect = width / height;
@@ -82,6 +82,8 @@ class ARRuntime {
   }
   start() {
     this.stop();
+    this.layers.clear("session");
+    this.layers.start();
     this.ready = false;
     this.tracking = null;
     this.shaderError = null;
@@ -96,6 +98,7 @@ class ARRuntime {
   }
   stop() {
     this.ready = false;
+    this.layers?.pause();
     this.session.stop();
   }
   updateTracking(valid) {
@@ -112,6 +115,7 @@ class ARRuntime {
         throw new Error("未取得相机帧，请检查设备兼容性和权限");
       return;
     }
+    this.renderer.info?.reset?.();
     const poseValid = this.session.isTracking() &&
       syncVKCamera(this.camera, frame.camera, 0.01, this.camera.far);
     const matrixMs = Date.now() - start;
@@ -138,6 +142,8 @@ class ARRuntime {
     // Never place or render spatial content against an initializing/stale pose.
     // Keep the camera background visible while native tracking recovers.
     if (!poseValid) {
+      this.layers.update(now, false);
+      this.layers.render(false);
       if (this.requireTracking?.() === false) this.trackingWaitAt = null;
       else if (this.trackingWaitAt == null) this.trackingWaitAt = start;
       if (this.trackingWaitAt != null && start - this.trackingWaitAt > 30000)
@@ -159,11 +165,12 @@ class ARRuntime {
     this.lastFrameAt = now;
     const businessAt = Date.now();
     this.onTick(dt);
-    const far = sceneFarPlane(this.camera, this.content);
+    this.layers.update(now, true);
+    const far = this.layers.farPlane();
     if (far !== this.camera.far) syncVKCamera(this.camera, frame.camera, 0.01, far);
     const businessMs = Date.now() - businessAt,
       renderAt = Date.now();
-    THREE.renderSceneContent(this.renderer, this.scene, this.camera, this.content, this.lighting);
+    this.layers.render(true);
     if (this.shaderError) throw new Error(this.shaderError);
     this.frames = (this.frames || 0) + 1;
     if (!this.reportAt) this.reportAt = now;
@@ -191,8 +198,7 @@ class ARRuntime {
   dispose() {
     this.disposed = true;
     this.stop();
-    this.lighting.dispose();
-    disposeTree(this.scene);
+    this.layers.dispose();
     this.background.dispose();
     disposeRenderer(this.renderer);
   }

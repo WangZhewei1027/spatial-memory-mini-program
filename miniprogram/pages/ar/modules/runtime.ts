@@ -1,7 +1,11 @@
 import type { ArPageContext, DetailEvent } from "./context";
 import type { createUiRegistry } from "../../../utils/ar-ui/registry";
-export const runtimeData = { retrievalMode: "gps", mapConfigReady: false, footerEnabled: false, runtimeState: "等待相机", runtimeError: "" };
+export const runtimeData = { retrievalMode: "gps", mapConfigReady: false, footerEnabled: false, runtimeState: "等待相机", runtimeError: "", renderLayers: [] as { id: string; label: string; enabled: boolean; state: string; nodes: number; error: string }[] };
 export const runtimeMethods = {
+  onRenderLayers(event: DetailEvent) {
+    this.setData({ renderLayers: Array.isArray(event.detail.layers) ? event.detail.layers : [] });
+    this.syncUI();
+  },
   onAssetError(event: DetailEvent) {
     const message = event.detail?.message || "素材加载失败";
     this.setData({ runtimeError: String(message) });
@@ -29,6 +33,9 @@ export function registerRuntime(page: ArPageContext, registry: ReturnType<typeof
   const branding = registry.register({ id: "branding", slot: "overlay" });
   return { sync() {
     runtime.update({ enabled: true }); diagnostics.update({ enabled: true }); branding.update({ enabled: page.data.footerEnabled });
-    runtime.publishDebug([{ key: "camera", label: "相机", value: page.data.runtimeError || page.data.runtimeState, level: page.data.runtimeError ? "error" : "info", order: 40 }]);
+    runtime.publishDebug([{ key: "camera", label: "相机", value: page.data.runtimeError || page.data.runtimeState, level: page.data.runtimeError ? "error" : "info", order: 40 }, ...page.data.renderLayers.filter(layer => layer.enabled || layer.error).map((layer, index) => ({
+      key: `layer:${layer.id}`, label: layer.label, value: layer.error || `${layer.nodes} 项 · ${layer.state === "running" ? "运行" : "暂停"}`,
+      level: layer.error ? "error" as const : "info" as const, order: 50 + index,
+    }))]);
   } };
 }

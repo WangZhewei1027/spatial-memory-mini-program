@@ -4,7 +4,7 @@ const { disposeTree } = require("../../../lib/three-runtime/resources");
  *   - 每个节点按 registry.js 声明的 descriptor.bucket 归入一个容量桶。
  *   - 每桶按 config.js 中 buckets[bucket] 的 { cap, evict } 独立限容，互不驱逐。
  *   - evict='farthest'：离用户【位置】最远的先踢（转头不变，只随移动缓慢淘汰）。
- *     evict='fifo'    ：注册顺序最旧的先踢（短命弹幕）。
+ *     evict='fifo'    ：注册顺序最旧的先踢。
  *   - minLifetimeMs：新节点在此窗口内不参与驱逐，防止"刚淡入就被挤掉"的一闪。
  * 加新素材类型无需改本文件，只需在 registry.js 加一项描述符。
  */
@@ -14,9 +14,9 @@ module.exports = function (XR_CONFIG) {
   return {
     /**
      * 注册一个已创建好的场景节点，追加到 nodeList 末尾，并触发其所属桶的容量检查。
-     * @param {number|null} assetId 素材库 id（本地直发弹幕为 null）
-     * @param {Element} node 场景根节点
-     * @param {Element|null} billboardEl 朝向相机的目标节点（null 表示不朝向）
+     * @param {string|null} assetId 投放记录 id
+     * @param {Object3D} node 场景根节点
+     * @param {Object3D|null} billboardEl 朝向相机的目标节点（null 表示不朝向）
      * @param {{ type?: string, audioRefs?: object, videoRefs?: object }} [opts]
      *        type 决定桶归属（查 registry）；audioRefs/videoRefs 供 dispose 释放资源。
      * @returns {object} 新建的 entry（供放置器后续挂 modelAnim 等）
@@ -52,7 +52,7 @@ module.exports = function (XR_CONFIG) {
       if (
         this._disposed ||
         this._retrievalPaused ||
-        (this.retrievalMode === "anchor" && !this._activityRecordIds?.has(assetId) &&
+        (this.retrievalMode === "anchor" &&
           (assetId == null || !this._matchedAnchorId)) ||
         (assetId != null &&
           ((o.contentEpoch ?? this._activePlacementEpoch) !==
@@ -61,6 +61,15 @@ module.exports = function (XR_CONFIG) {
       ) {
         this._destroyNode(newEntry);
         return newEntry;
+      }
+      const layer = this._getRenderLayer?.(type);
+      if (layer) {
+        newEntry.layer = layer;
+        if (!layer.mount(node, { current: o.current, dispose: () => {
+          const index = this.nodeList.indexOf(newEntry);
+          if (index >= 0) this.nodeList.splice(index, 1);
+          this._disposeNode(newEntry);
+        } })) return newEntry;
       }
       this.nodeList.push(newEntry);
       // 音频子列表：tickAudioVolume 每帧直接用，免去 nodeList.filter 的每帧分配
@@ -211,6 +220,10 @@ module.exports = function (XR_CONFIG) {
 
     /** 统一销毁一个 nodeList 条目：移除场景节点 + 调该类型 descriptor.dispose 释放资源。 */
     _destroyNode(entry) {
+      if (entry?.layer?.remove(entry.node)) return;
+      this._disposeNode(entry);
+    },
+    _disposeNode(entry) {
       if (!entry || entry._destroyed) return;
       entry._destroyed = true;
       const node = entry.node;
