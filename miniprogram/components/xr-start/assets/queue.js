@@ -52,7 +52,7 @@ module.exports = function (XR_CONFIG) {
       if (
         this._disposed ||
         this._retrievalPaused ||
-        (this.retrievalMode === "anchor" &&
+        (this.retrievalMode === "anchor" && !this._activityRecordIds?.has(assetId) &&
           (assetId == null || !this._matchedAnchorId)) ||
         (assetId != null &&
           ((o.contentEpoch ?? this._activePlacementEpoch) !==

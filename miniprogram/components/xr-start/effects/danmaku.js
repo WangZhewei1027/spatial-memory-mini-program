@@ -3,7 +3,7 @@ const { createTextAsset } = require("../../../lib/three-runtime/text");
 module.exports = () => ({
   showDanmakuInXR(text, record) {
     if (
-      this.retrievalMode === "anchor" ||
+      this._scenePreviewMode ||
       this._retrievalPaused ||
       this._disposed ||
       !this._arReady ||

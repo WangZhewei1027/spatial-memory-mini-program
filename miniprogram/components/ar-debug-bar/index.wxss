@@ -1,0 +1,7 @@
+@import "../../styles/ar-theme.wxss";
+.debug-bar { height: var(--ar-debug-height); width: 100%; background: rgba(20, 24, 20, 0.94); color: #e2e9df; white-space: nowrap; }
+.debug-line { display: inline-flex; align-items: center; height: var(--ar-debug-height); padding: 0 20rpx; }
+.debug-item { display: inline-flex; align-items: center; flex-shrink: 0; height: var(--ar-debug-height); line-height: var(--ar-debug-height); margin-right: 24rpx; font-size: 21rpx; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.debug-label { margin-right: 10rpx; color: var(--ar-accent); }
+.debug-item--warning { color: #e9c18b; }
+.debug-item--error { color: #ffb4a9; }

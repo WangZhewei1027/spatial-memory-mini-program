@@ -1,3 +1,4 @@
+const emitModuleAction = require("../../utils/ar-ui/action");
 import { fetchActivityProgress, submitActivityRecord } from "../../utils/backend";
 import { reportError } from "../../utils/report-error";
 import { activityDistance, activityParticipantId, activityRequestKey, validActivityLocation, withinActivityScope } from "../../utils/activity-state";
@@ -16,6 +17,8 @@ Component({
     activities: { type: Array, value: [] },
     location: { type: Object, value: null },
     visible: { type: Boolean, value: false },
+    // Keyboard compaction hides only the panel; it must not stop active navigation.
+    panelCollapsed: { type: Boolean, value: false },
     compassHeading: { type: Number, value: 0 },
   },
 
@@ -47,7 +50,7 @@ Component({
     activities() { this._selectActivity(); },
     visible(value) {
       if (value) { this._refreshDistances(); void this.loadProgress(); }
-      else { this.setData({ isNavigating: false }); this.triggerEvent("navchange", { shop: null }); }
+      else { this.setData({ isNavigating: false }); emitModuleAction(this, "shop", "target", { shop: null }); }
     },
     location() { this._refreshDistances(); },
     compassHeading() { this._refreshNavUI(); },
@@ -68,7 +71,7 @@ Component({
         shops: this._computeDistances(activeActivity?.points || [], activeActivity), checkedPointIds: {}, checkedInCount: 0 });
       this._applyProgress();
       if (wasNavigating && this.data.shops[selectedShopIdx]) this._activateNavigation(this.data.shops[selectedShopIdx]);
-      else this.triggerEvent("navchange", { shop: null });
+      else emitModuleAction(this, "shop", "target", { shop: null });
       if (this.properties.visible) void this.loadProgress();
     },
 
@@ -178,10 +181,12 @@ Component({
 
     _showReward(point) {
       this.setData({ showCheckinModal: true, checkinImageUrl: point.reward_url || "", checkinShopName: point.name });
+      emitModuleAction(this, "shop", "reward", { visible: true, title: point.name, image: point.reward_url || "" });
     },
 
     closeCheckinModal() {
       this.setData({ showCheckinModal: false, checkinImageUrl: "", checkinShopName: "" });
+      emitModuleAction(this, "shop", "reward", { visible: false, title: "", image: "" });
     },
 
     saveCheckinImage() {
@@ -235,7 +240,7 @@ Component({
     _activateNavigation(shop) {
       if (!validActivityLocation(shop)) {
         this.setData({ isNavigating: false });
-        this.triggerEvent("navchange", { shop: null });
+        emitModuleAction(this, "shop", "target", { shop: null });
         return;
       }
       this.setData({
@@ -245,7 +250,7 @@ Component({
       });
       this._refreshNavUI();
       // 通知父页面导航目标变更
-      this.triggerEvent("navchange", { shop });
+      emitModuleAction(this, "shop", "target", { shop });
     },
 
     _refreshNavUI() {
@@ -269,6 +274,7 @@ Component({
         navRelAngle: Math.round(relAngle),
         navDistance: `${Math.round(dist)}m`,
       });
+      emitModuleAction(this, "shop", "compass", { visible: true, title: this.data.navShopName, distance: this.data.navDistance, angle: this.data.navRelAngle });
     },
   },
 });

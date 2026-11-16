@@ -8,8 +8,8 @@ const recordRenderId = (id) => `activity:${id}`;
 /** Activity records are fetched independently; only the final text rendering is shared with assets. */
 module.exports = (XR_CONFIG) => ({
   async refreshActivityContent() {
-    if (this._disposed || this._retrievalPaused || this._scenePreviewMode || this.retrievalMode !== "gps" || !this._arReady) return;
-    const epoch = this._modeEpoch;
+    if (this._disposed || this._retrievalPaused || this._scenePreviewMode || !this._arReady) return;
+    const epoch = this._activityEpoch;
     if (this._activityFetch?.epoch === epoch) return;
     if (this._activityFetchEpoch === epoch && Date.now() < this._activityNextFetch) return;
     this._activityFetchEpoch = epoch;
@@ -17,8 +17,8 @@ module.exports = (XR_CONFIG) => ({
     const request = { epoch, revision: this._activityRevision || 0, discoverySequence: nextActivityDiscoverySequence() };
     this._activityFetch = request;
     const location = this.currentGPS;
-    const current = () => !this._disposed && !this._retrievalPaused && epoch === this._modeEpoch &&
-      this.retrievalMode === "gps" && request.revision === (this._activityRevision || 0) && isCurrentActivityDiscovery(request.discoverySequence);
+    const current = () => !this._disposed && !this._retrievalPaused && epoch === this._activityEpoch &&
+      !this._scenePreviewMode && request.revision === (this._activityRevision || 0) && isCurrentActivityDiscovery(request.discoverySequence);
     try {
       if (!CONFIG.organizationId || !validActivityLocation(location)) {
         this._replaceActivityRecords([]);

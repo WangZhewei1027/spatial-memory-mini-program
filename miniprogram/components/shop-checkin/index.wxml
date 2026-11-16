@@ -1,31 +1,5 @@
-<!-- 导航方向覆层 -->
-<view class="nav-overlay" wx:if="{{isNavigating}}">
-  <view class="nav-compass-ring">
-    <view class="nav-arrow-wrap" style="transform: rotate({{navRelAngle}}deg)">
-      <view class="nav-arrow-head"></view>
-      <view class="nav-arrow-tail"></view>
-    </view>
-  </view>
-  <view class="nav-info-row">
-    <text class="nav-shop-name">{{navShopName}}</text>
-    <text class="nav-dist">{{navDistance}}</text>
-  </view>
-</view>
-
-<!-- 打卡成功弹窗 -->
-<view class="checkin-mask" wx:if="{{showCheckinModal}}" bindtap="closeCheckinModal">
-  <view class="checkin-modal" catchtap="">
-    <text class="checkin-modal-title">{{checkinShopName}} · 打卡成功</text>
-    <image wx:if="{{checkinImageUrl}}" class="checkin-modal-img" src="{{checkinImageUrl}}" mode="aspectFit" />
-    <view class="checkin-modal-actions">
-      <view wx:if="{{checkinImageUrl}}" class="checkin-save-btn" bindtap="saveCheckinImage">保存到相册</view>
-      <view class="checkin-close-btn" bindtap="closeCheckinModal">关闭</view>
-    </view>
-  </view>
-</view>
-
 <!-- 店铺卡片列表 -->
-<view class="shop-swiper-wrap" wx:if="{{visible}}">
+<view class="shop-swiper-wrap" wx:if="{{visible && !panelCollapsed}}">
   <picker wx:if="{{activities.length > 1}}" range="{{activities}}" range-key="display_name" value="{{selectedActivityIdx}}" disabled="{{!!submittingPointId}}" bindchange="onActivityChange" aria-label="选择店铺打卡活动">
     <view class="shop-activity-picker">{{activeActivity.display_name}} · 切换活动</view>
   </picker>

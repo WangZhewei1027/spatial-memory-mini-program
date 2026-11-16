@@ -33,13 +33,13 @@ module.exports = {
   _matchLog(event, fields = {}, level = 'info') {
     matchLog(event, { run: this._modeEpoch, phase: this._matchPhase, ...fields }, level);
   },
-  _recognitionStatus(message) {
+  _recognitionStatus(message, hint = message) {
     if (this._disposed) return;
     const locked = this._matchPhase === PHASES.LOCKED;
-    const key = `${this.retrievalMode}:${locked}:${message}`;
+    const key = `${this.retrievalMode}:${locked}:${message}:${hint}`;
     if (key === this._lastRecognitionStatus) return;
     this._lastRecognitionStatus = key;
-    this.triggerEvent('recognitionstatus', { mode: this.retrievalMode, message, locked });
+    this.triggerEvent('recognitionstatus', { mode: this.retrievalMode, message: hint, diagnostic: hint === message ? '' : message, phase: this._matchPhase, locked });
   },
   // Second status line: whether a frame is being matched, when, and the scores
   // of every completed frame. Only emitted while scanning (at most ~2 per second).
@@ -69,7 +69,7 @@ module.exports = {
   rescan() {
     if (this._disposed || this._retrievalPaused || this.retrievalMode !== 'anchor') return;
     this._cancelRetrieval('rescan');
-    this._clearRemoteAssets();
+    this._clearRemoteAssets({ preserveActivities: true });
     this._recognitionStatus('正在准备重新扫描…');
     this._startMatchDiagnostics('rescan');
     // Keep the metric session and its established coordinate system alive.
@@ -114,7 +114,7 @@ module.exports = {
     } finally { if (this._modeEpoch === epoch) this._matchLocating = false; }
   },
   restartRecognitionAfterMovement(gps, movement) {
-    this._cancelRetrieval('movement'); this._clearRemoteAssets();
+    this._cancelRetrieval('movement'); this._clearRemoteAssets({ preserveActivities: true });
     this._candidateRefreshGPS = gps;
     this._startMatchDiagnostics('movement');
     this._matchLog('移动后刷新目标', { distanceMeters: +movement.distanceMeters.toFixed(1),
@@ -169,7 +169,7 @@ module.exports = {
       cache.protect(this._matchCandidates);
       for (const candidate of this._matchCandidates) {
         if (!current()) return;
-        this._recognitionStatus(`正在准备参考图（${references.length + failures.length + 1}/${this._matchCandidates.length}）…`);
+        this._recognitionStatus(`正在准备参考图（${references.length + failures.length + 1}/${this._matchCandidates.length}）…`, "正在准备图像识别…");
         try {
           this._matchStage('preparing_reference');
           const startedAt = Date.now();
@@ -217,7 +217,7 @@ module.exports = {
       this._stopMatcher(); this._matchReferences = []; this._matchCandidates = []; this._matchEvidence = null;
       this._setMatchPhase(PHASES.ERROR); this._nextRecognitionAt = Infinity;
       this._matchLog('识别准备失败', errorFields(error), 'error');
-      this._recognitionStatus(error.message || error.errMsg || '识别准备失败，请重新扫描');
+      this._recognitionStatus(error.message || error.errMsg || '识别准备失败', '识别准备失败，请重新扫描');
       this._stopMatchDiagnostics('preparation_error');
     } finally { if (this._modeEpoch === epoch) this._matchPreparing = false; }
   },
@@ -290,9 +290,10 @@ module.exports = {
       this._matchProgress(`${clockTime(now)} #${this._matchFrameCount} 相似度 ${this._lastMatchScores}` +
         ` · 次高 ${score(evaluation.second)} · 阈值 ${config.minimumScore} · 差 ${score(evaluation.margin)}` +
         ` · ${elapsed}ms · 下次 ${((this._nextMatchFrameAt - capturedAt) / 1000).toFixed(1)}s 后`);
-      if (!result.confirmed) this._recognitionStatus(match
-        ? `正在确认：${match.reference.name || '目标'}（${result.evidence.count}/${config.minimumObservations}）`
-        : this._scanStatusMessage || '自动识别中 · 请对准目标');
+      if (!result.confirmed) {
+        const hint = match ? `正在确认：${match.reference.name || '目标'} · 请保持镜头稳定` : this._scanStatusMessage || '自动识别中 · 请对准目标';
+        this._recognitionStatus(match ? `确认 ${result.evidence.count}/${config.minimumObservations}` : hint, hint);
+      }
       if (result.confirmed) {
         this._matchLog('确认命中', { anchorId: match.reference.id, score: +match.score.toFixed(4), inferenceMs, elapsedMs: elapsed });
         void this._acceptImageMatch(match.reference);
@@ -305,7 +306,7 @@ module.exports = {
     this._stopMatcher(); this._matchFrameBusy = false; this._matchEvidence = null;
     this._setMatchPhase(PHASES.ERROR); this._nextRecognitionAt = Infinity;
     this._matchLog('图像识别失败', errorFields(error), 'error');
-    this._recognitionStatus(error.message || '图像识别失败，请重新扫描');
+    this._recognitionStatus(error.message || '图像识别失败', '图像识别失败，请重新扫描');
     this._stopMatchDiagnostics('inference_error');
   },
   async _acceptImageMatch(candidate) {
@@ -329,7 +330,7 @@ module.exports = {
       if (!this._recognitionCurrent(epoch)) return;
       this._setMatchPhase(PHASES.ERROR); this._nextRecognitionAt = Infinity;
       this._matchLog('内容读取失败', errorFields(error), 'error');
-      this._recognitionStatus(error.message || '内容加载失败，请重新扫描');
+      this._recognitionStatus(error.message || '内容加载失败', '内容加载失败，请重新扫描');
     }
   },
   _finishMatchPlacement() {
@@ -338,8 +339,8 @@ module.exports = {
         this._runtime?.session.mode !== 'slam') return;
     this._pendingMatchPlacement = null;
     const { epoch, matchedAt, candidate, assets } = pending;
-    this._clearRemoteAssets(); this._matchedAnchorId = candidate.id;
-    this._allowedAssetIds = new Set(assets.map(a => a.id));
+    this._clearRemoteAssets({ preserveActivities: true }); this._matchedAnchorId = candidate.id;
+    for (const asset of assets) this._allowedAssetIds.add(asset.id);
     this._recognitionTiming = { requestId: `image-${epoch}-${matchedAt}`, startedAt: matchedAt, matchedAt,
       anchorId: candidate.id, contentEpoch: this._contentEpoch };
     this._setMatchPhase(PHASES.LOCKED); this.displayAssets(assets);

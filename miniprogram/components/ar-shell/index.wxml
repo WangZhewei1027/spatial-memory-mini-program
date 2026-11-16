@@ -1,0 +1,21 @@
+<view class="ar-shell ar-theme">
+  <view class="scene-slot"><slot name="scene" /></view>
+  <view class="top-slot"><slot name="top" /></view>
+  <view class="overlay-slot"><slot name="overlay" /></view>
+  <view wx:if="{{items.length}}" class="bottom-area {{keyboardHeight > 0 ? 'bottom-area--typing' : ''}}" style="bottom: {{keyboardHeight}}px;">
+    <view class="bottom-panel {{expanded ? '' : 'bottom-panel--collapsed'}}"><slot name="bottom" /></view>
+    <view class="bottom-navbar" aria-label="AR 功能导航">
+      <button wx:for="{{items}}" wx:key="key" size="mini"
+        class="bottom-nav-item {{active === item.key && expanded ? 'bottom-nav-item--active' : ''}}"
+        data-panel="{{item.key}}" bindtap="onSelect"
+        aria-label="{{active === item.key && expanded ? '收起' : '打开'}}{{item.label}}面板">
+        <view class="nav-icon-wrap">
+          <image class="nav-icon" src="/assets/{{item.icon}}.svg" mode="aspectFit" />
+          <view wx:if="{{item.badge === 'warning'}}" class="nav-status-dot nav-status-dot--warning"></view>
+          <view wx:elif="{{item.badge === 'ready'}}" class="nav-status-dot"></view>
+        </view>
+        <text class="nav-label">{{item.label}}</text>
+      </button>
+    </view>
+  </view>
+</view>

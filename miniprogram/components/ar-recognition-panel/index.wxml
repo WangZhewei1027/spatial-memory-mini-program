@@ -1,0 +1,4 @@
+<view wx:if="{{active}}" class="feature-panel ar-theme">
+  <view class="panel-heading"><text class="panel-title">匹配识别</text><button size="mini" class="panel-action" bindtap="onRescan">重新扫描</button></view>
+  <text class="retrieval-status">{{status}}</text>
+</view>

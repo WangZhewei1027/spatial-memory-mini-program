@@ -360,6 +360,51 @@ async function main() {
     "PASS production component dependencies/handlers, -Z placement, full text cleanup, stale async rejection, anchor whitelist and queue dedup",
   );
 
+  // Compose the real activity source, asset queue, renderer and matching lifecycle.
+  host.retrievalMode = "anchor";
+  host._matchedAnchorId = null;
+  const activityRecord = { id: "coexist-history", activity_placement_id: "activity-placement",
+    file_type: "text", text_content: "Visible before matching", metadata: { latitude: 31, longitude: 121 } };
+  host._placingBusy = true;
+  host._replaceActivityRecords([activityRecord]);
+  assert.equal(host._placeQueue.length, 1, "history queues before an anchor has matched");
+  await host._drainPlaceQueue();
+  const history = host.nodeList.find(entry => entry.assetId === "activity:coexist-history");
+  assert.ok(history && !history._destroyed, "real text renderer accepts activity history while scanning");
+  host.showDanmakuInXR("Live while scanning", { id: "coexist-live", placement_id: "activity-placement" });
+  const live = host.nodeList.find(entry => entry.assetId === "activity:coexist-live");
+  assert.ok(live && !live._destroyed, "acknowledged messages render while scanning");
+  const activityEpoch = host._activityEpoch;
+  host._sessionActive = true; host._cameraReady = true;
+  const recognize = host.recognizeAnchor;
+  host.recognizeAnchor = () => {};
+  host.rescan();
+  assert.equal(host._activityEpoch, activityEpoch, "rescan preserves activity requests");
+  assert.ok(host.nodeList.includes(history) && host.nodeList.includes(live));
+  assert.equal(history.node.parent, host.shadowRoot, "orphan cleanup must retain activity nodes");
+  host._matchPhase = "tracking";
+  host._pendingMatchPlacement = { epoch: host._modeEpoch, matchedAt: Date.now(), candidate: { id: "coexist-anchor" },
+    assets: [{ id: "coexist-content", file_type: "text", text_content: "Matched content" }] };
+  host._finishMatchPlacement();
+  assert.ok(host.nodeList.some(entry => entry.assetId === "coexist-content"));
+  assert.ok(host.nodeList.includes(history) && host.nodeList.includes(live), "matching cannot erase messages");
+  await host._drainPlaceQueue();
+  host._placingBusy = true;
+  host._replaceActivityRecords([activityRecord, { ...activityRecord, id: "queued-activity" }]);
+  host.restartRecognitionAfterMovement(host.currentGPS, { distanceMeters: 30, thresholdMeters: 20 });
+  assert.equal(host.nodeList.some(entry => entry.assetId === "coexist-content"), false);
+  assert.ok(host.nodeList.includes(history));
+  await host._drainPlaceQueue();
+  assert.ok(host.nodeList.some(entry => entry.assetId === "activity:queued-activity"), "pending activity text survives scan content epochs");
+  host.pauseRetrieval();
+  assert.equal(host.nodeList.length, 0);
+  assert.equal(host.shadowRoot.children.length, 0);
+  assert.equal(host._activityRecordIds.size, 0);
+  assert.equal(host._activityEpoch, activityEpoch + 1, "backgrounding cancels activity requests");
+  host.recognizeAnchor = recognize;
+  host._retrievalPaused = false;
+  console.log("PASS matching + activity history/live rendering, rescan/match/movement preservation, full session cleanup");
+
   // Exercise real async placement, including switching away and back to the same anchor/id.
   const allow = (id) => {
     host.retrievalMode = "anchor";
@@ -409,12 +454,12 @@ async function main() {
   await modelPlacement;
   assert.equal(modelReleases, 1);
   assert.equal(host.shadowRoot.children.length, 0);
-  // Anchor mode blocks local planting and local danmaku at the entry point.
+  // Unacknowledged local text is still rejected, including in matching mode.
   host.showDanmakuInXR("not associated with the matched anchor");
   assert.equal(host.shadowRoot.children.length, 0);
   host._clearRemoteAssets();
   console.log(
-    "PASS late image/model downloads release resources after clearing, even with the same anchor/id; local content blocked in anchor mode",
+    "PASS late image/model downloads release resources after clearing, even with the same anchor/id; unacknowledged local content blocked",
   );
 
   host.currentGPS = { latitude: 31, longitude: 121, accuracy: 10, sampledAt: Date.now() };
@@ -425,6 +470,7 @@ async function main() {
   host._sessionActive = true; host._cameraReady = true; host._arReady = false;
   wx.uploadFile = () => { throw new Error("camera upload is forbidden"); };
   wx.request = options => {
+    if (options.url.includes("/api/miniapp/activities?")) { options.success({ statusCode: 200, data: [] }); return; }
     assert.ok(options.url.endsWith("/api/miniapp/anchors/content"));
     options.success({ statusCode: 200, data: {
       anchor: { id: "matched-place" }, assets: [{ id: "result-text", file_type: "text", text_content: "Anchor text" }],

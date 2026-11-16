@@ -1,0 +1,5 @@
+<scroll-view scroll-x class="debug-bar ar-theme" show-scrollbar="{{false}}" aria-label="调试信息，可横向滑动">
+  <view class="debug-line">
+    <view wx:for="{{items}}" wx:key="key" class="debug-item debug-item--{{item.level || 'info'}}"><text class="debug-label">{{item.label}}</text><text>{{item.value}}</text></view>
+  </view>
+</scroll-view>

@@ -1,7 +1,12 @@
 {
-    "usingComponents": {
-        "xr-start": "../../components/xr-start/index",
-        "shop-checkin": "../../components/shop-checkin/index"
-    },
-    "disableScroll": true
+  "usingComponents": {
+    "xr-start": "../../components/xr-start/index",
+    "shop-checkin": "../../components/shop-checkin/index",
+    "ar-shell": "../../components/ar-shell/index",
+    "ar-debug-bar": "../../components/ar-debug-bar/index",
+    "ar-shop-overlays": "../../components/ar-shop-overlays/index",
+    "ar-recognition-panel": "../../components/ar-recognition-panel/index",
+    "ar-danmaku-panel": "../../components/ar-danmaku-panel/index"
+  },
+  "disableScroll": true
 }

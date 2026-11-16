@@ -57,4 +57,4 @@ for (const name of ["beforeCompile", "beforePreview"]) {
 // Upload also refreshes the address, then rejects packages that still contain labs.
 assert.equal(config.scripts.beforeUpload, "sh scripts/before-upload.sh");
 assert.match(fs.readFileSync(path.join(__dirname, "before-upload.sh"), "utf8"), /sync-dev-backend\.sh[\s\S]*check-upload-package\.cjs/);
-console.log("PASS DevTools hooks are enabled for compile, preview and upload");
+console.log("PASS DevTools hook declarations for compile, preview and upload; IDE UI enablement must be verified separately");

@@ -48,7 +48,9 @@ function buildInitialState() {
     firstFetchDone: false,
     currentGPS: null,
     isFetchingAssets: false,
+    _activityEpoch: 0,
     _activityRecordIds: new Set(),
+    _activityRecordPlacements: new Map(),
     _activityNextFetch: 0,
     _activityRevision: 0,
     _activityFetch: null,
@@ -287,11 +289,9 @@ Component({
       for (const entry of this.nodeList)
         if (entry.billboardEl) entry.billboardEl.lookAt(camPos);
       if (this._retrievalPaused) return;
-      if (this.retrievalMode === "anchor") {
-        return;
-      }
-      // Activities can be paused or moderated while the visitor stands still.
-      if (this._activityNextFetch) void this.refreshActivityContent?.();
+      // Activities are independent of how ordinary assets are discovered.
+      if (this.currentGPS) void this.refreshActivityContent?.();
+      if (this.retrievalMode === "anchor") return;
       // Refresh nearby data periodically while spatial placement uses SLAM poses.
       const now = Date.now();
       if (now - this._lastFetchTime >= XR_CONFIG.gpsRefreshMs) {

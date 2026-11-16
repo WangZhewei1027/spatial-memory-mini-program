@@ -1,98 +1,19 @@
-<view class="page-container">
-  <!-- AR 底层画布 -->
+<ar-shell items="{{bottomNavItems}}" active="{{activeBottomPanel}}" expanded="{{bottomPanelExpanded}}" keyboard-height="{{keyboardHeight}}" bind:panelchange="onPanelChange">
+  <xr-start slot="scene" disable-scroll id="main-frame" width="{{renderWidth}}" height="{{renderHeight}}" style="width:{{width}}px;height:{{height}}px;"
+    bind:mapconfigload="onMapConfigLoad" bind:activitiesload="onActivitiesLoad" bind:recognitionstatus="onRecognitionStatus"
+    bind:matchprogress="onMatchProgress" bind:renderstatus="onRenderStatus" bind:asseterror="onAssetError" />
 
-  <!-- 顶部 Logo 叠层 -->
-  <image wx:if="{{footerEnabled}}" class="ar-top-logo" src="/assets/DHL-Outlined.png" mode="aspectFit" />
+  <ar-debug-bar slot="top" items="{{debugItems}}" />
 
-  <xr-start
-    disable-scroll
-    id="main-frame"
-    width="{{renderWidth}}"
-    height="{{renderHeight}}"
-    style="width:{{width}}px;height:{{height}}px;"
-    bind:mapconfigload="onMapConfigLoad"
-    bind:activitiesload="onActivitiesLoad"
-    bind:recognitionstatus="onRecognitionStatus"
-    bind:matchprogress="onMatchProgress"
-    bind:asseterror="onAssetError"
-  />
+  <image slot="overlay" wx:if="{{footerEnabled}}" class="ar-top-logo" src="/assets/DHL-Outlined.png" mode="aspectFit" />
+  <ar-shop-overlays slot="overlay" navigation="{{shopNavigation}}" reward="{{shopReward}}" bind:moduleaction="onModuleAction" />
 
-  <!-- ===== 底部区域 ===== -->
-  <view class="bottom-area">
-
-    <!-- 店铺打卡组件（导航覆层 + 打卡弹窗 + 店铺列表） -->
-    <block wx:if="{{mapConfigReady && shopCheckinEnabled}}">
-      <shop-checkin
-        id="shop-checkin"
-        activities="{{shopActivities}}"
-        visible="{{showShopPanel}}"
-        location="{{location}}"
-        compass-heading="{{compassHeading}}"
-        bind:navchange="onShopNavChange"
-      />
-    </block>
-
-    <view wx:if="{{(mapConfigReady && retrievalMode === 'anchor') || activitiesLoading || activitiesError}}" class="retrieval-panel">
-      <text wx:if="{{mapConfigReady && retrievalMode === 'anchor'}}" class="retrieval-status">{{recognitionStatus}}</text>
-      <text wx:if="{{mapConfigReady && retrievalMode === 'anchor' && matchProgress}}" class="match-progress">{{matchProgress}}</text>
-      <button wx:if="{{mapConfigReady && retrievalMode === 'anchor'}}" class="recognition-rescan-button" bindtap="onRescan" aria-label="重新扫描识别目标">重新扫描</button>
-      <text wx:if="{{activitiesLoading}}" class="activity-status">活动加载中…</text>
-      <button wx:if="{{activitiesError}}" class="activity-retry" bindtap="refreshActivities">{{activitiesError}}</button>
-    </view>
-
-    <view wx:if="{{mapConfigReady && retrievalMode === 'gps' && activeDanmaku}}" class="activity-heading">
-      <picker wx:if="{{danmakuActivities.length > 1}}" range="{{danmakuActivities}}" range-key="display_name" value="{{selectedDanmakuIdx}}" disabled="{{isSubmitting}}" bindchange="onDanmakuActivityChange" aria-label="选择留言活动">
-        <view class="activity-picker">{{activeDanmaku.display_name}} · 切换活动</view>
-      </picker>
-      <text wx:else>{{activeDanmaku.display_name}}</text>
-      <text wx:if="{{!location}}" class="activity-status">等待定位后可留言</text>
-      <text wx:elif="{{!danmakuInRange}}" class="activity-status">进入活动范围后可留言</text>
-    </view>
-
-    <!-- 入口来自当前地图启用的活动投放。 -->
-    <view wx:if="{{mapConfigReady && ((retrievalMode === 'gps' && activeDanmaku) || shopCheckinEnabled)}}" class="danmaku-bar">
-
-      <!-- GPS 调试小窗（点灯泡开关） -->
-      <view wx:if="{{showGpsDebug}}" class="gps-debug-pop">
-        <block wx:if="{{location}}">
-          <view class="gps-debug-row"><text class="gps-debug-label">纬度</text>{{location.latStr}}</view>
-          <view class="gps-debug-row"><text class="gps-debug-label">经度</text>{{location.lngStr}}</view>
-          <view class="gps-debug-row"><text class="gps-debug-label">精度</text>{{location.accuracyStr}}</view>
-          <view class="gps-debug-row"><text class="gps-debug-label">海拔</text>{{location.altitudeStr}}</view>
-        </block>
-        <view wx:else class="gps-debug-row">暂无 GPS 信号</view>
-      </view>
-
-      <view class="gps-dot-tap" bindtap="toggleGpsDebug">
-        <view class="gps-dot {{location ? 'gps-ok' : 'gps-fail'}}"></view>
-      </view>
-      <input
-        wx:if="{{retrievalMode === 'gps' && activeDanmaku}}"
-        class="danmaku-input"
-        placeholder="发个弹幕到AR世界~"
-        value="{{textContent}}"
-        bindinput="onTextInput"
-        maxlength="{{danmakuLimit}}"
-        disabled="{{isSubmitting}}"
-        confirm-type="send"
-        bindconfirm="submitText"
-      />
-      <view
-        wx:if="{{retrievalMode === 'gps' && activeDanmaku}}"
-        class="danmaku-send {{canSubmit ? 'active' : ''}}"
-        bindtap="submitText"
-        aria-role="button"
-        aria-label="{{isSubmitting ? '发送中' : '发送留言'}}"
-        aria-disabled="{{!canSubmit}}"
-      >
-        <image class="send-icon" src="/assets/send.svg" mode="aspectFit" />
-      </view>
-      <view wx:if="{{retrievalMode === 'gps' && activeDanmaku && shopCheckinEnabled}}" class="bar-divider"></view>
-      <text wx:if="{{(retrievalMode !== 'gps' || !activeDanmaku) && shopCheckinEnabled}}" class="shop-activity-label">店铺打卡活动</text>
-      <view wx:if="{{shopCheckinEnabled}}" class="shop-toggle {{showShopPanel ? 'shop-toggle-on' : ''}}" bindtap="toggleShopPanel" aria-role="button" aria-label="{{showShopPanel ? '收起打卡活动' : '打开打卡活动'}}">
-        <image class="shop-toggle-icon" src="/assets/circle-check-big.svg" mode="aspectFit" />
-      </view>
-    </view>
-
-  </view>
-</view>
+  <ar-recognition-panel slot="bottom" active="{{bottomPanelExpanded && activeBottomPanel === 'recognition'}}" status="{{recognitionStatus}}" bind:moduleaction="onModuleAction" />
+  <ar-danmaku-panel slot="bottom" active="{{bottomPanelExpanded && activeBottomPanel === 'danmaku'}}"
+    activity="{{activeDanmaku}}" activities="{{danmakuActivities}}" selected="{{selectedDanmakuIdx}}" submitting="{{isSubmitting}}"
+    text="{{textContent}}" limit="{{danmakuLimit}}" loading="{{activitiesLoading}}" error="{{activitiesError}}"
+    ready="{{mapConfigReady}}" in-range="{{danmakuInRange}}" located="{{!!location}}" can-submit="{{canSubmit}}" bind:moduleaction="onModuleAction" />
+  <shop-checkin slot="bottom" wx:if="{{mapConfigReady && shopCheckinEnabled}}" id="shop-checkin" activities="{{shopActivities}}"
+    visible="{{showShopPanel}}" panel-collapsed="{{activeBottomPanel !== 'shop' || !bottomPanelExpanded}}"
+    location="{{location}}" compass-heading="{{compassHeading}}" bind:moduleaction="onModuleAction" />
+</ar-shell>

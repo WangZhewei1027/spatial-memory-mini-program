@@ -422,3 +422,20 @@ test('a target with several reference images embeds each one and is scored by it
   assert.deepEqual(loaded, image_urls, 'an unchanged version reuses every cached image embedding');
   f.host.pauseRetrieval();
 });
+
+test('recognition events separate technical diagnostics from actionable panel hints', async () => {
+  const f = fixture();
+  await f.host.recognizeAnchor();
+  const preparation = f.statuses.find(event => event.diagnostic.includes('参考图'));
+  assert.equal(preparation.message, '正在准备图像识别…');
+  assert.equal(preparation.phase, 'preparing');
+  await f.sample();
+  const confirmation = f.statuses.at(-1);
+  assert.match(confirmation.diagnostic, /确认 1\/3/);
+  assert.match(confirmation.message, /请保持镜头稳定/);
+  assert.doesNotMatch(confirmation.message, /1\/3/);
+  f.host._failFrameRecognition(new Error('WORKER_KILLED'), f.host._modeEpoch);
+  assert.equal(f.statuses.at(-1).message, '图像识别失败，请重新扫描');
+  assert.equal(f.statuses.at(-1).diagnostic, 'WORKER_KILLED');
+  assert.equal(f.statuses.at(-1).phase, 'error');
+});

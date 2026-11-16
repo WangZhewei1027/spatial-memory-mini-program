@@ -1,0 +1,25 @@
+      <view wx:if="{{active}}" class="feature-panel ar-theme">
+        <view wx:if="{{activity}}" class="panel-heading">
+          <picker wx:if="{{activities.length > 1}}" class="activity-selector" range="{{activities}}" range-key="display_name" value="{{selected}}" disabled="{{submitting}}" bindchange="onSelect" aria-label="选择留言活动">
+            <view class="activity-picker"><text class="panel-title activity-name">{{activity.display_name}}</text><image class="picker-chevron" src="/assets/chevron-down.svg" mode="aspectFit" /></view>
+          </picker>
+          <text wx:else class="panel-title activity-name">{{activity.display_name}}</text>
+          <text class="input-counter">{{text.length}} / {{limit}}</text>
+        </view>
+        <text wx:elif="{{loading}}" class="panel-title">正在加载留言活动…</text>
+        <text wx:if="{{loading && activity}}" class="activity-status">正在更新活动…</text>
+        <button wx:if="{{error}}" class="activity-retry" bindtap="onRetry">{{error}}</button>
+        <block wx:if="{{ready && activity}}">
+          <text wx:if="{{!located}}" class="activity-status">等待定位后可留言</text>
+          <text wx:elif="{{!inRange}}" class="activity-status">进入活动范围后可留言</text>
+          <view class="danmaku-composer">
+            <input class="danmaku-input" placeholder="发个弹幕到AR世界~" placeholder-class="danmaku-placeholder" aria-label="弹幕留言"
+              adjust-position="{{false}}" bindkeyboardheightchange="onKeyboard" bindblur="onBlur"
+              value="{{text}}" bindinput="onInput" maxlength="{{limit}}" disabled="{{submitting}}"
+              confirm-type="send" bindconfirm="onSubmit" />
+            <button size="mini" class="danmaku-send" disabled="{{!canSubmit}}" loading="{{submitting}}" bindtap="onSubmit" aria-label="{{submitting ? '发送中' : '发送留言'}}">
+              <image wx:if="{{!submitting}}" class="send-icon" src="/assets/send.svg" mode="aspectFit" />
+            </button>
+          </view>
+        </block>
+      </view>

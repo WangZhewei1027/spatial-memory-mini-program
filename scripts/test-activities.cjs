@@ -12,7 +12,8 @@ const activity = (n, type = "danmaku", points = []) => ({ id: uuid(n), activity_
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
 function launch(storage = new Map()) {
-  const calls = { requests: [], toasts: [], writes: [], navigation: [], danmaku: [], reports: [] };
+  const calls = { requests: [], toasts: [], writes: [], navigation: [], danmaku: [], reports: [], keyboardHides: 0, retrieval: [], moduleActions: [], headings: [], sensorStops: 0 };
+  let sensorTime = Date.now(), compassCallback;
   const wx = {
     getAccountInfoSync: () => ({ miniProgram: { envVersion: "develop" } }),
     getDeviceInfo: () => ({ platform: "devtools" }),
@@ -20,9 +21,15 @@ function launch(storage = new Map()) {
     setStorageSync(key, value) { storage.set(key, copy(value)); calls.writes.push(key); },
     request(options) { calls.requests.push(options); },
     showToast(options) { calls.toasts.push(options.title); },
+    hideKeyboard() { calls.keyboardHides++; },
+    getLocation({ success }) { success({ ...at, accuracy: 5, altitude: 10 }); },
+    startCompass({ success }) { success(); },
+    onCompassChange(callback) { compassCallback = callback; },
+    offCompassChange(callback) { assert.equal(callback, compassCallback); calls.sensorStops++; },
+    stopCompass() {},
   };
   let pageDefinition, componentDefinition;
-  const context = vm.createContext({ wx, console: { log() {}, error() {} }, setTimeout, clearTimeout,
+  const context = vm.createContext({ wx, Date: class extends Date { static now() { return sensorTime; } }, console: { log() {}, error() {} }, setTimeout, clearTimeout,
     Page(value) { pageDefinition = value; }, Component(value) { componentDefinition = value; } });
   const modules = new Map();
   modules.set(path.join(root, "utils/backend-environment.ts"), { exports: { resolveBackendBaseUrl: () => "https://example.test" } });
@@ -41,7 +48,7 @@ function launch(storage = new Map()) {
   const backend = load(path.join(root, "utils/backend.ts"));
   backend.setConfig({ workspaceId: uuid(900), organizationId: uuid(901) });
   const state = load(path.join(root, "utils/activity-state.ts"));
-  const frame = { pauseRetrieval() {}, resumeRetrieval() {}, setNavigationTarget(value) { calls.navigation.push(value); }, showDanmakuInXR(value) { calls.danmaku.push(value); }, setRetrievalMode() {} };
+  const frame = { updateCompassHeading(value) { calls.headings.push(value); }, pauseRetrieval() { calls.retrieval.push("pause"); }, resumeRetrieval() { calls.retrieval.push("resume"); }, rescan() { calls.retrieval.push("rescan"); }, setNavigationTarget(value) { calls.navigation.push(value); }, showDanmakuInXR(value) { calls.danmaku.push(value); }, setRetrievalMode() {} };
   function page() {
     load(path.join(root, "pages/ar/ar.ts"));
     return { ...pageDefinition, data: copy(pageDefinition.data), setData(patch) { Object.assign(this.data, patch); }, selectComponent() { return frame; } };
@@ -50,9 +57,13 @@ function launch(storage = new Map()) {
     storage.set("checkedInShopIds", legacy);
     load(path.join(root, "components/shop-checkin/index.js"));
     const host = { ...componentDefinition.methods, data: copy(componentDefinition.data), properties: { activities, location: { ...at }, visible: false, compassHeading: 0 },
-      setData(patch) { Object.assign(this.data, patch); }, triggerEvent(name, value) { if (name === "navchange") calls.navigation.push(value.shop); } };
+      setData(patch) { Object.assign(this.data, patch); }, triggerEvent(name, value) { if (name === "moduleaction") { calls.moduleActions.push(value); if (value.action === "target") calls.navigation.push(value.payload.shop); } } };
     componentDefinition.lifetimes.attached.call(host);
     return { host, definition: componentDefinition };
+  }
+  function uiComponent(name, dispatch = () => {}) {
+    load(path.join(root, `components/${name}/index.js`));
+    return { ...componentDefinition.methods, triggerEvent(event, detail) { dispatch(event, detail); } };
   }
   function respond(statusCode, data) {
     const request = calls.requests.shift();
@@ -60,7 +71,7 @@ function launch(storage = new Map()) {
     request.success({ statusCode, data });
     return request;
   }
-  return { backend, state, calls, page, component, storage, respond, activityMethods: () => load(path.join(root, "components/xr-start/activities.js"))({ maxDistanceMeters: 100 }) };
+  return { backend, state, calls, page, component, uiComponent, storage, respond, compass: (heading, ms = 0) => { sensorTime += ms; compassCallback({ direction: heading }); }, activityMethods: () => load(path.join(root, "components/xr-start/activities.js"))({ maxDistanceMeters: 100 }) };
 }
 
 async function main() {
@@ -83,6 +94,22 @@ async function main() {
   const shopMaps = first.state.parseActivityPlacements([sharedShop, { ...sharedShop, id: uuid(4), workspace_id: uuid(904), workspace_name: "Map 4" }], true);
   assert.deepEqual(copy(shopMaps[0].points), copy(shopMaps[1].points), "both maps consume the same fixed activity locations and point IDs");
   assert.notEqual(shopMaps[0].id, shopMaps[1].id, "participation remains scoped to a map association");
+
+  const sensors = launch(), sensorPage = sensors.page();
+  sensorPage._startCompassWatch();
+  sensors.compass(127);
+  assert.equal(sensorPage.data.compassHeading, 127, "first compass sample is accepted");
+  assert.equal(sensorPage.data.debugItems.find(item => item.key === "sensors:heading").value, "127°");
+  sensors.compass(127, 250);
+  assert.deepEqual(sensors.calls.headings, [127], "stationary readings do not redraw the compass");
+  sensors.compass(130, 250);
+  assert.equal(sensorPage.data.compassHeading, 130);
+  assert.equal(sensorPage.data.compassDebugHeading, 127, "top diagnostics update at most once a second");
+  sensors.compass(359, 1000); sensors.compass(0, 250);
+  assert.equal(sensorPage.data.compassHeading, 359, "one-degree changes across north stay below the redraw threshold");
+  sensorPage.onUnload(); sensors.compass(90, 1000);
+  assert.equal(sensorPage.data.compassHeading, 359, "late sensor callbacks cannot update an unloaded page");
+  assert.equal(sensors.calls.sensorStops, 1);
 
   const app = launch();
   const page = app.page();
@@ -128,15 +155,79 @@ async function main() {
   app.respond(200, { id: uuid(501) }); await second;
   page.onMapConfigLoad({ detail: { ready: true, retrievalMode: "anchor", footerEnabled: false } });
   page.onTextInput({ detail: { value: "Hi" } });
-  assert.equal(page.data.canSubmit, false);
+  assert.equal(page.data.canSubmit, true, "matching and in-range danmaku must coexist");
+  const anchorSubmission = page.submitText();
+  assert.equal(app.calls.requests[0].data.placement_id, uuid(2));
+  app.respond(200, { id: uuid(503), placement_id: uuid(2) }); await anchorSubmission;
+  assert.equal(app.calls.danmaku.at(-1), "Hi", "matching uses acknowledged activity records too");
+  const selectPanel = (panel) => page.onPanelChange({ detail: { id: panel } });
+  assert.deepEqual(copy(page.data.bottomNavItems.map(item => item.key)), ["recognition", "danmaku", "shop"]);
+  assert.equal(page.data.activeBottomPanel, "recognition", "a matching map starts with the recognition component");
+  selectPanel("danmaku");
+  page.onTextInput({ detail: { value: "Hi" } });
+  page.onKeyboardHeightChange({ detail: { height: 280 } });
+  assert.equal(page.data.keyboardHeight, 280);
+  selectPanel("shop");
+  assert.equal(page.data.keyboardHeight, 0);
+  assert.equal(page.data.showShopPanel, true);
+  assert.equal(app.calls.keyboardHides, 1);
+  selectPanel("recognition");
+  assert.equal(page.data.showShopPanel, true, "switching tabs leaves shop navigation mounted and active");
+  assert.equal(page.data.textContent, "Hi", "tab changes preserve the comment draft");
+  assert.deepEqual(app.calls.retrieval, [], "navbar never pauses or restarts recognition");
+  page.onKeyboardHeightChange({ detail: { height: 280 } });
+  assert.equal(page.data.keyboardHeight, 0, "late keyboard events from a removed composer cannot move other panels");
+  selectPanel("recognition");
+  assert.equal(page.data.bottomPanelExpanded, false);
+  page.syncUI();
+  assert.equal(page.data.bottomPanelExpanded, false, "discovery refresh does not reopen a collapsed panel");
+  page.getLocation();
+  page.onMatchProgress({ detail: { mode: "anchor", text: "42 特征点 · 3 候选" } });
+  assert.equal(page.data.debugItems.find(item => item.key === "sensors:gps").value, "±5.0m");
+  assert.equal(page.data.debugItems.find(item => item.key === "recognition:match").value, "42 特征点 · 3 候选");
+  page.onRecognitionStatus({ detail: { mode: "anchor", message: "正在准备图像识别…", diagnostic: "正在准备参考图（2/7）…", phase: "preparing" } });
+  assert.equal(page.data.recognitionStatus, "正在准备图像识别…");
+  assert.equal(page.data.debugItems.find(item => item.key === "recognition:status").value, "正在准备参考图（2/7）…");
+  selectPanel("location"); selectPanel("unknown");
+  assert.equal(page.data.activeBottomPanel, "recognition", "diagnostics are not a business navigation item");
+  assert.equal(page.data.bottomPanelExpanded, false, "diagnostics cannot reopen the bottom panel");
+  selectPanel("danmaku");
+  assert.equal(page.data.textContent, "Hi");
+  assert.equal(page.data.selectedDanmakuIdx, 1);
+  page.syncUI();
+  assert.equal(page.data.activeBottomPanel, "danmaku", "background refresh preserves manual selection");
+  page.onKeyboardHeightChange({ detail: { height: 280 } });
+  assert.equal(page.data.keyboardHeight, 280);
+  page.onComposerBlur();
+  assert.equal(page.data.keyboardHeight, 0);
+  page.onKeyboardHeightChange({ detail: { height: -1 } });
+  assert.equal(page.data.keyboardHeight, 0);
+  page.onKeyboardHeightChange({ detail: { height: 280 } });
+  const composer = app.uiComponent("ar-danmaku-panel", (name, detail) => { assert.equal(name, "moduleaction"); page.onModuleAction({ detail }); });
+  composer.onInput({ detail: { value: "OK" } });
+  assert.equal(page.data.textContent, "OK", "presentation events reach the registered feature handler");
+  const recognitionPanel = app.uiComponent("ar-recognition-panel", (name, detail) => page.onModuleAction({ detail }));
+  recognitionPanel.onRescan();
+  assert.equal(app.calls.retrieval.at(-1), "rescan");
+  assert.equal(page.onModuleAction({ detail: { moduleId: "recognition", action: "toString" } }), false);
+  page.onModuleAction({ detail: { moduleId: "shop", action: "compass", payload: { visible: true, title: "Cafe", distance: "12m", angle: 90 } } });
+  selectPanel("recognition");
+  assert.equal(page.data.shopNavigation.visible, true, "overlay presentation lives independently of the bottom panel");
+  page.onHide();
+  assert.equal(page.data.keyboardHeight, 0, "returning to AR cannot retain a stale keyboard offset");
+  page._activityVisible = true;
   const refreshed = page.refreshActivities(); app.respond(200, []); await refreshed;
   assert.equal(page.data.shopCheckinEnabled, false);
+  assert.equal(page.data.shopNavigation.visible, false, "removed deployments clear their overlay");
   assert.equal(page.data.activeDanmaku, null);
+  assert.equal(page.data.activeBottomPanel, "recognition", "removed activity falls back to an available feature");
+  assert.deepEqual(copy(page.data.bottomNavItems.map(item => item.key)), ["recognition"]);
   await page.submitText(); assert.equal(app.calls.requests.length, 0);
   const stale = page.refreshActivities(); page.onHide(); app.respond(200, definitions); await stale;
   assert.equal(page.data.activeDanmaku, null, "a response after hiding cannot re-enable activities");
   const failedLoad = page.refreshActivities(); app.respond(503, {}); await failedLoad;
   assert.ok(page.data.activitiesError);
+  assert.ok(page.data.bottomNavItems.some(item => item.key === "danmaku"), "failed discovery keeps a retry entry in the navbar");
   app.backend.setConfig({ organizationId: uuid(901) });
   const allMaps = page.refreshActivities();
   assert.match(app.calls.requests[0].url, /\/activities\?organization_id=/);
@@ -180,8 +271,11 @@ async function main() {
   assert.equal(host.data.checkedInCount, 1);
   assert.equal(host.data.checkedPointIds[point(2).point_id], true);
   assert.equal(host.data.showCheckinModal, true);
+  assert.equal(shops.calls.moduleActions.at(-1).action, "reward");
+  assert.equal(shops.calls.moduleActions.at(-1).payload.visible, true);
   assert.equal(shops.calls.writes.includes("checkedInShopIds"), false, "only server records determine progress");
   host.closeCheckinModal();
+  assert.equal(shops.calls.moduleActions.at(-1).payload.visible, false);
   const oldProgress = host.loadProgress();
   host.onActivityChange({ detail: { value: "1" } });
   assert.equal(host.data.checkedInCount, 0, "progress is scoped to deployment even when point definitions are shared");
@@ -196,11 +290,12 @@ async function main() {
   assert.equal(host.data.isNavigating, false);
   console.log("PASS multi-point check-in, server-only progress, deployment isolation, race handling and directory points");
 
+  for (const mode of ["gps", "anchor"]) {
   const runtime = launch();
   runtime.backend.setConfig({ organizationId: uuid(901) });
   const removed = [], events = [];
   const ordinary = { assetId: uuid(700), node: {} };
-  const renderer = { ...runtime.activityMethods(), _modeEpoch: 1, _activityRevision: 0, _arReady: true, retrievalMode: "gps", currentGPS: at,
+  const renderer = { ...runtime.activityMethods(), _modeEpoch: 1, _activityEpoch: 1, _activityRevision: 0, _arReady: true, retrievalMode: mode, currentGPS: at,
     _allowedAssetIds: new Set([ordinary.assetId]), _activityRecordIds: new Set(), _seenAssets: new Map(), nodeList: [ordinary],
     _pendingDisplayAssets: [], _placeQueue: [], flyingDanmakus: [],
     triggerEvent(name, detail) { events.push({ name, detail }); },
@@ -217,6 +312,7 @@ async function main() {
   runtime.respond(200, [d1, d2, outOfRange]); await tick();
   assert.equal(runtime.calls.requests.length, 2, "fetch only the in-range activity record streams");
   assert.ok(runtime.calls.requests.every((request) => request.url.includes("/activity-records?placement_id=")));
+  renderer._modeEpoch++; // A scan restart must not cancel independent activity data.
   runtime.respond(200, [record(710, d1), record(711, d2)]); // Wrong placement is ignored.
   runtime.respond(200, [record(712, d2)]); await initial;
   assert.deepEqual(renderer.nodeList.map((entry) => entry.assetId), [ordinary.assetId, `activity:${uuid(710)}`, `activity:${uuid(712)}`]);
@@ -238,9 +334,9 @@ async function main() {
   assert.deepEqual(renderer.nodeList.map((entry) => entry.assetId), [ordinary.assetId], "hidden records are removed without touching ordinary assets");
   renderer._activityNextFetch = 0;
   const staleRecords = renderer.refreshActivityContent();
-  runtime.respond(200, [d1]); await tick(); renderer._modeEpoch++;
+  runtime.respond(200, [d1]); await tick(); renderer._activityEpoch++;
   runtime.respond(200, [record(710, d1)]); await staleRecords;
-  assert.equal(renderer.nodeList.length, 1, "late response from another retrieval epoch cannot resurrect activity records");
+  assert.equal(renderer.nodeList.length, 1, "late response from another activity session cannot resurrect activity records");
   renderer._activityNextFetch = 0;
   renderer._replaceActivityRecords([record(710, d1)]);
   const supersededRecords = renderer.refreshActivityContent();
@@ -259,9 +355,12 @@ async function main() {
   runtime.calls.requests.shift().fail(new Error("offline")); await offline;
   assert.equal(events.at(-1).detail.error, true);
   assert.equal(renderer.nodeList[0], ordinary);
-  console.log("PASS separate activity discovery/records, scoped rendering, stationary refresh, pause/moderation removal and stale-response cleanup");
+  console.log(`PASS ${mode}: independent activities, rescan coexistence, stationary refresh, moderation and session cleanup`);
+  }
 
-  for (const [file, handlers] of [["pages/ar/ar.wxml", page], ["components/shop-checkin/index.wxml", host]]) {
+  const presentations = ["ar-shell", "ar-debug-bar", "ar-recognition-panel", "ar-danmaku-panel", "ar-shop-overlays"];
+  for (const [file, handlers] of [["pages/ar/ar.wxml", page], ["components/shop-checkin/index.wxml", host],
+    ...presentations.map(name => [`components/${name}/index.wxml`, launch().uiComponent(name)])]) {
     for (const match of fs.readFileSync(path.join(root, file), "utf8").matchAll(/bind[\w:]+="(\w+)"/g)) assert.equal(typeof handlers[match[1]], "function", `${file}: ${match[1]}`);
   }
   console.log("PASS activity WXML event handlers exist");

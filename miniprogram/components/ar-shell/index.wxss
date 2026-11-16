@@ -1,0 +1,53 @@
+@import "../../styles/ar-theme.wxss";
+:host { display: block; width: 100%; height: 100%; }
+.ar-shell, .scene-slot { position: relative; width: 100%; height: 100%; }
+.top-slot { position: fixed; top: 0; left: 0; right: 0; height: var(--ar-debug-height); z-index: 110; }
+.overlay-slot { position: relative; z-index: 120; }
+.bottom-area {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 100;
+  color: #f5f5f3;
+}
+.bottom-panel {
+  background: var(--ar-panel);
+  border-radius: 24rpx 24rpx 0 0;
+}
+/* Feature panels control visibility without unmounting their business state. */
+.bottom-panel--collapsed { background: transparent; }
+.bottom-navbar {
+  display: flex;
+  align-items: stretch;
+  padding: 8rpx 16rpx calc(8rpx + env(safe-area-inset-bottom));
+  border-top: 1rpx solid #3c4239;
+  background: var(--ar-navbar);
+}
+.bottom-area--typing .bottom-navbar { padding-bottom: 8rpx; }
+.bottom-navbar .bottom-nav-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 112rpx;
+  margin: 0;
+  padding: 8rpx 0;
+  background: transparent;
+  border-radius: 0;
+  color: #b6beb3;
+  line-height: 1;
+}
+.nav-icon-wrap { position: relative; display: flex; align-items: center; justify-content: center; width: 88rpx; height: 64rpx; border-radius: 16rpx; }
+.nav-icon { width: 44rpx; height: 44rpx; opacity: 0.65; }
+.nav-label { margin-top: 6rpx; font-size: 22rpx; line-height: 30rpx; }
+.bottom-nav-item--active .nav-icon-wrap { background: var(--ar-accent-muted); }
+.bottom-nav-item--active .nav-icon { opacity: 1; }
+.bottom-nav-item--active .nav-label { color: var(--ar-accent-text); font-weight: 600; }
+.bottom-nav-item:active { opacity: 0.7; }
+.nav-status-dot { position: absolute; right: 12rpx; top: 8rpx; width: 10rpx; height: 10rpx; border: 3rpx solid var(--ar-navbar); border-radius: 50%; background: var(--ar-accent); }
+.nav-status-dot--warning { background: #e2b882; }
+
+.bottom-nav-item::after { border: none; }

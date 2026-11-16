@@ -1,5 +1,6 @@
 import { CONFIG, isSceneConfig } from "../../utils/backend";
 Page({
+  _stateBeforeTracking: "loading",
   data: { sceneId: "", organizationId: "", width: 0, height: 0, renderWidth: 0, renderHeight: 0, state: "loading", playback: "paused", message: "正在启动 AR 相机…", invalid: false },
   onLoad(options: Record<string, string>) {
     const entry = options.sceneId || options.organizationId ? options : CONFIG;

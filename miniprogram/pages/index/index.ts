@@ -25,7 +25,7 @@ interface HistoryItem extends ScanHistoryEntry {
 }
 
 /** AR 体验依赖的授权 scope 及其展示名 */
-const REQUIRED_SCOPES: { scope: string; label: string }[] = [
+const REQUIRED_SCOPES: { scope: keyof WechatMiniprogram.AuthSetting; label: string }[] = [
   { scope: "scope.userLocation", label: "位置" },
   { scope: "scope.camera", label: "相机" },
 ];

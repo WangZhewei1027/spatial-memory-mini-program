@@ -27,8 +27,8 @@ module.exports = function (XR_CONFIG) {
 
     async fetchNearbyAssets() {
       if (this._disposed || this._retrievalPaused) return;
-      if (this.retrievalMode === "anchor") return this.recognizeAnchor();
       void this.refreshActivityContent?.();
+      if (this.retrievalMode === "anchor") return this.recognizeAnchor();
       if (this.isFetchingAssets || !this.currentGPS) return;
       const epoch = this._modeEpoch;
       this.isFetchingAssets = true;
@@ -77,12 +77,12 @@ module.exports = function (XR_CONFIG) {
      */
     displayAssets(assets) {
       if (this._disposed || this._retrievalPaused) return;
-      // 匹配模式只接收已确认 anchor 的白名单；预加载回放也不能复活旧轮素材。
+      // 活动来源独立于匹配白名单；预加载回放也不能复活旧轮素材。
       assets = assets.filter(
         (a) =>
           a &&
           (a._contentEpoch == null || a._contentEpoch === this._contentEpoch) &&
-          (this.retrievalMode !== "anchor" ||
+          (this._activityRecordIds?.has(a.id) || this.retrievalMode !== "anchor" ||
             (this._matchedAnchorId && this._allowedAssetIds.has(a.id))),
       );
       if (!assets.length) return;
@@ -168,7 +168,7 @@ module.exports = function (XR_CONFIG) {
         const asset = this._placeQueue.shift();
         // 关联匹配请求，而非素材加载完成时碰巧处于活动状态的另一轮请求。
         const timing =
-          this.retrievalMode === "anchor" &&
+          this.retrievalMode === "anchor" && !this._activityRecordIds?.has(asset.id) &&
           this._recognitionTiming?.contentEpoch === asset._contentEpoch
             ? this._recognitionTiming
             : null;
@@ -318,7 +318,7 @@ module.exports = function (XR_CONFIG) {
         !this._retrievalPaused &&
         asset._contentEpoch === this._contentEpoch &&
         this._allowedAssetIds.has(asset.id) &&
-        (this.retrievalMode !== "anchor" || !!this._matchedAnchorId)
+        (this._activityRecordIds?.has(asset.id) || this.retrievalMode !== "anchor" || !!this._matchedAnchorId)
       );
     },
 
@@ -334,9 +334,10 @@ module.exports = function (XR_CONFIG) {
       else if (asset.file_type === "scene") await this._placeSceneAsset(asset);
     },
 
-    // Releases every remote node, pending queue and audio context, and advances
-    // the content epoch so late async placements discard themselves.
-    _clearRemoteAssets() {
+    // Scan changes preserve activity text in the same SLAM space. Session exits
+    // clear both sources. Old asynchronous ordinary placements always expire.
+    _clearRemoteAssets({ preserveActivities = false } = {}) {
+      const keep = (id) => preserveActivities && this._activityRecordIds?.has(id);
       this._recognitionTiming = null;
       this._contentEpoch++;
       for (const ctx of this._pendingAudioContexts || []) {
@@ -346,13 +347,23 @@ module.exports = function (XR_CONFIG) {
         } catch (_) {}
       }
       this._pendingAudioContexts?.clear();
-      this._allowedAssetIds.clear();
-      this._placeQueue = [];
-      this._pendingDisplayAssets = [];
-      const clearedNodeCount = this.nodeList.length;
-      for (const entry of this.nodeList) this._destroyNode(entry);
-      this.nodeList = [];
-      this.flyingDanmakus = [];
+      this._allowedAssetIds = new Set([...this._allowedAssetIds].filter(keep));
+      const keepPending = (assets) => (assets || []).filter(asset => keep(asset.id))
+        .map(asset => ({ ...asset, _contentEpoch: this._contentEpoch }));
+      this._placeQueue = keepPending(this._placeQueue);
+      this._pendingDisplayAssets = keepPending(this._pendingDisplayAssets);
+      const cleared = this.nodeList.filter(entry => !keep(entry.assetId));
+      const clearedNodeCount = cleared.length;
+      for (const entry of cleared) this._destroyNode(entry);
+      this.nodeList = this.nodeList.filter(entry => keep(entry.assetId));
+      const keptNodes = new Set(this.nodeList.map(entry => entry.node));
+      this.flyingDanmakus = this.flyingDanmakus.filter(entry => keptNodes.has(entry.node));
+      if (!preserveActivities) {
+        this._activityEpoch = (this._activityEpoch || 0) + 1;
+        this._activityRecordIds?.clear();
+        this._activityRecordPlacements?.clear();
+        this._activityNextFetch = 0;
+      }
       this.stopRandomConfetti?.();
       if (clearedNodeCount || this._hugeNodeList?.length)
         matchLog("清空场景素材", { run: this._modeEpoch, clearedNodeCount, hugeNodeCount: this._hugeNodeList?.length || 0 });
@@ -360,11 +371,11 @@ module.exports = function (XR_CONFIG) {
       this._hugeNodeList = [];
       this._pendingHugeAssets = [];
       this._hugePlaceQueue = [];
-      this._seenAssets.clear();
+      for (const id of this._seenAssets.keys()) if (!keep(id)) this._seenAssets.delete(id);
       this._firstRevealDone = false;
       this._matchedAnchorId = null;
       // 兜底回收此前构建异常留下的、未能登记的动态根节点。
-      const orphans = [...(this.shadowRoot?.children || [])];
+      const orphans = [...(this.shadowRoot?.children || [])].filter(node => !keptNodes.has(node));
       for (const node of orphans) this._destroyNode({ node });
       if (orphans.length) matchLog("清理未登记场景节点", { count: orphans.length });
     },

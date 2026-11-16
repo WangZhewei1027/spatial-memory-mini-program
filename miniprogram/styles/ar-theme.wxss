@@ -1,0 +1,9 @@
+.ar-theme {
+  --ar-accent: #8fbc8f;
+  --ar-accent-text: #d6edcb;
+  --ar-accent-muted: #3a4b33;
+  --ar-navbar: #1b1e1a;
+  --ar-panel: rgba(30, 32, 30, 0.96);
+  --ar-debug-height: 48rpx;
+  color: #f5f5f3;
+}
