@@ -142,4 +142,36 @@ function candidateMovement(from, to, minimumMeters) {
   const thresholdMeters = Math.max(minimumMeters, from.accuracy + to.accuracy);
   return distanceMeters >= thresholdMeters ? { distanceMeters, thresholdMeters } : null;
 }
-module.exports = { similarity, referenceScore, evaluateMatch, track, intervalFor, inspectPixels, blurState, candidateMovement };
+// Where the locked viewing point is relative to the camera, on the ground plane.
+// `focus.forward` preserves the locked heading when the camera reaches that point.
+// Pitch is separate: content sits at any height, but a phone pointing at the floor or
+// the sky is not looking at it, and its horizontal heading is meaningless.
+function contentView(position, forward, focus, config) {
+  const dx = focus.x - position.x, dz = focus.z - position.z, distance = Math.hypot(dx, dz);
+  const horizontal = Math.hypot(forward.x, forward.z), degrees = 180 / Math.PI;
+  const pitchDeg = Math.atan2(forward.y, horizontal) * degrees;
+  const steep = Math.abs(pitchDeg) > config.awayPitchDeg;
+  // Near the focus, its bearing becomes unstable. Keep turn detection by comparing
+  // with the locked heading instead of treating every direction as looking at it.
+  const near = distance < config.focusNearMeters && focus.forward;
+  const lookX = near ? focus.forward.x : dx, lookZ = near ? focus.forward.z : dz;
+  const denominator = horizontal * Math.hypot(lookX, lookZ);
+  const offsetDeg = steep || denominator < 1e-8 ? null
+    : Math.acos(Math.max(-1, Math.min(1, (forward.x * lookX + forward.z * lookZ) / denominator))) * degrees;
+  return { distance, offsetDeg, pitchDeg, steep };
+}
+// Whether the user has left the shown content: turned away, lowered the phone or walked
+// off. Either state has to hold for a while before it flips, with a narrower angle and a
+// shorter distance to come back than to leave, so a glance or a threshold pose does not
+// toggle it. Time without samples (tracking lost) does not count towards the delay.
+function attention(state, view, now, config) {
+  const away = !!state?.away;
+  const off = view.steep || view.offsetDeg > (away ? config.returnAngleDeg : config.awayAngleDeg) ||
+    view.distance > (away ? config.returnDistanceMeters : config.awayDistanceMeters);
+  const continued = state && state.since != null && now - state.lastAt <= config.attentionMaxGapMs;
+  const since = off === away ? null : continued ? state.since : now;
+  const flipped = since != null && now - since >= (away ? config.returnDelayMs : config.awayDelayMs);
+  return { away: flipped ? !away : away, since: flipped ? null : since, lastAt: now, flipped };
+}
+module.exports = { similarity, referenceScore, evaluateMatch, track, intervalFor, inspectPixels, blurState, candidateMovement,
+  contentView, attention };

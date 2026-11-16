@@ -36,6 +36,22 @@ module.exports = {
   scoreSmoothingMs: 1500,
   // A frame score this far above the target's average is adopted directly (camera turned onto it).
   scoreJump: 0.25,
+  // After content is shown: has the user left it? Leaving only resumes scanning in the
+  // background; the content is replaced when a different target is confirmed.
+  // Angles are relative to a stable point ahead of the locked camera pose.
+  // None of these values has been calibrated on a phone yet.
+  attentionIntervalMs: 200,
+  attentionMaxGapMs: 1000,
+  awayAngleDeg: 45, // Content is placed within 30 degrees of the heading it was shown at.
+  returnAngleDeg: 30,
+  awayPitchDeg: 60, // Phone pointing at the floor or the sky.
+  awayDistanceMeters: 8,
+  returnDistanceMeters: 6,
+  awayDelayMs: 600,
+  returnDelayMs: 1500,
+  focusNearMeters: 1, // Near the viewing point, compare against the locked heading.
+  focusAheadMeters: 2, // Fixed point ahead of the lock pose; independent of asset loading/origin.
+  reacquireRetryMs: 10000, // After the background Worker failed.
   gpsCacheMs: 5000,
   gpsWatchMaxAgeMs: 10000,
 };

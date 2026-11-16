@@ -94,9 +94,9 @@ test('a clear match locks after two spaced Worker results, releases inference, a
 test('recognition phases follow the declared lifecycle and cancellation restores every per-scan field', async () => {
   const state = require(path.join(base, 'components/xr-start/matching/state'));
   const { PHASES: P, canTransition } = state;
-  for (const [from, to] of [[P.IDLE,P.PREPARING],[P.PREPARING,P.SCANNING],[P.SCANNING,P.LOADING],[P.LOADING,P.TRACKING],[P.TRACKING,P.LOCKED],[P.LOCKED,P.IDLE],[P.ERROR,P.IDLE]])
+  for (const [from, to] of [[P.IDLE,P.PREPARING],[P.PREPARING,P.SCANNING],[P.SCANNING,P.LOADING],[P.LOADING,P.TRACKING],[P.TRACKING,P.LOCKED],[P.LOCKED,P.IDLE],[P.ERROR,P.IDLE],[P.LOCKED,P.REACQUIRING],[P.REACQUIRING,P.LOCKED],[P.REACQUIRING,P.LOADING]])
     assert.ok(canTransition(from, to), `${from} -> ${to}`);
-  for (const [from, to] of [[P.IDLE,P.SCANNING],[P.LOCKED,P.SCANNING],[P.ERROR,P.SCANNING],[P.TRACKING,P.ERROR],[P.EMPTY,P.PREPARING]])
+  for (const [from, to] of [[P.IDLE,P.SCANNING],[P.LOCKED,P.SCANNING],[P.ERROR,P.SCANNING],[P.TRACKING,P.ERROR],[P.EMPTY,P.PREPARING],[P.SCANNING,P.REACQUIRING],[P.REACQUIRING,P.SCANNING],[P.REACQUIRING,P.ERROR]])
     assert.ok(!canTransition(from, to), `${from} -> ${to} must be rejected`);
   const f=fixture(); await f.host.recognizeAnchor();
   for (let i=0;i<3;i++) { await f.sample(); f.tick(); }
@@ -358,6 +358,140 @@ test('same-area GPS checks preserve confirmation; a slow fallback fix does not p
   const before = f.counts().captures; await f.sample(); assert.equal(f.counts().captures, before + 1);
   pendingFix.success({ latitude: 31, longitude: 121, accuracy: 10 }); await check;
   assert.equal(f.counts().candidateCalls, 1); f.host.pauseRetrieval();
+});
+// Heading in degrees clockwise from -Z (the Three camera's forward), pitch upwards.
+const heading = (deg, pitch = 0) => { const r = deg * Math.PI / 180, p = pitch * Math.PI / 180;
+  return { x: Math.sin(r) * Math.cos(p), y: Math.sin(p), z: -Math.cos(r) * Math.cos(p) }; };
+test('leaving shown content is decided from heading, pitch and distance, with a delay each way', () => {
+  const focus = { x: 0, z: -3, forward: heading(0) };
+  const view = (deg, { x = 0, z = 0, pitch = 0 } = {}) => policy.contentView({ x, y: 1.5, z }, heading(deg, pitch), focus, config);
+  assert.equal(Math.round(view(0).offsetDeg), 0); assert.equal(Math.round(view(90).offsetDeg), 90); assert.equal(view(0).distance, 3);
+  assert.equal(Math.round(view(0, { x: 3, z: -3 }).offsetDeg), 90, 'walked past it without turning');
+  assert.equal(Math.round(view(170, { z: -2.5 }).offsetDeg), 170, 'near the focus, turning still uses the locked heading');
+  assert.equal(Math.round(view(180, { z: -3 }).offsetDeg), 180, 'turning at the exact focus is well-defined');
+  assert.ok(view(0, { pitch: -75 }).steep, 'phone lowered'); assert.ok(!view(0, { pitch: -40 }).steep);
+  // Feeds one view every attention interval for a duration; returns the state and when it flipped.
+  let now = 0;
+  const feed = (state, v, ms) => { let flippedAt = null;
+    for (let t = 0; t < ms; t += config.attentionIntervalMs) { now += config.attentionIntervalMs; state = policy.attention(state, v, now, config); if (state.flipped) flippedAt = now; }
+    return { ...state, flippedAt }; };
+  let s = feed(null, view(0), 2000); assert.equal(s.away, false);
+  s = feed(s, view(40), 3000); assert.equal(s.away, false, 'content is placed within 30 degrees; looking at its edge is not leaving');
+  s = feed(s, view(90), config.awayDelayMs - 200); assert.equal(s.away, false);
+  s = feed(s, view(0), 400); s = feed(s, view(90), config.awayDelayMs - 200); assert.equal(s.away, false, 'a glance restarts the delay');
+  const turnedAt = now; s = feed(s, view(90), 2000); assert.equal(s.away, true); assert.equal(s.flippedAt - turnedAt, 400, 'the delay runs from the first sample of this turn');
+  s = feed(s, view(40), 5000); assert.equal(s.away, true, 'coming back needs the narrower angle');
+  s = feed(s, view(10), config.returnDelayMs); assert.equal(s.away, true);
+  s = feed(s, view(10), 200); assert.equal(s.away, false);
+  s = feed(s, view(0, { pitch: -80 }), 1000); assert.equal(s.away, true, 'lowered phone');
+  s = feed(s, view(0), 2000); assert.equal(s.away, false);
+  s = feed(s, view(0, { z: 6 }), 1000); assert.equal(s.away, true, 'walked 9 m back while still facing it');
+  s = feed(s, view(0, { z: 4 }), 5000); assert.equal(s.away, true); s = feed(s, view(0, { z: 2 }), 2000); assert.equal(s.away, false);
+  // Samples stop while tracking is lost; that time does not count towards the delay.
+  s = policy.attention(s, view(90), now += 200, config); s = policy.attention(s, view(90), now += 5000, config);
+  assert.equal(s.away, false); s = feed(s, view(90), config.awayDelayMs); assert.equal(s.away, true);
+});
+// Two nearby targets and a posed camera. The camera sees target a until `seen.vector` changes.
+function shownContent(overrides = {}) {
+  const seen = { vector: [1, 0, 0] };
+  const f = fixture({ fetchAnchorCandidates: async () => ({ statusCode: 200, data: { candidates: [target('a'), target('b')] } }),
+    loadReference: async url => new ArrayBuffer(url.includes('/a.') ? 4 : 8),
+    embed: pixels => pixels.byteLength === 4 ? { vector: [1, 0, 0] } : pixels.byteLength === 8 ? { vector: [0, 1, 0] }
+      : overrides.cameraEmbed ? overrides.cameraEmbed() : { vector: seen.vector, inferenceMs: 100 }, ...overrides });
+  const camera = { position: { x: 0, y: 1.5, z: 0 }, forward: heading(0), getWorldDirection() { return this.forward; } };
+  f.host.getCamTransform = () => camera;
+  const contentCalls = () => f.calls.filter(([type]) => type === 'content').map(([, body]) => body.anchor_id);
+  return { ...f, seen, camera, contentCalls,
+    turn(deg, pitch) { camera.forward = heading(deg, pitch); },
+    attend(ms) { for (let t = 0; t < ms; t += config.attentionIntervalMs) { f.tick(config.attentionIntervalMs); f.host._tickAttention(); } },
+    async lock() { await f.host.recognizeAnchor(); await f.sample(); f.tick(); await f.sample(); assert.equal(f.host._matchPhase, 'locked'); } };
+}
+test('turning away keeps the content and matches again; only a different target replaces it', async () => {
+  const f = shownContent(); await f.lock();
+  assert.equal(f.host._matchedAnchorId, 'a'); assert.equal(f.counts().closed, 1);
+  f.attend(3000); f.turn(40); f.attend(3000); assert.equal(f.host._matchPhase, 'locked');
+  f.turn(90); f.attend(config.awayDelayMs - 200); f.turn(0); f.attend(400); assert.equal(f.host._matchPhase, 'locked', 'a glance');
+  f.turn(90); f.attend(config.awayDelayMs + 200); await settle();
+  assert.equal(f.host._matchPhase, 'reacquiring'); assert.equal(f.host._matchedAnchorId, 'a'); assert.equal(f.host.displayed.length, 1);
+  assert.equal(f.counts().candidateCalls, 1, 'no new discovery'); assert.equal(f.counts().loaded, 2, 'embeddings come from the cache');
+  assert.equal(f.statuses.at(-1).locked, true); assert.match(f.statuses.at(-1).message, /已识别：a · 对准其他目标可自动切换/);
+  assert.deepEqual({ ...f.logs.find(([event]) => event === '离开内容')[1], run: 0 }, { run: 0, phase: 'locked', offsetDeg: 90, pitchDeg: 0, distanceMeters: 2 });
+  // The shown target in view again (say, another of its reference images): nothing happens.
+  for (let i = 0; i < 4; i++) { await f.sample(); f.tick(); }
+  assert.equal(f.host._matchPhase, 'reacquiring'); assert.equal(f.host.displayed.length, 1); assert.deepEqual(f.contentCalls(), ['a']);
+  assert.doesNotMatch(f.statuses.at(-1).message, /正在确认/);
+  assert.equal(f.host._nextMatchFrameAt - f.now(), 0, 'the shown target does not speed up sampling');
+  f.seen.vector = [0, 1, 0]; await f.sample();
+  assert.match(f.statuses.at(-1).message, /正在确认：b/); assert.deepEqual(f.contentCalls(), ['a', 'b'], 'prefetched');
+  f.tick(); await f.sample(); await settle();
+  assert.equal(f.host._matchPhase, 'locked'); assert.equal(f.host._matchedAnchorId, 'b'); assert.equal(f.host.displayed.length, 2);
+  assert.equal(f.counts().closed, 2); assert.equal(f.host._imageMatcher, null); assert.deepEqual(f.contentCalls(), ['a', 'b']);
+  const change = f.logs.find(([event]) => event === '切换目标')[1]; assert.equal(change.from, 'a'); assert.equal(change.to, 'b');
+  assert.match(f.statuses.at(-1).message, /已识别：b · 内容已固定在空间中/);
+  // The new content is ahead of the new lock pose: facing it is watching again.
+  f.attend(3000); assert.equal(f.host._matchPhase, 'locked');
+  assert.ok(!f.logs.some(([event]) => event === '非法识别状态切换')); f.host.pauseRetrieval();
+});
+test('looking back stops the background scan, and its late result cannot touch the content', async () => {
+  for (const late of ['resolve', 'reject']) {
+    let pending = null;
+    const f = shownContent({ cameraEmbed: () => pending ? pending.promise : { vector: [0, 1, 0], inferenceMs: 100 } });
+    await f.host.recognizeAnchor(); f.host._acceptImageMatch(f.host._matchReferences[0]); await settle();
+    assert.equal(f.host._matchPhase, 'locked');
+    // Late assets follow the camera at load time, but cannot move the viewing baseline.
+    f.turn(90);
+    f.host.nodeList = [{ node: { position: { x: 3, y: 1.5, z: 0 } } }, { trs: { position: { x: 5, y: 1.5, z: 0 } } }];
+    f.attend(config.awayDelayMs + 200); await settle(); assert.equal(f.host._matchPhase, 'reacquiring');
+    assert.equal(f.logs.find(([event]) => event === '离开内容')[1].distanceMeters, 2);
+    pending = deferred(); await f.sample(); assert.equal(f.host._matchFrameBusy, true);
+    f.turn(0); f.attend(config.returnDelayMs); assert.equal(f.host._matchPhase, 'reacquiring');
+    f.attend(200); assert.equal(f.host._matchPhase, 'locked'); assert.equal(f.host._imageMatcher, null); assert.equal(f.host._matchFrameBusy, false);
+    assert.match(f.statuses.at(-1).message, /内容已固定在空间中/); assert.equal(f.counts().closed, 2);
+    if (late === 'resolve') pending.resolve({ vector: [0, 1, 0], inferenceMs: 100 }); else pending.reject(Error('识别已取消'));
+    pending = null; await settle();
+    assert.equal(f.host._matchPhase, 'locked'); assert.equal(f.host._matchedAnchorId, 'a'); assert.equal(f.host.displayed.length, 1);
+    // Leaving again starts a fresh scan that can still switch.
+    f.turn(90); f.attend(config.awayDelayMs + 200); await settle(); assert.equal(f.host._matchPhase, 'reacquiring');
+    await f.sample(); f.tick(); await f.sample(); await settle();
+    assert.equal(f.host._matchedAnchorId, 'b'); assert.equal(f.host._matchPhase, 'locked');
+    assert.ok(!f.logs.some(([event, , level]) => level === 'error')); f.host.pauseRetrieval();
+  }
+});
+test('nearby turns and walking restart matching, regardless of Scene origins or late content', async () => {
+  const f = shownContent(); await f.lock();
+  f.host.nodeList = [{ type: 'scene', node: { position: { x: 0, y: 0, z: -10 } } }];
+  f.attend(3000); assert.equal(f.host._matchPhase, 'locked', 'a distant authored Scene origin is not walking away');
+  f.camera.position.z = -1.5; // Half a metre from the stable viewing point.
+  f.turn(180); f.attend(config.awayDelayMs + 200); await settle();
+  assert.equal(f.host._matchPhase, 'reacquiring', 'nearby in-place turn restarts matching');
+  f.host.nodeList.push({ node: { position: { x: 0, y: 1.5, z: 2 } } });
+  f.attend(3000); assert.equal(f.host._matchPhase, 'reacquiring', 'late content in the new direction does not count as looking back');
+  f.turn(0); f.attend(config.returnDelayMs + 200); assert.equal(f.host._matchPhase, 'locked');
+  f.camera.position.z = 7;
+  f.attend(config.awayDelayMs + 200); await settle();
+  assert.equal(f.host._matchPhase, 'reacquiring', 'walking away while facing the target also restarts matching');
+  f.host.pauseRetrieval();
+});
+test('a lone target or a failing background Worker leaves the shown content alone', async () => {
+  const lone = fixture(); lone.host.getCamTransform = () => ({ position: { x: 0, y: 1.5, z: 0 }, getWorldDirection: () => heading(180) });
+  await lone.host.recognizeAnchor(); await lone.sample(); lone.tick(); await lone.sample(); assert.equal(lone.host._matchPhase, 'locked');
+  lone.host._matchLockPose = { position: { x: 0, y: 1.5, z: 0 }, forward: heading(0) };
+  for (let i = 0; i < 10; i++) { lone.tick(200); lone.host._tickAttention(); }
+  assert.equal(lone.host._matchPhase, 'locked'); assert.equal(lone.counts().closed, 1, 'no Worker is started with nothing to switch to');
+  assert.equal(lone.logs.filter(([event]) => event === '不启动后台扫描').length, 1); lone.host.pauseRetrieval();
+  let broken = false;
+  const f = shownContent({ cameraEmbed: () => { if (broken) throw Error('WORKER_KILLED'); return { vector: [1, 0, 0], inferenceMs: 100 }; } });
+  await f.lock(); f.turn(120); f.attend(config.awayDelayMs + 200); await settle(); assert.equal(f.host._matchPhase, 'reacquiring');
+  broken = true; await f.sample();
+  assert.equal(f.host._matchPhase, 'locked'); assert.equal(f.host._matchedAnchorId, 'a'); assert.equal(f.host.displayed.length, 1);
+  assert.notEqual(f.statuses.at(-1).phase, 'error'); assert.match(f.statuses.at(-1).message, /内容已固定在空间中/);
+  assert.equal(f.logs.at(-1)[0] === '后台识别失败' || f.logs.some(([event]) => event === '后台识别失败'), true);
+  f.attend(config.reacquireRetryMs - 400); assert.equal(f.host._matchPhase, 'locked', 'waits before retrying');
+  broken = false; f.attend(400); await settle(); assert.equal(f.host._matchPhase, 'reacquiring');
+  // GPS movement still restarts everything, also during a background scan.
+  f.tick(5000); f.move(40); await f.host.recognizeAnchor();
+  assert.equal(f.host._matchPhase, 'scanning'); assert.equal(f.host._matchedAnchorId, null); assert.equal(f.host._matchAttention, null);
+  f.host.pauseRetrieval();
 });
 test('moving after a lock starts a new scan without discarding reference embeddings', async () => {
   const f = fixture(); await f.host.recognizeAnchor();
@@ -639,4 +773,130 @@ test('recognition events separate technical diagnostics from actionable panel hi
   assert.equal(f.statuses.at(-1).message, '图像识别失败，请重新扫描');
   assert.equal(f.statuses.at(-1).diagnostic, 'WORKER_KILLED');
   assert.equal(f.statuses.at(-1).phase, 'error');
+});
+
+test('replacement keeps the old content until the new response and a valid pose are ready', async t => {
+  const content = deferred();
+  const response = id => ({ statusCode: 200, data: { anchor: { id }, assets: [{ id: `${id}-text`, file_type: 'text' }] } });
+  const f = shownContent({ fetchAnchorContent: body => body.anchor_id === 'b' ? content.promise : Promise.resolve(response('a')) });
+  t.after(() => f.host.pauseRetrieval());
+  await f.lock();
+  const epoch = f.host._contentEpoch;
+  const oldNodes = f.host.nodeList = [{ node: { position: { x: 0, y: 1.5, z: -2 } } }];
+  f.turn(120); f.attend(config.awayDelayMs + 200); await settle();
+  f.seen.vector = [0, 1, 0]; await f.sample(); f.tick(); await f.sample();
+  assert.equal(f.host._matchPhase, 'loading');
+  assert.equal(f.host._matchedAnchorId, 'a', 'confirmation must not remove the shown target before its replacement is available');
+  assert.equal(f.host._contentEpoch, epoch); assert.equal(f.host.nodeList, oldNodes); assert.equal(f.host.displayed.length, 1);
+  f.host._arReady = false;
+  content.resolve(response('b')); await settle();
+  assert.equal(f.host._matchPhase, 'tracking');
+  assert.equal(f.host._matchedAnchorId, 'a'); assert.equal(f.host._contentEpoch, epoch); assert.equal(f.host.nodeList, oldNodes);
+  f.host._finishMatchPlacement(); assert.equal(f.host.displayed.length, 1, 'a response alone cannot place without SLAM');
+  f.host._arReady = true; f.host._finishMatchPlacement();
+  assert.equal(f.host._matchPhase, 'locked'); assert.equal(f.host._matchedAnchorId, 'b');
+  assert.equal(f.host._contentEpoch, epoch + 1, 'the replacement clears once, when placement can proceed');
+  assert.notEqual(f.host.nodeList, oldNodes); assert.equal(f.host.displayed.length, 2);
+  assert.equal(f.host.displayed.at(-1)[0].id, 'b-text');
+  assert.ok(!f.logs.some(([event]) => event === '非法识别状态切换'));
+});
+
+test('a replacement request failure preserves the shown target and retries after the cooldown', async t => {
+  let failReplacement = true, replacementRequests = 0;
+  const f = shownContent({ async fetchAnchorContent(body) {
+    if (body.anchor_id === 'b') {
+      replacementRequests++;
+      if (failReplacement) throw Error('content offline');
+    }
+    return { statusCode: 200, data: { anchor: { id: body.anchor_id }, assets: [{ id: `${body.anchor_id}-text`, file_type: 'text' }] } };
+  } });
+  t.after(() => f.host.pauseRetrieval());
+  await f.lock();
+  const epoch = f.host._contentEpoch;
+  const oldNodes = f.host.nodeList = [{ node: { position: { x: 0, y: 1.5, z: -2 } } }];
+  f.turn(120); f.attend(config.awayDelayMs + 200); await settle();
+  f.seen.vector = [0, 1, 0]; await f.sample(); f.tick(); await f.sample(); await settle();
+  assert.equal(replacementRequests, 2, 'failed prefetch is retried once on confirmation');
+  assert.equal(f.host._matchPhase, 'locked'); assert.equal(f.host._matchedAnchorId, 'a');
+  assert.equal(f.host._contentEpoch, epoch); assert.equal(f.host.nodeList, oldNodes); assert.equal(f.host.displayed.length, 1);
+  assert.equal(f.host._imageMatcher, null); assert.equal(f.statuses.at(-1).locked, true);
+  f.attend(config.reacquireRetryMs - 200); await settle();
+  assert.equal(f.host._matchPhase, 'locked'); assert.equal(replacementRequests, 2);
+  failReplacement = false; f.attend(200); await settle();
+  assert.equal(f.host._matchPhase, 'reacquiring');
+  await f.sample(); f.tick(); await f.sample(); await settle();
+  assert.equal(f.host._matchedAnchorId, 'b'); assert.equal(f.host._matchPhase, 'locked');
+  assert.equal(f.host._contentEpoch, epoch + 1); assert.equal(f.host.displayed.length, 2);
+  assert.ok(!f.logs.some(([event]) => event === '非法识别状态切换'));
+  const first = fixture({ async fetchAnchorContent() { throw Error('content offline'); } });
+  t.after(() => first.host.pauseRetrieval());
+  await first.host.recognizeAnchor(); await first.sample(); first.tick(); await first.sample(); await settle();
+  assert.equal(first.host._matchPhase, 'error', 'without shown content the initial failure still requires rescan');
+  assert.ok(first.host._matchedAnchorId == null); assert.equal(first.host.displayed.length, 0);
+});
+
+test('late background Worker initialization cannot undo a return, pause or replacement scan', async t => {
+  for (const action of ['return', 'pause', 'rescan']) for (const late of ['resolve', 'reject']) {
+    const oldStart = deferred(), newStart = deferred(); let starts = 0;
+    const f = shownContent({ start: () => {
+      starts++;
+      return starts === 2 ? oldStart.promise : starts === 3 ? newStart.promise : undefined;
+    } });
+    t.after(() => f.host.pauseRetrieval());
+    await f.lock(); f.turn(120); f.attend(config.awayDelayMs + 200); await settle();
+    const oldMatcher = f.host._imageMatcher;
+    assert.equal(f.host._matchPhase, 'reacquiring'); assert.equal(f.host._matchPreparing, true); assert.equal(starts, 2);
+    if (action === 'return') {
+      f.turn(0); f.attend(config.returnDelayMs + 400); await settle();
+      assert.equal(f.host._matchPhase, 'locked'); assert.equal(f.host._matchedAnchorId, 'a');
+      f.turn(120); f.attend(config.awayDelayMs + 200); await settle();
+    } else if (action === 'pause') f.host.pauseRetrieval();
+    else { f.host.rescan(); await settle(); }
+    const currentMatcher = f.host._imageMatcher, phase = f.host._matchPhase, epoch = f.host._contentEpoch;
+    assert.equal(oldMatcher.closed, true);
+    assert.equal(f.host._matchPreparing, action !== 'pause');
+    if (action !== 'pause') assert.notEqual(currentMatcher, oldMatcher);
+    if (late === 'resolve') oldStart.resolve(); else oldStart.reject(Error('late Worker initialization failure'));
+    await settle();
+    assert.equal(f.host._imageMatcher, currentMatcher, `${action}/${late}: old start cannot replace the active matcher`);
+    assert.equal(f.host._matchPhase, phase); assert.equal(f.host._contentEpoch, epoch);
+    assert.equal(f.host._matchPreparing, action !== 'pause', 'an old finally cannot release a newer initialization');
+    assert.equal(f.logs.filter(([event]) => event === '后台识别失败').length, 0);
+    if (action !== 'pause') {
+      newStart.resolve(); await settle();
+      assert.equal(f.host._matchPreparing, false);
+      assert.equal(f.host._matchPhase, action === 'return' ? 'reacquiring' : 'scanning');
+    }
+    assert.ok(!f.logs.some(([event]) => event === '非法识别状态切换'));
+    f.host.pauseRetrieval();
+  }
+});
+
+test('a retired background inference cannot release a newer Worker request', async t => {
+  for (const late of ['resolve', 'reject']) {
+    let pending = null;
+    const f = shownContent({ cameraEmbed: () => pending ? pending.promise : { vector: [1, 0, 0], inferenceMs: 100 } });
+    t.after(() => f.host.pauseRetrieval());
+    await f.lock(); f.turn(120); f.attend(config.awayDelayMs + 200); await settle();
+    const oldInference = pending = deferred();
+    await f.sample(); assert.equal(f.host._matchFrameBusy, true);
+    const oldMatcher = f.host._imageMatcher;
+    f.turn(0); f.attend(config.returnDelayMs + 400); await settle();
+    assert.equal(f.host._matchPhase, 'locked'); assert.equal(oldMatcher.closed, true);
+    const newInference = pending = deferred();
+    f.turn(120); f.attend(config.awayDelayMs + 200); await settle(); await f.sample();
+    const newMatcher = f.host._imageMatcher, epoch = f.host._contentEpoch;
+    assert.notEqual(newMatcher, oldMatcher); assert.equal(f.host._matchFrameBusy, true);
+    if (late === 'resolve') oldInference.resolve({ vector: [0, 1, 0], inferenceMs: 100 });
+    else oldInference.reject(Error('late Worker inference failure'));
+    await settle();
+    assert.equal(f.host._imageMatcher, newMatcher); assert.equal(f.host._matchFrameBusy, true);
+    assert.equal(f.host._matchEvidence, null); assert.equal(f.host._matchPhase, 'reacquiring');
+    assert.equal(f.host._matchedAnchorId, 'a'); assert.equal(f.host._contentEpoch, epoch); assert.equal(f.host.displayed.length, 1);
+    assert.equal(f.logs.filter(([event]) => event === '后台识别失败').length, 0);
+    newInference.resolve({ vector: [0, 1, 0], inferenceMs: 100 }); pending = null; await settle();
+    assert.equal(f.host._matchFrameBusy, false); assert.equal(f.host._matchEvidence.id, 'b');
+    assert.equal(f.host._matchPhase, 'reacquiring'); assert.equal(f.host.displayed.length, 1);
+    f.host.pauseRetrieval();
+  }
 });

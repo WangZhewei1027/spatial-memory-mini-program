@@ -10,6 +10,7 @@ const PHASES = Object.freeze({
   LOADING: 'loading', // Confirmed; fetching content.
   TRACKING: 'tracking', // Content ready; waiting for a valid SLAM pose.
   LOCKED: 'locked', // Content placed in world space.
+  REACQUIRING: 'reacquiring', // Content stays; the user left it, frames are matched again.
   ERROR: 'error', // Waits for an explicit rescan.
 });
 const TRANSITIONS = Object.freeze({
@@ -17,9 +18,10 @@ const TRANSITIONS = Object.freeze({
   empty: [],
   preparing: ['scanning', 'error'],
   scanning: ['loading', 'error'],
-  loading: ['tracking', 'error'],
+  loading: ['tracking', 'error', 'locked'], // A failed replacement keeps the previous content.
   tracking: ['locked'],
-  locked: [],
+  locked: ['reacquiring'],
+  reacquiring: ['locked', 'loading'],
   error: [],
 });
 function canTransition(from, to) {
@@ -50,6 +52,11 @@ function scanState() {
     _matchFrameCount: 0,
     _matchScanStartedAt: 0,
     _lastMatchScores: null,
+    _matchLockStatus: '',
+    _matchLockPose: null,
+    _matchAttention: null,
+    _nextAttentionAt: 0,
+    _reacquireBlockedUntil: 0,
   };
 }
 // Fields that live for the component instance (survive rescans).

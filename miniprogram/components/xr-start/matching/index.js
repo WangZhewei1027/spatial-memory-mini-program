@@ -2,7 +2,7 @@ const config = require("./config");
 const { CONFIG, fetchAnchorCandidates, fetchAnchorContent } = require("../../../utils/backend");
 const { loadReferencePixels } = require("./reference");
 const { ImageMatcher } = require("../../../lib/image-matcher/client");
-const { track, intervalFor, inspectPixels, blurState, candidateMovement } = require("../../../lib/image-matcher/policy");
+const { track, intervalFor, inspectPixels, blurState, candidateMovement, contentView, attention } = require("../../../lib/image-matcher/policy");
 const { RGBA_BYTES, INPUT_EDGE } = require("../../../lib/image-matcher/spec");
 const matchLog = require("./log");
 const diagnostics = require("./diagnostics");
@@ -11,7 +11,8 @@ const { referenceScope, gpsBody, checked, candidatesFrom, contentFrom } = requir
 const { PHASES, canTransition, scanState } = require("./state");
 
 // Recognition flow: discover nearby targets -> embed references -> match camera
-// frames -> fetch content -> place it once SLAM has a valid pose.
+// frames -> fetch content -> place it once SLAM has a valid pose. Once the user leaves
+// the shown content, frames are matched again and a different target replaces it.
 // Pure decisions live in lib/image-matcher/policy.js; per-scan fields in ./state.js.
 const errorFields = error => ({ code: error.code, message: error.message || error.errMsg });
 const pad = (value, width = 2) => String(value).padStart(width, '0');
@@ -19,6 +20,10 @@ const clockTime = ms => { const t = new Date(ms); return `${pad(t.getHours())}:$
 const score = value => Number.isFinite(value) ? value.toFixed(3) : '—';
 const round2 = value => Number.isFinite(value) ? +value.toFixed(2) : null;
 const round3 = value => Number.isFinite(value) ? +value.toFixed(3) : null;
+const SCANNING_PHASES = [PHASES.SCANNING, PHASES.REACQUIRING], SHOWN_PHASES = [PHASES.LOCKED, PHASES.REACQUIRING];
+// Relative pose only; no coordinates.
+const viewFields = view => ({ offsetDeg: view.offsetDeg == null ? null : Math.round(view.offsetDeg),
+  pitchDeg: Math.round(view.pitchDeg), distanceMeters: +view.distance.toFixed(1) });
 // Which phone produced a log; scores and timings are only comparable per device.
 const deviceInfo = () => {
   try {
@@ -48,7 +53,7 @@ module.exports = {
   },
   _recognitionStatus(message, hint = message) {
     if (this._disposed) return;
-    const locked = this._matchPhase === PHASES.LOCKED;
+    const locked = SHOWN_PHASES.includes(this._matchPhase) || !!this._matchedAnchorId;
     const key = `${this.retrievalMode}:${locked}:${message}:${hint}`;
     if (key === this._lastRecognitionStatus) return;
     this._lastRecognitionStatus = key;
@@ -254,8 +259,8 @@ module.exports = {
     const d = this._matchDiagnostics;
     if (d) { d.cameraFrames++; d.lastFrameAt = now; if (this._matchFrameBusy) d.busyFrames++; }
     if (!this._matchPreparing && !this._matchLocating && now >= this._nextRecognitionAt) void this.recognizeAnchor();
-    if (this._matchPhase !== PHASES.SCANNING || this._matchPreparing || this._matchFrameBusy || now < this._nextMatchFrameAt) return;
-    const epoch = this._modeEpoch;
+    if (!SCANNING_PHASES.includes(this._matchPhase) || this._matchPreparing || this._matchFrameBusy || now < this._nextMatchFrameAt) return;
+    const epoch = this._modeEpoch, background = this._matchPhase === PHASES.REACQUIRING;
     this._matchFrameBusy = true; this._nextMatchFrameAt = now + config.frameIntervalMs;
     try {
       // Consume the native frame synchronously; only an owned RGBA buffer may
@@ -270,7 +275,7 @@ module.exports = {
         this._matchEvidence = null; this._matchFrameBusy = false;
         this._recordMatchDecision({ reason: 'invalid_pixels', pixelMin: +stats.min.toFixed(1),
           pixelMax: +stats.max.toFixed(1), pixelStddev: +stats.stddev.toFixed(1), captureMs });
-        this._recognitionStatus('自动识别中 · 画面过暗或缺少细节');
+        if (!background) this._recognitionStatus('自动识别中 · 画面过暗或缺少细节');
         this._matchProgress(`${clockTime(now)} 跳过：画面过暗或缺少细节 · 等待下一帧`);
         return;
       }
@@ -296,10 +301,13 @@ module.exports = {
     } catch (error) { this._failFrameRecognition(error, epoch); }
   },
   async _matchCameraPixels(pixels, epoch, capturedAt) {
-    if (!this._recognitionCurrent(epoch)) return;
+    // A background scan ends without a new epoch; its matcher identifies late results.
+    const matcher = this._imageMatcher;
+    const current = () => this._recognitionCurrent(epoch) && this._imageMatcher === matcher && SCANNING_PHASES.includes(this._matchPhase);
+    if (!matcher || !current()) return;
     try {
-      const { vector, inferenceMs } = await this._imageMatcher.embed(pixels);
-      if (!this._recognitionCurrent(epoch) || this._matchPhase !== PHASES.SCANNING) return;
+      const { vector, inferenceMs } = await matcher.embed(pixels);
+      if (!current()) return;
       const now = Date.now(), elapsed = now - capturedAt;
       const d = this._matchDiagnostics;
       if (d) d.inferred++;
@@ -312,13 +320,15 @@ module.exports = {
         return;
       }
       const result = track(this._matchEvidence, vector, this._matchReferences, capturedAt, config);
-      const match = result.match;
+      // While its content is shown, the same target leading again changes nothing.
+      const shown = this._matchPhase === PHASES.REACQUIRING && result.match?.reference.id === this._matchedAnchorId;
+      const match = shown ? null : result.match;
       this._matchEvidence = result.evidence;
       // Only a clear lead speeds up sampling: on a borderline lead, extra frames within the
       // same couple of seconds mostly repeat the same view and make false confirmations easier.
-      this._nextMatchFrameAt = capturedAt + intervalFor(elapsed, config, result.strong);
+      this._nextMatchFrameAt = capturedAt + intervalFor(elapsed, config, result.strong && !shown);
       if (match && !result.confirmed) this._prefetchMatchContent(match.reference, epoch);
-      this._recordMatchDecision({ reason: result.confirmed ? 'confirmed' : match ? 'confirming' : result.reason,
+      this._recordMatchDecision({ reason: shown ? 'shown_target' : result.confirmed ? 'confirmed' : match ? 'confirming' : result.reason,
         topId: result.best?.reference.id || null, topScore: result.best?.score,
         secondScore: result.second, margin: result.margin,
         frameTopId: result.frame.best?.reference.id || null, frameTopScore: result.frame.best?.score,
@@ -336,21 +346,28 @@ module.exports = {
       this._matchProgress(`${clockTime(now)} #${this._matchFrameCount} 相似度 ${this._lastMatchScores}` +
         ` · 次高 ${score(result.second)} · 阈值 ${config.minimumScore} · 差 ${score(result.margin)}` +
         ` · ${elapsed}ms · 下次 ${((this._nextMatchFrameAt - capturedAt) / 1000).toFixed(1)}s 后`);
-      if (!result.confirmed) {
+      if (!result.confirmed || shown) {
         const hint = match ? `正在确认：${match.reference.name || '目标'} · 请保持镜头稳定` : this._scanStatusMessage || '自动识别中 · 请对准目标';
         this._recognitionStatus(match ? `确认 ${result.progress}/${result.required}` : hint, hint);
       }
-      if (result.confirmed) {
+      if (result.confirmed && shown) this._matchEvidence = null;
+      else if (result.confirmed) {
         this._matchLog('确认命中', { anchorId: match.reference.id, score: +match.score.toFixed(4), margin: round3(result.margin),
           via: result.via, strong: result.strong, observations: result.progress, frames: this._matchFrameCount,
           leadMs: capturedAt - result.evidence.since, scanMs: now - this._matchScanStartedAt, inferenceMs, elapsedMs: elapsed });
         void this._acceptImageMatch(match.reference);
       }
-    } catch (error) { this._failFrameRecognition(error, epoch); }
-    finally { if (this._modeEpoch === epoch) this._matchFrameBusy = false; }
+    } catch (error) { if (this._imageMatcher === matcher) this._failFrameRecognition(error, epoch); }
+    finally { if (this._modeEpoch === epoch && (!this._imageMatcher || this._imageMatcher === matcher)) this._matchFrameBusy = false; }
   },
   _failFrameRecognition(error, epoch) {
     if (!this._recognitionCurrent(epoch)) return;
+    // The shown content is unaffected by a failed background scan; try again later.
+    if (this._matchPhase === PHASES.REACQUIRING) {
+      this._matchLog('后台识别失败', errorFields(error), 'warn');
+      this._reacquireBlockedUntil = Date.now() + config.reacquireRetryMs;
+      return this._stopReacquire('inference_error');
+    }
     this._stopMatcher(); this._matchFrameBusy = false; this._matchEvidence = null;
     this._setMatchPhase(PHASES.ERROR); this._nextRecognitionAt = Infinity;
     this._matchLog('图像识别失败', errorFields(error), 'error');
@@ -376,10 +393,12 @@ module.exports = {
     return contentFrom(checked(response), candidate.id);
   },
   async _acceptImageMatch(candidate) {
-    if (this._matchPhase !== PHASES.SCANNING || !candidate) return;
-    const epoch = this._modeEpoch, matchedAt = Date.now();
+    if (!SCANNING_PHASES.includes(this._matchPhase) || !candidate) return;
+    const epoch = this._modeEpoch, matchedAt = Date.now(), replacing = this._matchPhase === PHASES.REACQUIRING;
+    if (replacing && candidate.id === this._matchedAnchorId) return;
     const prefetched = this._matchContentPrefetch.get(candidate.id);
     this._stopMatchDiagnostics('matched');
+    // Keep the old content until the replacement is ready and SLAM can place it.
     this._setMatchPhase(PHASES.LOADING); this._stopMatcher(); this._matchReferences = [];
     this._matchEvidence = null; this._nextRecognitionAt = Date.now() + config.gpsCheckIntervalMs;
     this._recognitionStatus(`已识别：${candidate.name || '目标'}，正在加载内容…`);
@@ -399,6 +418,13 @@ module.exports = {
       this._finishMatchPlacement();
     } catch (error) {
       if (!this._recognitionCurrent(epoch)) return;
+      if (replacing) {
+        this._matchLog('切换内容读取失败', { anchorId: candidate.id, ...errorFields(error) }, 'warn');
+        this._reacquireBlockedUntil = Date.now() + config.reacquireRetryMs;
+        this._setMatchPhase(PHASES.LOCKED); this._matchProgress('');
+        this._recognitionStatus(this._matchLockStatus);
+        return;
+      }
       this._setMatchPhase(PHASES.ERROR); this._nextRecognitionAt = Infinity;
       this._matchLog('内容读取失败', errorFields(error), 'error');
       this._recognitionStatus(error.message || '内容加载失败', '内容加载失败，请重新扫描');
@@ -410,13 +436,91 @@ module.exports = {
         this._runtime?.session.mode !== 'slam') return;
     this._pendingMatchPlacement = null;
     const { epoch, matchedAt, candidate, assets } = pending;
+    if (this._matchedAnchorId) this._matchLog('切换目标', { from: this._matchedAnchorId, to: candidate.id });
     this._clearRemoteAssets({ preserveActivities: true }); this._matchedAnchorId = candidate.id;
     for (const asset of assets) this._allowedAssetIds.add(asset.id);
     this._recognitionTiming = { requestId: `image-${epoch}-${matchedAt}`, startedAt: matchedAt, matchedAt,
       anchorId: candidate.id, contentEpoch: this._contentEpoch };
-    this._setMatchPhase(PHASES.LOCKED); this.displayAssets(assets);
+    this._setMatchPhase(PHASES.LOCKED);
+    this._matchAttention = null; this._matchLockPose = this._cameraPose(); this._reacquireBlockedUntil = 0;
+    this.displayAssets(assets);
     this._matchLog('内容已锁定', { anchorId: candidate.id, assets: assets.length, space: 'world', elapsedMs: Date.now() - matchedAt,
       scanMs: Date.now() - this._matchScanStartedAt });
-    this._recognitionStatus(`已识别：${candidate.name || '目标'}${assets.length ? ' · 内容已固定在空间中' : ' · 暂无关联内容'}`);
+    this._matchLockStatus = `已识别：${candidate.name || '目标'}${assets.length ? ' · 内容已固定在空间中' : ' · 暂无关联内容'}`;
+    this._recognitionStatus(this._matchLockStatus);
+  },
+  // Camera position and viewing direction in SLAM world space, copied.
+  _cameraPose() {
+    const camera = this.getCamTransform?.();
+    if (!camera) return null;
+    const forward = camera.getWorldDirection(this._forwardScratch), position = camera.position;
+    return { position: { x: position.x, y: position.y, z: position.z }, forward: { x: forward.x, y: forward.y, z: forward.z } };
+  },
+  // Stable viewing reference for this target. Async assets may appear in the new
+  // camera direction, and a Scene's authored origin can be anywhere; neither should
+  // move the attention baseline or cancel a turn toward the next target.
+  _contentFocus() {
+    const lock = this._matchLockPose;
+    if (!lock) return null;
+    const reach = config.focusAheadMeters / (Math.hypot(lock.forward.x, lock.forward.z) || 1);
+    return { x: lock.position.x + lock.forward.x * reach, z: lock.position.z + lock.forward.z * reach, forward: lock.forward };
+  },
+  // Runs on rendered frames with a valid pose. Leaving the shown content resumes
+  // matching in the background; coming back stops it. Content is only replaced by a
+  // confirmed different target, so a wrong guess here costs inference, not content.
+  _tickAttention() {
+    if (!SHOWN_PHASES.includes(this._matchPhase)) return;
+    const now = Date.now();
+    if (now < this._nextAttentionAt) return;
+    this._nextAttentionAt = now + config.attentionIntervalMs;
+    const pose = this._cameraPose(), focus = pose && this._contentFocus();
+    if (!focus) return;
+    const view = contentView(pose.position, pose.forward, focus, config);
+    const state = this._matchAttention = attention(this._matchAttention, view, now, config);
+    if (state.flipped) this._matchLog(state.away ? '离开内容' : '回到内容', viewFields(view));
+    if (state.away && this._matchPhase === PHASES.LOCKED && now >= this._reacquireBlockedUntil) void this._startReacquire();
+    else if (!state.away && this._matchPhase === PHASES.REACQUIRING) this._stopReacquire('returned');
+  },
+  // Matches frames again against the targets this scan already prepared; nothing is
+  // fetched and the shown content is untouched.
+  async _startReacquire() {
+    const epoch = this._modeEpoch, references = [];
+    for (const candidate of this._matchCandidates) {
+      const cached = this._referenceCache.lookup(candidate.id, candidate.reference_version);
+      if (cached) references.push({ ...candidate, vectors: cached.vectors });
+    }
+    // No other target to switch to, or a competitor is missing (see recognizeAnchor):
+    // stay locked until movement or a rescan refreshes the targets.
+    if (references.length < 2 || references.length !== this._matchCandidates.length) {
+      this._reacquireBlockedUntil = Infinity;
+      this._matchLog('不启动后台扫描', { references: references.length, candidates: this._matchCandidates.length });
+      return;
+    }
+    const shown = references.find(reference => reference.id === this._matchedAnchorId);
+    this._setMatchPhase(PHASES.REACQUIRING);
+    Object.assign(this, { _matchReferences: references, _matchEvidence: null, _matchBlur: null, _matchContentPrefetch: new Map(),
+      _matchFrameBusy: false, _matchFrameCount: 0, _nextMatchFrameAt: 0, _lastMatchScores: null, _matchScanStartedAt: Date.now() });
+    this._scanStatusMessage = `已识别：${shown?.name || '目标'} · 对准其他目标可自动切换`;
+    this._recognitionStatus(this._scanStatusMessage);
+    this._startMatchDiagnostics('reacquire'); this._matchStage('initializing_worker');
+    const matcher = this._imageMatcher = new ImageMatcher();
+    this._matchPreparing = true;
+    try {
+      await matcher.start();
+      if (this._imageMatcher !== matcher) return;
+      this._matchStage('scanning');
+      this._matchLog('后台扫描开始', { shownAnchorId: this._matchedAnchorId, references: references.length, elapsedMs: Date.now() - this._matchScanStartedAt });
+    } catch (error) {
+      if (this._imageMatcher === matcher) this._failFrameRecognition(error, epoch);
+    } finally { if (this._imageMatcher === matcher) this._matchPreparing = false; }
+  },
+  _stopReacquire(reason) {
+    this._stopMatchDiagnostics(reason); this._stopMatcher();
+    clearTimeout(this._matchSubmitTimer);
+    Object.assign(this, { _matchSubmitTimer: null, _matchReferences: [], _matchEvidence: null, _matchContentPrefetch: new Map(),
+      _matchFrameBusy: false, _matchPreparing: false });
+    this._setMatchPhase(PHASES.LOCKED);
+    this._matchProgress('');
+    this._recognitionStatus(this._matchLockStatus);
   },
 };

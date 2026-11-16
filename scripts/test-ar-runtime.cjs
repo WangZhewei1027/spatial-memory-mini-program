@@ -699,6 +699,55 @@ async function main() {
   assert.equal(host._matchDiagnosticTimer, null, 'leaving the scanning fixture releases its heartbeat');
   console.log("PASS Worker match -> existing SLAM pose -> world-locked Three content with camera parallax -> tracking recovery -> rescan");
 
+  // Exercise the component's real tracking notifications, camera pose and attention
+  // tick. A sub-second tracking loss must interrupt both leave and return evidence.
+  {
+    let attentionNow = 1000, scanStarts = 0;
+    context.Date = class extends Date { static now() { return attentionNow; } };
+    try {
+      const attentionHost = Object.assign({ data: {}, setData() {}, triggerEvent() {} }, component.methods);
+      attentionHost.startGPSWatch = () => {};
+      attentionHost.loadMapConfig = () => {};
+      component.lifetimes.attached.call(attentionHost);
+      const camera = new THREE.PerspectiveCamera();
+      camera.position.set(0, 1.5, 0); camera.updateMatrixWorld(true);
+      attentionHost._runtime = { camera, session: { mode: "slam", getDiagnostics: () => ({}) } };
+      attentionHost._arReady = true;
+      attentionHost.retrievalMode = "anchor";
+      attentionHost._matchPhase = "locked";
+      attentionHost._matchedAnchorId = "shown";
+      attentionHost._matchLockPose = attentionHost._cameraPose();
+      // Isolate Worker startup; all pose sampling and attention decisions remain real.
+      attentionHost._startReacquire = () => { scanStarts++; attentionHost._matchPhase = "reacquiring"; };
+      const tick = ms => { attentionNow += ms; camera.updateMatrixWorld(true); attentionHost.handleTick(ms / 1000); };
+      camera.rotation.y = Math.PI;
+      tick(0);
+      assert.equal(scanStarts, 0);
+      attentionHost.onARState("tracking", "tracking lost");
+      tick(600);
+      attentionHost.onARState("trackingrestored");
+      tick(0);
+      assert.equal(scanStarts, 0, "600 ms without tracking cannot complete the leave delay");
+      tick(200); tick(200);
+      assert.equal(scanStarts, 0);
+      tick(200);
+      assert.equal(scanStarts, 1, "fresh valid pose samples complete the leave delay");
+      camera.rotation.y = 0;
+      tick(200);
+      attentionHost.onARState("tracking", "tracking lost");
+      tick(600);
+      assert.equal(attentionHost._matchAttention.away, true, "tracking loss preserves the confirmed away state");
+      attentionHost.onARState("trackingrestored");
+      tick(0);
+      for (let i = 0; i < 7; i++) tick(200);
+      assert.equal(attentionHost._matchPhase, "reacquiring", "return delay also restarts after the outage");
+      tick(200);
+      assert.equal(attentionHost._matchPhase, "locked");
+      assert.equal(attentionHost._matchAttention.away, false);
+    } finally { delete context.Date; }
+    console.log("PASS short tracking loss interrupts leave and return attention delays without losing the confirmed state");
+  }
+
   let decoderRemoved = 0,
     audioDestroyed = 0,
     ended,

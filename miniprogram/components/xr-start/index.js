@@ -126,7 +126,7 @@ Component({
               onTick: (dt) => this.handleTick(dt),
               onState: (state, message) => this.onARState(state, message),
               onCameraFrame: (frame) => this.handleRecognitionFrame(frame),
-              requireTracking: () => this._scenePreviewMode || this.retrievalMode !== "anchor" || ["tracking", "locked"].includes(this._matchPhase),
+              requireTracking: () => this._scenePreviewMode || this.retrievalMode !== "anchor" || !!this._matchedAnchorId || ["tracking", "locked", "reacquiring"].includes(this._matchPhase),
               debugTimings: XR_CONFIG.debugLog,
               onLayersChange: layers => this.onRenderLayersChange(layers),
               onLayerError: event => this.onRenderLayerError(event),
@@ -236,6 +236,10 @@ Component({
         });
       } else if (state === "tracking") {
         this._arReady = false;
+        // Even a short tracking outage interrupts a pending attention decision;
+        // keep the confirmed state, but require fresh pose samples for the delay.
+        if (this._matchAttention) this._matchAttention = { ...this._matchAttention, since: null, lastAt: null, flipped: false };
+        this._nextAttentionAt = 0;
         this.setData({ arReady: false, renderStatus: message });
       } else if (state === "trackingrestored") {
         this._arReady = true;
@@ -278,7 +282,7 @@ Component({
         return;
       }
       if (this._retrievalPaused) return;
-      if (this.retrievalMode === "anchor") return;
+      if (this.retrievalMode === "anchor") { this._tickAttention(); return; }
       // Refresh nearby data periodically while spatial placement uses SLAM poses.
       const now = Date.now();
       if (now - this._lastFetchTime >= XR_CONFIG.gpsRefreshMs) {
