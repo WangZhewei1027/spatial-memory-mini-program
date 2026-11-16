@@ -2,7 +2,7 @@ const config = require("./config");
 const { CONFIG, fetchAnchorCandidates, fetchAnchorContent } = require("../../../utils/backend");
 const { loadReferencePixels } = require("./reference");
 const { ImageMatcher } = require("../../../lib/image-matcher/client");
-const { evaluateMatch, observe, intervalFor, inspectPixels, candidateMovement } = require("../../../lib/image-matcher/policy");
+const { track, intervalFor, inspectPixels, blurState, candidateMovement } = require("../../../lib/image-matcher/policy");
 const { RGBA_BYTES, INPUT_EDGE } = require("../../../lib/image-matcher/spec");
 const matchLog = require("./log");
 const diagnostics = require("./diagnostics");
@@ -17,6 +17,19 @@ const errorFields = error => ({ code: error.code, message: error.message || erro
 const pad = (value, width = 2) => String(value).padStart(width, '0');
 const clockTime = ms => { const t = new Date(ms); return `${pad(t.getHours())}:${pad(t.getMinutes())}:${pad(t.getSeconds())}`; };
 const score = value => Number.isFinite(value) ? value.toFixed(3) : '—';
+const round2 = value => Number.isFinite(value) ? +value.toFixed(2) : null;
+const round3 = value => Number.isFinite(value) ? +value.toFixed(3) : null;
+// Which phone produced a log; scores and timings are only comparable per device.
+const deviceInfo = () => {
+  try {
+    const device = wx.getDeviceInfo?.() || {}, app = wx.getAppBaseInfo?.() || {};
+    return { model: device.model, system: device.system, wechat: app.version, sdk: app.SDKVersion };
+  } catch (_) { return null; }
+};
+// Per-target scores of one frame for field calibration: raw (this frame), smoothed,
+// and which reference image matched best. Highest raw scores first, bounded.
+const targetScores = entries => [...entries].sort((a, b) => b.raw - a.raw).slice(0, config.frameLogTargets)
+  .map(entry => ({ id: entry.reference.id, raw: round3(entry.raw), smooth: round3(entry.score), image: entry.image }));
 
 module.exports = {
   ...diagnostics,
@@ -210,11 +223,20 @@ module.exports = {
       this._matchStage('scanning');
       this._scanStatusMessage = '自动识别中 · 请对准目标';
       this._recognitionStatus(this._scanStatusMessage);
+      this._matchScanStartedAt = Date.now();
       this._matchLog('扫描开始', {
+        device: deviceInfo(),
+        targets: references.map(reference => ({ id: reference.id, name: reference.name, images: reference.vectors.length,
+          distanceMeters: Number.isFinite(reference.distance_meters) ? Math.round(reference.distance_meters) : null })),
         references: references.length, candidates: this._matchCandidates.length, cacheHits,
         cacheMisses: references.length - cacheHits, intervalMs: config.frameIntervalMs,
-        minimumScore: config.minimumScore, minimumMargin: config.minimumMargin,
-        observationsRequired: config.minimumObservations, confirmDurationMs: config.confirmDurationMs });
+        minimumScore: config.minimumScore, minimumMargin: config.minimumMargin, scoreSmoothingMs: config.scoreSmoothingMs, scoreJump: config.scoreJump,
+        observationsRequired: config.minimumObservations, confirmDurationMs: config.confirmDurationMs,
+        strongScore: config.strongScore, strongMargin: config.strongMargin, strongObservationsRequired: config.strongObservations,
+        strongConfirmDurationMs: config.strongConfirmDurationMs, leadFrameIntervalMs: config.leadFrameIntervalMs,
+        maxFrameIntervalMs: config.maxFrameIntervalMs, maxResultAgeMs: config.maxResultAgeMs,
+        blurSharpnessRatio: config.blurSharpnessRatio, maxBlurRetries: config.maxBlurRetries,
+        maxContentPrefetches: config.maxContentPrefetches });
     } catch (error) {
       if (!current()) return;
       this._stopMatcher(); this._matchReferences = []; this._matchCandidates = []; this._matchEvidence = null;
@@ -252,7 +274,18 @@ module.exports = {
         this._matchProgress(`${clockTime(now)} 跳过：画面过暗或缺少细节 · 等待下一帧`);
         return;
       }
-      if (d) { d.submittedAt = now; d.captureMs = captureMs; }
+      // A motion-blurred frame costs no inference and keeps the accumulated evidence.
+      const blur = this._matchBlur = blurState(this._matchBlur, stats.sharpness, config);
+      if (blur.blurred) {
+        if (d) d.blurredFrames++;
+        this._matchFrameBusy = false; this._nextMatchFrameAt = now + config.blurRetryMs;
+        this._recordMatchDecision({ reason: 'blurred_frame', sharpness: +stats.sharpness.toFixed(2),
+          sharpnessBaseline: +blur.previous.toFixed(2), sharpnessRatio: round2(stats.sharpness / blur.previous),
+          retry: blur.retries, captureMs });
+        this._matchProgress(`${clockTime(now)} 跳过：画面模糊 · 马上重试`);
+        return;
+      }
+      if (d) { d.submittedAt = now; d.captureMs = captureMs; d.sharpness = stats.sharpness; d.sharpnessBaseline = blur.previous; }
       this._matchFrameCount = (this._matchFrameCount || 0) + 1;
       this._matchProgress(`匹配中… #${this._matchFrameCount} · ${clockTime(now)} 取帧${this._lastMatchScores ? ` · 上次 ${this._lastMatchScores}` : ''}`);
       // Let the current rendering callback finish before copying pixels to Worker.
@@ -274,31 +307,43 @@ module.exports = {
       if (elapsed > config.maxResultAgeMs) {
         if (d) d.staleResults++;
         this._matchEvidence = null;
-        this._recordMatchDecision({ reason: 'stale_result', elapsedMs: elapsed, inferenceMs });
+        this._recordMatchDecision({ reason: 'stale_result', frame: this._matchFrameCount, elapsedMs: elapsed, inferenceMs });
         this._matchProgress(`${clockTime(now)} #${this._matchFrameCount} 结果过期（${elapsed}ms）已丢弃 · 等待下一帧`);
         return;
       }
-      const evaluation = evaluateMatch(vector, this._matchReferences, config), match = evaluation.match;
-      const result = observe(this._matchEvidence, match, capturedAt, config);
+      const result = track(this._matchEvidence, vector, this._matchReferences, capturedAt, config);
+      const match = result.match;
       this._matchEvidence = result.evidence;
-      this._recordMatchDecision({ reason: result.confirmed ? 'confirmed' : match ? 'confirming' : evaluation.reason,
-        topId: evaluation.best?.reference.id || null, topScore: evaluation.best?.score,
-        secondScore: evaluation.second, margin: evaluation.margin, minimumScore: config.minimumScore,
-        minimumMargin: config.minimumMargin, observations: result.evidence?.count || 0,
-        observationsRequired: config.minimumObservations, captureMs: d?.captureMs, inferenceMs, elapsedMs: elapsed,
-        nextIntervalMs: this._nextMatchFrameAt - capturedAt });
-      const best = evaluation.best;
+      // Only a clear lead speeds up sampling: on a borderline lead, extra frames within the
+      // same couple of seconds mostly repeat the same view and make false confirmations easier.
+      this._nextMatchFrameAt = capturedAt + intervalFor(elapsed, config, result.strong);
+      if (match && !result.confirmed) this._prefetchMatchContent(match.reference, epoch);
+      this._recordMatchDecision({ reason: result.confirmed ? 'confirmed' : match ? 'confirming' : result.reason,
+        topId: result.best?.reference.id || null, topScore: result.best?.score,
+        secondScore: result.second, margin: result.margin,
+        frameTopId: result.frame.best?.reference.id || null, frameTopScore: result.frame.best?.score,
+        frameMargin: result.frame.margin, minimumScore: config.minimumScore,
+        minimumMargin: config.minimumMargin, observations: result.progress,
+        observationsRequired: result.required, strong: result.strong, slowObservations: result.evidence.count,
+        leadMs: result.evidence.id ? capturedAt - result.evidence.since : null, frame: this._matchFrameCount,
+        sharpness: round2(d?.sharpness), sharpnessBaseline: round2(d?.sharpnessBaseline),
+        captureMs: d?.captureMs, inferenceMs, elapsedMs: elapsed,
+        nextIntervalMs: this._nextMatchFrameAt - capturedAt, scores: targetScores(result.scores) });
+      const best = result.best;
+      const frameBest = result.frame.best;
       this._lastMatchScores = best
-        ? `${score(best.score)} ${best.reference.name || best.reference.id}` : '无可比参考图';
+        ? `${score(best.score)}（本帧 ${score(frameBest?.score)}） ${best.reference.name || best.reference.id}` : '无可比参考图';
       this._matchProgress(`${clockTime(now)} #${this._matchFrameCount} 相似度 ${this._lastMatchScores}` +
-        ` · 次高 ${score(evaluation.second)} · 阈值 ${config.minimumScore} · 差 ${score(evaluation.margin)}` +
+        ` · 次高 ${score(result.second)} · 阈值 ${config.minimumScore} · 差 ${score(result.margin)}` +
         ` · ${elapsed}ms · 下次 ${((this._nextMatchFrameAt - capturedAt) / 1000).toFixed(1)}s 后`);
       if (!result.confirmed) {
         const hint = match ? `正在确认：${match.reference.name || '目标'} · 请保持镜头稳定` : this._scanStatusMessage || '自动识别中 · 请对准目标';
-        this._recognitionStatus(match ? `确认 ${result.evidence.count}/${config.minimumObservations}` : hint, hint);
+        this._recognitionStatus(match ? `确认 ${result.progress}/${result.required}` : hint, hint);
       }
       if (result.confirmed) {
-        this._matchLog('确认命中', { anchorId: match.reference.id, score: +match.score.toFixed(4), inferenceMs, elapsedMs: elapsed });
+        this._matchLog('确认命中', { anchorId: match.reference.id, score: +match.score.toFixed(4), margin: round3(result.margin),
+          via: result.via, strong: result.strong, observations: result.progress, frames: this._matchFrameCount,
+          leadMs: capturedAt - result.evidence.since, scanMs: now - this._matchScanStartedAt, inferenceMs, elapsedMs: elapsed });
         void this._acceptImageMatch(match.reference);
       }
     } catch (error) { this._failFrameRecognition(error, epoch); }
@@ -312,19 +357,42 @@ module.exports = {
     this._recognitionStatus(error.message || '图像识别失败', '图像识别失败，请重新扫描');
     this._stopMatchDiagnostics('inference_error');
   },
+  // Content for the leading target is requested before confirmation finishes, so a
+  // confirmed match usually has it ready. A wrong guess is simply never used.
+  _prefetchMatchContent(candidate, epoch) {
+    const prefetch = this._matchContentPrefetch;
+    if (prefetch.has(candidate.id) || prefetch.size >= config.maxContentPrefetches) return;
+    const startedAt = Date.now(), request = this._requestMatchContent(candidate, epoch);
+    // A failure is retried only if this target is confirmed; here it is just recorded.
+    request.then(assets => { if (assets) this._matchLog('预取完成', { anchorId: candidate.id, assets: assets.length, elapsedMs: Date.now() - startedAt }); },
+      error => { if (this._modeEpoch === epoch) this._matchLog('预取失败', { anchorId: candidate.id, elapsedMs: Date.now() - startedAt, ...errorFields(error) }, 'warn'); });
+    prefetch.set(candidate.id, request);
+    this._matchLog('预取内容', { anchorId: candidate.id, frame: this._matchFrameCount, scanMs: startedAt - this._matchScanStartedAt });
+  },
+  async _requestMatchContent(candidate, epoch) {
+    const gps = await this._locateForRecognition(epoch);
+    if (!this._recognitionCurrent(epoch)) return null;
+    const response = await fetchAnchorContent({ ...gpsBody(CONFIG, gps), anchor_id: candidate.id, reference_version: candidate.reference_version });
+    return contentFrom(checked(response), candidate.id);
+  },
   async _acceptImageMatch(candidate) {
     if (this._matchPhase !== PHASES.SCANNING || !candidate) return;
     const epoch = this._modeEpoch, matchedAt = Date.now();
+    const prefetched = this._matchContentPrefetch.get(candidate.id);
     this._stopMatchDiagnostics('matched');
     this._setMatchPhase(PHASES.LOADING); this._stopMatcher(); this._matchReferences = [];
     this._matchEvidence = null; this._nextRecognitionAt = Date.now() + config.gpsCheckIntervalMs;
     this._recognitionStatus(`已识别：${candidate.name || '目标'}，正在加载内容…`);
     try {
-      const gps = await this._locateForRecognition(epoch);
-      if (!this._recognitionCurrent(epoch)) return;
-      const response = await fetchAnchorContent({ ...gpsBody(CONFIG, gps), anchor_id: candidate.id, reference_version: candidate.reference_version });
-      if (!this._recognitionCurrent(epoch)) return;
-      const assets = contentFrom(checked(response), candidate.id);
+      let assets = null;
+      if (prefetched) {
+        try { assets = await prefetched; }
+        catch (error) { this._matchLog('预取未命中，重新读取', { anchorId: candidate.id }); }
+        if (!this._recognitionCurrent(epoch)) return;
+      }
+      if (!assets) assets = await this._requestMatchContent(candidate, epoch);
+      if (!assets || !this._recognitionCurrent(epoch)) return;
+      this._matchLog('内容就绪', { anchorId: candidate.id, prefetched: !!prefetched, assets: assets.length, elapsedMs: Date.now() - matchedAt });
       this._pendingMatchPlacement = { epoch, matchedAt, candidate, assets };
       this._setMatchPhase(PHASES.TRACKING);
       if (!this._arReady) this._recognitionStatus(`已识别：${candidate.name || '目标'} · 请缓慢左右移动手机，建立空间定位`);
@@ -347,7 +415,8 @@ module.exports = {
     this._recognitionTiming = { requestId: `image-${epoch}-${matchedAt}`, startedAt: matchedAt, matchedAt,
       anchorId: candidate.id, contentEpoch: this._contentEpoch };
     this._setMatchPhase(PHASES.LOCKED); this.displayAssets(assets);
-    this._matchLog('内容已锁定', { anchorId: candidate.id, assets: assets.length, space: 'world', elapsedMs: Date.now() - matchedAt });
+    this._matchLog('内容已锁定', { anchorId: candidate.id, assets: assets.length, space: 'world', elapsedMs: Date.now() - matchedAt,
+      scanMs: Date.now() - this._matchScanStartedAt });
     this._recognitionStatus(`已识别：${candidate.name || '目标'}${assets.length ? ' · 内容已固定在空间中' : ' · 暂无关联内容'}`);
   },
 };

@@ -7,9 +7,9 @@ module.exports = {
     if (config.debugLogs === false || this._matchDiagnostics) return;
     const now = Date.now();
     const d = this._matchDiagnostics = { source, startedAt: now, stage: 'waiting_camera', stageAt: now,
-      cameraFrames: 0, captured: 0, inferred: 0, invalidPixels: 0, staleResults: 0, busyFrames: 0,
+      cameraFrames: 0, captured: 0, inferred: 0, invalidPixels: 0, blurredFrames: 0, staleResults: 0, busyFrames: 0,
       lastFrameAt: null, submittedAt: null, lastResult: null, lastDecision: null };
-    this._matchLog('识别启动', { source, automatic: true, intervalMs: config.frameIntervalMs });
+    this._matchLog('识别启动', { source, automatic: true, intervalMs: config.frameIntervalMs, frameLogs: !!config.frameLogs });
     const report = () => {
       if (this._matchDiagnostics !== d || this._disposed || this._retrievalPaused) return;
       this._reportMatchDiagnostics();
@@ -24,12 +24,13 @@ module.exports = {
   _recordMatchDecision(fields) {
     const d = this._matchDiagnostics;
     if (!d) return;
-    d.lastResult = { ...fields, topScore: round(fields.topScore), secondScore: round(fields.secondScore),
-      margin: round(fields.margin) };
+    // tMs orders frames within one diagnostics run; console lines carry no timestamp.
+    d.lastResult = { tMs: Date.now() - d.startedAt, ...fields, topScore: round(fields.topScore), secondScore: round(fields.secondScore),
+      margin: round(fields.margin), frameTopScore: round(fields.frameTopScore), frameMargin: round(fields.frameMargin) };
     const key = `${fields.reason}:${fields.topId || ''}:${fields.observations || 0}`;
-    // Log first result / reason transitions / confirmation progress immediately;
-    // unchanged decisions are included in the 3-second summary, not every frame.
-    if (key !== d.lastDecision) this._matchLog('匹配结果', d.lastResult);
+    // frameLogs prints every sampled frame. Otherwise only the first result, reason
+    // transitions and confirmation progress; unchanged decisions reach the summary.
+    if (config.frameLogs || key !== d.lastDecision) this._matchLog('匹配结果', d.lastResult);
     d.lastDecision = key;
   },
   _reportMatchDiagnostics(reason = 'periodic') {
@@ -38,12 +39,12 @@ module.exports = {
     const now = Date.now();
     this._matchLog('扫描摘要', { reason, stage: d.stage, stageMs: now - d.stageAt,
       cameraFrames: d.cameraFrames, captured: d.captured, inferred: d.inferred,
-      invalidPixels: d.invalidPixels, staleResults: d.staleResults, busyFrames: d.busyFrames,
+      invalidPixels: d.invalidPixels, blurredFrames: d.blurredFrames, staleResults: d.staleResults, busyFrames: d.busyFrames,
       frameAgeMs: d.lastFrameAt == null ? null : now - d.lastFrameAt,
       workerBusy: !!this._matchFrameBusy,
       inFlightMs: this._matchFrameBusy && d.submittedAt != null ? now - d.submittedAt : 0,
       nextFrameInMs: Math.max(0, (this._nextMatchFrameAt || 0) - now),
-      references: this._matchReferences?.length || 0, lastResult: d.lastResult });
+      references: this._matchReferences?.length || 0, lastResult: d.lastResult && { ...d.lastResult, scores: undefined } });
   },
   _stopMatchDiagnostics(reason) {
     this._reportMatchDiagnostics(reason);

@@ -34,6 +34,8 @@ function scanState() {
     _matchReferences: [],
     _matchCandidates: [],
     _matchEvidence: null,
+    _matchBlur: null,
+    _matchContentPrefetch: new Map(),
     _matchPreparing: false,
     _matchFrameBusy: false,
     _matchLocating: false,
@@ -46,6 +48,7 @@ function scanState() {
     _recognitionGPS: null,
     _recognitionGPSRequest: null,
     _matchFrameCount: 0,
+    _matchScanStartedAt: 0,
     _lastMatchScores: null,
   };
 }

@@ -81,10 +81,10 @@ function fixture(overrides = {}) {
     move(meters, accuracy = 10) { gps = { latitude: 31 + meters / 6371000 * 180 / Math.PI, longitude: 121, accuracy }; host.currentGPS = { ...gps, sampledAt: now }; },
     counts: () => ({ closed, embedded, loaded, captures, candidateCalls }) };
 }
-test('three spaced Worker results lock once, release inference, and rescan reuses SLAM', async () => {
+test('a clear match locks after two spaced Worker results, releases inference, and rescan reuses SLAM', async () => {
   const f=fixture(); await f.host.recognizeAnchor();
   assert.equal(f.host._matchPhase,'scanning');
-  await f.sample(); f.tick(); await f.sample(); assert.equal(f.host.displayed.length,0);
+  await f.sample(); assert.equal(f.host.displayed.length,0);
   f.tick(); await f.sample(); assert.equal(f.host._matchPhase,'locked'); assert.equal(f.host.displayed.length,1);
   assert.equal(f.counts().closed,1); assert.equal(f.host._imageMatcher,null);
   f.tick(60000); await f.sample(); assert.equal(f.calls.length,2);
@@ -123,9 +123,77 @@ test('busy frames are dropped, native pixels are copied, and slow responses redu
   for(let i=0;i<30;i++){f.tick(40);f.host.handleRecognitionFrame(f.frame);}
   assert.equal(f.counts().captures,1); assert.notEqual(input,f.pixels.buffer);
   const copy=new Uint8Array(input)[20];f.pixels[20]=255;assert.equal(new Uint8Array(input)[20],copy);
-  pending.resolve({vector:[1,0],inferenceMs:1200});await settle();
-  assert.equal(f.host._nextMatchFrameAt,4000); assert.equal(f.host._matchFrameBusy,false);
+  pending.resolve({vector:[0,1],inferenceMs:1200});await settle();
+  assert.equal(f.host._nextMatchFrameAt,4000,'no leading target: four times the measured time'); assert.equal(f.host._matchFrameBusy,false);
   f.host.pauseRetrieval();
+});
+test('frames come faster only while a target leads clearly, still bounded by the measured time', async () => {
+  assert.equal(policy.intervalFor(150, config), config.frameIntervalMs);
+  assert.equal(policy.intervalFor(150, config, true), config.leadFrameIntervalMs);
+  assert.equal(policy.intervalFor(700, config, true), 1400); assert.equal(policy.intervalFor(5000, config, true), config.maxFrameIntervalMs);
+  const weak = fixture({ embed: pixels => ({ vector: pixels.byteLength === 4 ? [1, 0] : [.2, .98], inferenceMs: 100 }) });
+  await weak.host.recognizeAnchor(); await weak.sample();
+  assert.equal(weak.host._nextMatchFrameAt, weak.now() + config.frameIntervalMs); weak.host.pauseRetrieval();
+  const borderline = fixture({ embed: pixels => ({ vector: pixels.byteLength === 4 ? [1, 0] : [.42, .9075], inferenceMs: 100 }) });
+  await borderline.host.recognizeAnchor(); await borderline.sample(); assert.equal(borderline.host._matchEvidence.id, 'a');
+  assert.equal(borderline.host._nextMatchFrameAt, borderline.now() + config.frameIntervalMs, 'a borderline lead keeps the slow pace');
+  borderline.host.pauseRetrieval();
+  const lead = fixture(); await lead.host.recognizeAnchor(); await lead.sample();
+  assert.equal(lead.host._nextMatchFrameAt, lead.now() + config.leadFrameIntervalMs);
+  lead.tick(config.leadFrameIntervalMs); await lead.sample(); assert.equal(lead.host._matchPhase, 'locked', 'confirmed half a second later');
+});
+test('a blurred frame is retried shortly without inference and keeps the evidence', async () => {
+  const f = fixture({ embed: pixels => ({ vector: pixels.byteLength === 4 ? [1, 0] : [.42, .9075], inferenceMs: 100 }) });
+  await f.host.recognizeAnchor(); await f.sample();
+  const sharp = f.pixels.slice(), evidence = f.host._matchEvidence, embedded = f.counts().embedded;
+  assert.equal(evidence.count, 1);
+  // Same brightness range, but neighbouring pixels are almost equal: low gradient energy.
+  for (let i = 0; i < f.pixels.length; i++) f.pixels[i] = Math.floor(i / 4 / 224) % 251;
+  for (let retry = 1; retry <= config.maxBlurRetries; retry++) {
+    f.tick(); await f.sample();
+    assert.equal(f.counts().embedded, embedded, 'blurred frames are not sent to the Worker');
+    assert.equal(f.host._nextMatchFrameAt, f.now() + config.blurRetryMs); assert.equal(f.host._matchFrameBusy, false);
+  }
+  assert.equal(f.host._matchEvidence, evidence); assert.match(f.progress.at(-1).text, /画面模糊/);
+  assert.equal(f.logs.filter(([event]) => event === '匹配结果').at(-1)[1].reason, 'blurred_frame');
+  // Retries are capped: a scene that stays plain is scored anyway.
+  f.tick(); await f.sample(); assert.equal(f.counts().embedded, embedded + 1);
+  // A sharp frame after one blurred frame is scored immediately.
+  const g = fixture(); await g.host.recognizeAnchor(); await g.sample(); const before = g.counts().embedded;
+  for (let i = 0; i < g.pixels.length; i++) g.pixels[i] = Math.floor(i / 4 / 224) % 251;
+  g.tick(); await g.sample(); g.pixels.set(sharp); g.tick(config.blurRetryMs); await g.sample();
+  assert.equal(g.counts().embedded, before + 1);
+  f.heartbeat(); assert.equal(f.logs.filter(([event]) => event === '扫描摘要').at(-1)[1].blurredFrames, config.maxBlurRetries);
+  f.host.pauseRetrieval(); g.host.pauseRetrieval();
+  const state = policy.blurState(null, 10, config); assert.equal(state.blurred, false); assert.equal(state.baseline, 10);
+  assert.equal(policy.blurState(state, 6, config).blurred, false); assert.equal(policy.blurState(state, 4, config).blurred, true);
+  assert.equal(policy.blurState(null, null, config).blurred, false);
+});
+test('content for the leading target is prefetched once and reused at confirmation', async () => {
+  const content = deferred(); let requests = 0;
+  const f = fixture({ embed: pixels => ({ vector: pixels.byteLength === 4 ? [1, 0] : [.42, .9075], inferenceMs: 100 }),
+    fetchAnchorContent: async body => { requests++; await content.promise; return { statusCode: 200, data: { anchor: { id: body.anchor_id }, assets: [{ id: 'text', file_type: 'text' }] } }; } });
+  await f.host.recognizeAnchor(); await f.sample();
+  assert.equal(requests, 1, 'requested on the first leading frame'); assert.equal(f.host._matchPhase, 'scanning');
+  f.tick(); await f.sample(); f.tick(); await f.sample();
+  assert.equal(f.host._matchPhase, 'loading'); assert.equal(requests, 1, 'confirmation waits for the same request');
+  content.resolve(); await settle();
+  assert.equal(f.host._matchPhase, 'locked'); assert.equal(f.host.displayed.length, 1);
+  assert.equal(f.logs.find(([event]) => event === '内容就绪')[1].prefetched, true);
+  // A failed prefetch falls back to a fresh request at confirmation.
+  let attempts = 0;
+  const g = fixture({ fetchAnchorContent: async body => { if (++attempts === 1) throw Error('offline');
+    return { statusCode: 200, data: { anchor: { id: body.anchor_id }, assets: [] } }; } });
+  await g.host.recognizeAnchor(); await g.sample(); g.tick(); await g.sample();
+  assert.equal(attempts, 2); assert.equal(g.host._matchPhase, 'locked');
+  // Leaving the scan drops prefetched content; an unconfirmed guess is never displayed.
+  const h = fixture(); await h.host.recognizeAnchor(); await h.sample(); assert.equal(h.host._matchContentPrefetch.size, 1);
+  h.host.rescan(); await settle(); assert.equal(h.host._matchContentPrefetch.size, 0); assert.equal(h.host.displayed.length, 0);
+  h.host.pauseRetrieval();
+  // At most maxContentPrefetches requests per scan.
+  const epoch = f.host._modeEpoch; f.host._matchContentPrefetch = new Map(); requests = 0;
+  for (const id of ['x', 'y', 'z']) f.host._prefetchMatchContent({ id, reference_version: 'v' }, epoch);
+  await settle(); assert.equal(f.host._matchContentPrefetch.size, config.maxContentPrefetches);
 });
 test('dark images and stale inference never confirm a target', async () => {
   const f=fixture();await f.host.recognizeAnchor();f.pixels.fill(0);await f.sample();assert.equal(f.counts().embedded,1);
@@ -137,10 +205,109 @@ test('dark images and stale inference never confirm a target', async () => {
 test('ambiguous scores, weak matches, changed targets and observation gaps reset confirmation', () => {
   const a={id:'a',vector:[1,0]}, b={id:'b',vector:[.99,.01]};
   assert.equal(policy.evaluateMatch([1,0],[a,b],config).match,null);assert.equal(policy.evaluateMatch([0,1],[a],config).match,null);
-  let evidence=policy.observe(null,{reference:a},1000,config).evidence;
-  evidence=policy.observe(evidence,{reference:b},2000,config).evidence;assert.equal(evidence.count,1);
-  evidence=policy.observe(evidence,{reference:b},7000,config).evidence;assert.equal(evidence.count,1);
-  assert.equal(policy.observe(evidence,null,8000,config).evidence,null);
+  const c={id:'c',vector:[0,1]}, refs=[a,c];
+  let evidence=policy.track(null,[.8,.6],refs,1000,config).evidence;assert.equal(evidence.id,'a');
+  // A moderate rise of another target is averaged in: the two are ambiguous, nobody leads.
+  evidence=policy.track(evidence,[.6,.8],refs,2000,config).evidence;assert.equal(evidence.id,null);
+  // A large jump onto another target switches the leader at once and counting restarts.
+  evidence=policy.track(policy.track(null,[1,0],refs,1000,config).evidence,[0,1],refs,2000,config).evidence;
+  assert.equal(evidence.id,'c');assert.equal(evidence.count,1);
+  evidence=policy.track(evidence,[1,0],refs,9000,config).evidence;assert.equal(evidence.id,'a','a long gap restarts the average');
+  evidence=policy.track(evidence,[0,1],[a],13000,config).evidence;assert.equal(evidence.id,null,'a sustained weak score drops the leader');
+});
+// Unit vector with cosine `score` to the x axis, `other` to the y axis, the rest on z.
+const toward = (score, other = .1) => [score, other, Math.sqrt(1 - score * score - other * other), 0];
+test('smoothed evidence survives one weak frame while walking towards a target', () => {
+  const target = { id: 't', vectors: [[1, 0, 0, 0], [.6, 0, 0, .8]] }, other = { id: 'o', vectors: [[0, 1, 0, 0]] };
+  // Raw cosine to the target rises as the camera approaches; the third frame is blurred.
+  const slowOnly = { ...config, strongObservations: Infinity }; // The averaged path on its own.
+  const raw = [.45, .55, .3, .65, .75];
+  let evidence = null, confirmedAt = null, oldCount = 0, oldConfirmed = false;
+  raw.forEach((score, i) => {
+    const result = policy.track(evidence, toward(score), [target, other], 1000 * (i + 1), slowOnly);
+    oldCount = result.frame.match ? oldCount + 1 : 0; oldConfirmed ||= oldCount >= config.minimumObservations;
+    evidence = result.evidence;
+    if (result.confirmed && confirmedAt == null) confirmedAt = i;
+  });
+  assert.equal(oldConfirmed, false, 'per-frame gating resets on the blurred frame and never reaches three');
+  assert.equal(evidence.id, 't'); assert.equal(confirmedAt, 3);
+  // A raw winner that is not the leader does not advance confirmation.
+  const before = policy.track(null, toward(.8), [target, other], 0, config).evidence;
+  const after = policy.track(before, toward(.1, .9), [target, other], 500, config);
+  assert.equal(after.evidence.count, before.count);
+});
+test('a borderline match keeps three confirmations; a clear lead needs two', async () => {
+  const f = fixture({ embed: pixels => ({ vector: pixels.byteLength === 4 ? [1, 0] : [.42, .9075], inferenceMs: 150 }) });
+  await f.host.recognizeAnchor();
+  for (let i = 0; i < 2; i++) { await f.sample(); f.tick(); }
+  assert.equal(f.host._matchPhase, 'scanning'); assert.match(f.statuses.at(-1).diagnostic, /确认 2\/3/);
+  await f.sample(); assert.equal(f.host._matchPhase, 'locked');
+  const a = { id: 'a', vector: [1, 0, 0, 0] }, b = { id: 'b', vector: [0, 1, 0, 0] };
+  const first = policy.track(null, toward(.7), [a, b], 0, config);
+  assert.equal(first.strong, true); assert.equal(first.required, config.strongObservations); assert.equal(first.confirmed, false);
+  assert.equal(policy.track(first.evidence, toward(.7), [a, b], 300, config).confirmed, false, 'two clear frames must be half a second apart');
+  assert.equal(policy.track(first.evidence, toward(.7), [a, b], 500, config).confirmed, true);
+  // A frame that is not clear on its own ends the streak; the next clear frame starts over.
+  const dip = policy.track(first.evidence, toward(.43, .3), [a, b], 500, config);
+  assert.equal(dip.strong, false); assert.equal(dip.confirmed, false);
+  const again = policy.track(dip.evidence, toward(.7), [a, b], 1000, config);
+  assert.equal(again.progress, 1); assert.equal(again.confirmed, false);
+  // A high score with a close competitor is not a clear lead.
+  const close = policy.track(null, toward(.7, .58), [a, b], 0, config);
+  assert.equal(close.strong, false); assert.equal(close.required, config.minimumObservations);
+});
+test('clear frames confirm on the second one, replaying five iPhone 15 Pro scans of 2026-11-16', () => {
+  const ids = ['outdoor', 'indoor', 'rest', 'lift9', 'lift3', 'market', 'house'];
+  const refs = ids.map((id, i) => ({ id, vector: [...ids, ''].map((_, j) => +(i === j)) }));
+  // Logged raw scores per frame, highest first; unlisted targets sit just below the last one.
+  const frame = scores => { const low = Math.min(...Object.values(scores)) - .01, v = ids.map(id => scores[id] ?? low);
+    return [...v, Math.sqrt(1 - v.reduce((sum, x) => sum + x * x, 0))]; };
+  const replay = (frames, settings) => { let evidence = null, leads = 0;
+    for (const [i, [at, scores]] of frames.entries()) {
+      const result = policy.track(evidence, frame(scores), refs, at, settings); evidence = result.evidence;
+      if (result.match) leads++;
+      if (result.confirmed) return `${result.match.reference.id} F${i + 1} ${result.via}`;
+    }
+    return `none, ${leads} leads`; };
+  const scans = {
+    turnIndoor: [[4373, { indoor: .253, lift9: .108, outdoor: .102 }], [5372, { indoor: .236, outdoor: .093, lift3: .072 }],
+      [6376, { indoor: .57, outdoor: .331, rest: .26 }], [7407, { indoor: .572, rest: .266, outdoor: .258 }],
+      [8407, { indoor: .547, rest: .243, outdoor: .214 }]],
+    turnOutdoor: [[12435, { outdoor: .255, indoor: .208, lift9: .203 }], [13604, { outdoor: .606, lift9: .221, indoor: .218 }],
+      [14602, { outdoor: .493, lift9: .267, lift3: .223 }], [15602, { outdoor: .662, market: .242, indoor: .227 }]],
+    risingIndoor: [[3041, { indoor: .399, lift9: .216, rest: .181 }], [4042, { indoor: .499, rest: .253, lift9: .233 }],
+      [5041, { indoor: .554, rest: .269, outdoor: .2 }], [6041, { indoor: .553, rest: .295, outdoor: .196 }]],
+    steadyOutdoor: [[250, { outdoor: .483, lift9: .164, lift3: .125 }], [1254, { outdoor: .519, lift9: .16, lift3: .11 }],
+      [2255, { outdoor: .5, indoor: .209, rest: .182 }]],
+    // Target in view, lost for seven seconds, then back.
+    lostOutdoor: [[353, { outdoor: .506, indoor: .218, lift9: .189 }], [1366, { outdoor: .25, lift9: .194, lift3: .186 }],
+      [2367, { outdoor: .379, lift3: .326, lift9: .322 }], [3533, { outdoor: .221, rest: .213, indoor: .152 }],
+      [4535, { outdoor: .307, rest: .21, indoor: .129 }], [5568, { outdoor: .26, rest: .219, lift9: .135 }],
+      [6568, { outdoor: .351, lift9: .29, indoor: .228 }], [7568, { market: .174, outdoor: .139, rest: .126 }],
+      [8734, { outdoor: .43, indoor: .13, market: .128 }], [9735, { outdoor: .556, indoor: .238, market: .236 }],
+      [10734, { outdoor: .531, market: .277, house: .233 }], [11735, { outdoor: .531, market: .289, indoor: .257 }]],
+  };
+  const slowOnly = { ...config, strongObservations: Infinity };
+  const outcome = settings => Object.values(scans).map(frames => replay(frames, settings)).join(' | ');
+  // What the phone did before the fast path judged raw frames: three counted frames every time.
+  assert.equal(outcome(slowOnly), 'indoor F5 slow | outdoor F4 slow | indoor F4 slow | outdoor F3 slow | outdoor F12 slow');
+  assert.equal(outcome(config), 'indoor F4 fast | outdoor F3 fast | indoor F3 fast | outdoor F2 fast | outdoor F11 fast');
+  // Thirteen frames of looking around before the target came into view: no lead at all.
+  const searching = [[.265, .144], [.246, .255], [.159, .184], [.285, .294], [.31, .321], [.235, .3], [.055, .182],
+    [.051, .211], [.124, .221], [.251, .295], [.204, .154], [.274, .324], [.208, .255]]
+    .map(([other, target], i) => [392 + i * 1000, { rest: other, outdoor: target, indoor: other - .02 }]);
+  assert.equal(replay(searching, config), 'none, 0 leads');
+});
+test('a single-frame spike on a competitor does not confirm it', () => {
+  const a = { id: 'a', vector: [1, 0, 0, 0] }, b = { id: 'b', vector: [0, 1, 0, 0] };
+  let evidence = null;
+  for (let i = 0; i < 4; i++) evidence = policy.track(evidence, toward(.8), [a, b], i * 1000, config).evidence;
+  const spike = policy.track(evidence, toward(.1, .95), [a, b], 4000, config);
+  assert.equal(spike.evidence.id, 'b', 'a large jump takes the lead for that frame');
+  assert.equal(spike.evidence.count, 1); assert.equal(spike.confirmed, false);
+  // The previous leader only decays, so it is back in front as soon as the spike is gone.
+  const back = policy.track(spike.evidence, toward(.8), [a, b], 4500, config);
+  assert.equal(back.evidence.id, 'a'); assert.equal(back.evidence.count, 1); assert.equal(back.confirmed, false);
 });
 test('all nearby references participate immediately, including targets beyond the old five-image batch', async () => {
   let embeddings = 0;
@@ -332,7 +499,7 @@ test('cold entry starts matching from camera frames without a rescan, even while
   initialization.resolve(); await settle();
   assert.equal(f.host._matchPhase, 'scanning');
   for (let i = 0; i < 3; i++) { f.tick(); await f.sample(); }
-  assert.equal(f.counts().captures, 3);
+  assert.equal(f.counts().captures, 2, 'a clear match confirms on the second frame and stops sampling');
   assert.equal(f.host._matchPhase, 'tracking', 'automatic matching finishes before a SLAM pose');
   f.host._arReady = true; f.host._finishMatchPlacement();
   assert.equal(f.host._matchPhase, 'locked'); assert.equal(f.host.displayed.length, 1);
@@ -372,9 +539,11 @@ test('diagnostic heartbeat distinguishes waiting for camera, model and inference
   assert.equal(f.logs.length, stoppedLogCount); assert.equal(f.diagnosticTimers.size, 0);
 });
 
-test('steady weak results update summary without spamming logs or UI, and dark frames explain rejection', async () => {
+test('steady weak results update summary without spamming logs or UI, and dark frames explain rejection', async t => {
   let embeddings = 0;
   const f = fixture({ embed: () => ({ vector: ++embeddings === 1 ? [1, 0] : [0.28, 0.96], inferenceMs: 150 }) });
+  // Without per-frame logging, unchanged decisions are logged once.
+  config.frameLogs = false; t.after(() => { config.frameLogs = true; });
   await f.host.recognizeAnchor(); const statusCount = f.statuses.length;
   for (let i = 0; i < 5; i++) { f.tick(); await f.sample(); }
   assert.equal(f.logs.filter(([event]) => event === '匹配结果').length, 1);
@@ -382,8 +551,8 @@ test('steady weak results update summary without spamming logs or UI, and dark f
   // The progress line reports every sampled frame: in-flight first, then its scores.
   const texts = f.progress.map(p => p.text);
   assert.equal(texts.filter(t => t.startsWith('匹配中')).length, 5);
-  assert.equal(texts.filter(t => /相似度 0\.280 /.test(t)).length, 5);
-  assert.match(texts.at(-1), /^\d\d:\d\d:\d\d #5 相似度 0\.280 .*下次 \d+\.\ds 后$/);
+  assert.equal(texts.filter(t => /相似度 0\.280（本帧 0\.280） /.test(t)).length, 5);
+  assert.match(texts.at(-1), /^\d\d:\d\d:\d\d #5 相似度 0\.280（本帧 0\.280） .*下次 \d+\.\ds 后$/);
   assert.ok(texts.at(-1).includes(` 阈值 ${config.minimumScore} `));
   f.heartbeat(); const summary = f.logs.filter(([event]) => event === '扫描摘要').at(-1)[1];
   assert.equal(summary.inferred, 5); assert.equal(summary.lastResult.topScore, 0.28);
@@ -394,6 +563,38 @@ test('steady weak results update summary without spamming logs or UI, and dark f
   assert.match(f.statuses.at(-1).message, /画面过暗/);
   assert.match(f.progress.at(-1).text, /跳过：画面过暗/);
   f.host.pauseRetrieval(); assert.equal(f.diagnosticTimers.size, 0);
+});
+test('field calibration logs every sampled frame with per-target scores, timing and sharpness', async () => {
+  assert.equal(config.frameLogs, true);
+  const targets = [{ ...target('a'), image_urls: ['https://media.test/a.png', 'https://media.test/a-near.png'] }, target('b')];
+  let references = 0;
+  const f = fixture({ fetchAnchorCandidates: async () => ({ statusCode: 200, data: { candidates: targets } }),
+    // Reference order: a, a-near, b. Camera frames match a-near best.
+    embed: pixels => ({ vector: pixels.byteLength !== 4 ? [.1, .45, .8874] : [[1, 0, 0], [.6, .8, 0], [.8, -.6, 0]][references++], inferenceMs: 120 }) });
+  await f.host.recognizeAnchor();
+  const start = f.logs.find(([event]) => event === '扫描开始')[1];
+  assert.equal(JSON.stringify(start.targets.map(t => [t.id, t.name, t.images])), JSON.stringify([['a', 'a', 2], ['b', 'b', 1]]));
+  for (const key of ['minimumScore', 'minimumMargin', 'scoreSmoothingMs', 'strongScore', 'strongMargin', 'strongConfirmDurationMs',
+    'leadFrameIntervalMs', 'blurSharpnessRatio', 'maxBlurRetries', 'maxContentPrefetches']) assert.equal(start[key], config[key], key);
+  for (let i = 0; i < 3; i++) { await f.sample(); f.tick(); }
+  const frames = f.logs.filter(([event]) => event === '匹配结果').map(([, fields]) => fields);
+  assert.equal(frames.length, 3, 'one line per sampled frame');
+  assert.equal(frames.map(frame => frame.frame).join(), '1,2,3'); assert.ok(frames[1].tMs > frames[0].tMs);
+  const first = frames[0];
+  assert.equal(JSON.stringify(first.scores[0]), JSON.stringify({ id: 'a', raw: 0.42, smooth: 0.42, image: 1 }));
+  assert.equal(JSON.stringify(first.scores[1]), JSON.stringify({ id: 'b', raw: -0.19, smooth: -0.19, image: 0 }));
+  for (const key of ['topScore', 'secondScore', 'margin', 'frameTopScore', 'frameMargin', 'observations', 'observationsRequired',
+    'strong', 'leadMs', 'sharpness', 'captureMs', 'inferenceMs', 'elapsedMs', 'nextIntervalMs'])
+    assert.ok(first[key] !== undefined && first[key] !== null, key);
+  assert.equal(first.sharpnessBaseline, null, 'no baseline before the first frame'); assert.ok(frames[1].sharpnessBaseline > 0);
+  const confirmed = f.logs.find(([event]) => event === '确认命中')[1];
+  for (const key of ['via', 'score', 'margin', 'strong', 'observations', 'frames', 'leadMs', 'scanMs']) assert.ok(confirmed[key] != null, key);
+  const prefetch = f.logs.find(([event]) => event === '预取内容')[1]; assert.equal(prefetch.frame, 1);
+  assert.ok(f.logs.find(([event]) => event === '预取完成')[1].elapsedMs >= 0);
+  assert.equal(f.logs.find(([event]) => event === '内容就绪')[1].prefetched, true);
+  assert.ok(f.logs.find(([event]) => event === '内容已锁定')[1].scanMs >= 0);
+  const text = JSON.stringify(f.logs);
+  assert.ok(!text.includes('media.test') && !text.includes('latitude'), 'no image URLs or coordinates in logs');
 });
 test('candidate image lists accept one to five http images and fall back to image_url for older servers', () => {
   const { candidatesFrom } = require(path.join(base, 'components/xr-start/matching/candidates'));
@@ -431,9 +632,9 @@ test('recognition events separate technical diagnostics from actionable panel hi
   assert.equal(preparation.phase, 'preparing');
   await f.sample();
   const confirmation = f.statuses.at(-1);
-  assert.match(confirmation.diagnostic, /确认 1\/3/);
+  assert.match(confirmation.diagnostic, /确认 1\/2/);
   assert.match(confirmation.message, /请保持镜头稳定/);
-  assert.doesNotMatch(confirmation.message, /1\/3/);
+  assert.doesNotMatch(confirmation.message, /1\/2/);
   f.host._failFrameRecognition(new Error('WORKER_KILLED'), f.host._modeEpoch);
   assert.equal(f.statuses.at(-1).message, '图像识别失败，请重新扫描');
   assert.equal(f.statuses.at(-1).diagnostic, 'WORKER_KILLED');
