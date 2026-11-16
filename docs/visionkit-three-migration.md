@@ -27,12 +27,14 @@ pages/ar/ar（地图配置就绪、识别状态、重新扫描）
 
 | 内容 | 实现 |
 | --- | --- |
-| 文字与气泡 | 原生 Canvas 字形 RGBA、DataTexture 与程序化几何；中文、换行、emoji 与句末标点避头布局，使用当前地图样式。气泡为 60% 不透明的深色底、白色细描边环与底部居中尾巴，单一轮廓避免半透明叠加；白字带柔和阴影，保留 `text_color` / `background_color` 覆盖 |
+| 文字与气泡 | 原生 Canvas 字形 RGBA、DataTexture 与程序化几何；中文、换行、emoji 与句末标点避头布局，使用当前地图样式。气泡为 60% 不透明的深色底、白色细描边环与创建时随机选择左下或右下尾巴，单一轮廓避免半透明叠加；白字带柔和阴影，保留 `text_color` / `background_color` 覆盖 |
 | 图片 | 原生下载与 Canvas.createImage 解码，按原比例展示 |
 | 模型 | GLTFLoader、SkeletonUtils 克隆、AnimationMixer；普通模型归一化，Scene 保留保存的局部变换 |
 | 音频 | 原生渐进播放与耳机模型；按 SLAM 相机位置计算距离衰减与近距离聚焦 |
 | 视频 | 原生 VideoDecoder、RGBA DataTexture；支持 TBB 与普通视频 |
 | Scene | 共享 Core 时间轴、观看位置、媒体预加载与回收；空间音频使用 SLAM 相机位置 |
+
+气泡背景、描边与文字共用居中的透明排序基准，包围球扩大以包含尾巴，避免转动视角时背景排到文字之后造成明暗跳变；各层仍按实际深度排序，保留不同气泡与其他空间内容的遮挡关系。尾巴在单个气泡存续期间不重新随机。
 
 文字每条最多 2000 个 UTF-16 单元、32 行，溢出省略；旧 profile/bubble/confetti 位图已从打包排除。模型、音视频格式及 Scene 协议见[场景播放](scene-asset.md)。
 

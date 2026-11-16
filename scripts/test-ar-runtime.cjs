@@ -136,6 +136,70 @@ async function main() {
   const ringArea = bubbleMeshes[1].geometry.index.count / 3;
   assert.ok(ringArea > 0);
   assert.equal(short.userData.bubble.opacity, bubbleMeshes[0].material.opacity);
+  const cornerBubbles = [];
+  const contextMath = vm.runInContext("Math", context), originalRandom = contextMath.random;
+  try {
+    for (const [random, side] of [[0.25, "left"], [0.75, "right"]]) {
+      contextMath.random = () => random;
+      for (const [text, size] of [["Hi", 0.6], ["这是多行文字，用来检查气泡尾巴和白色描边是否对齐。", 3]]) {
+        const bubble = createTextAsset(text, { text_size: size });
+        cornerBubbles.push(bubble);
+        assert.equal(bubble.userData.bubble.tailSide, side);
+        for (const mesh of bubble.children.slice(0, 2)) {
+          const vertices = mesh.geometry.attributes.position;
+          let tip = { x: 0, y: Infinity };
+          for (let i = 0; i < vertices.count; i++) {
+            const vertex = new THREE.Vector3().fromBufferAttribute(vertices, i);
+            assert.ok(vertex.distanceTo(mesh.geometry.boundingSphere.center) <= mesh.geometry.boundingSphere.radius + 1e-6,
+              "the complete tail must remain inside the frustum-culling bounds");
+            if (vertex.y < tip.y) tip = vertex;
+          }
+          assert.ok(tip.y < -bubble.userData.bubble.height / 2);
+          assert.ok(side === "left" ? tip.x < 0 : tip.x > 0, "body and outline share the chosen bottom corner");
+        }
+      }
+    }
+  } finally { contextMath.random = originalRandom; }
+  // Exercise Three's real transparent sorter with the same projected bounding
+  // centres used by WebGLRenderer, while the production billboard faces the camera.
+  // The integrated tail must not make the body paint over its own glyphs as we tilt.
+  const { WebGLRenderList } = await import("../node_modules/three/src/renderers/webgl/WebGLRenderLists.js");
+  const textCamera = new THREE.PerspectiveCamera(70, 1, 0.01, 100);
+  textCamera.position.set(0, 0, 3);
+  const drawOrder = (roots) => {
+    const list = WebGLRenderList();
+    for (const root of roots) {
+      root.lookAt(textCamera.position);
+      root.updateMatrixWorld(true);
+      for (const mesh of root.children) {
+        if (!mesh.geometry.boundingSphere) mesh.geometry.computeBoundingSphere();
+        const centre = mesh.geometry.boundingSphere.center.clone().applyMatrix4(mesh.matrixWorld).project(textCamera);
+        list.push(mesh, mesh.geometry, mesh.material, root.renderOrder, centre.z, null);
+      }
+    }
+    list.sort();
+    return list.transparent.map(item => item.object);
+  };
+  for (const yaw of [-25, 0, 25]) {
+    for (let pitch = -30; pitch <= 30; pitch++) {
+      textCamera.rotation.set(pitch * Math.PI / 180, yaw * Math.PI / 180, 0);
+      textCamera.updateMatrixWorld(true);
+      for (const bubble of [short, long, ...cornerBubbles]) {
+        const ordered = drawOrder([bubble]);
+        assert.ok(ordered.indexOf(bubble.children[0]) < ordered.indexOf(bubble.children[2]),
+          `bubble background must remain behind its text at camera pitch ${pitch}, yaw ${yaw}`);
+      }
+      // Do not fix self-overlap by globally drawing all glyphs over all bubbles.
+      // Every layer of the farther bubble still draws before the nearer one.
+      const [near, far] = cornerBubbles;
+      far.position.z = -2;
+      const ordered = drawOrder([near, far]);
+      assert.ok(Math.max(...far.children.map(mesh => ordered.indexOf(mesh))) < Math.min(...near.children.map(mesh => ordered.indexOf(mesh))));
+      far.position.z = 0;
+    }
+  }
+  for (const bubble of cornerBubbles) lib("resources").disposeTree(bubble);
+  console.log("PASS left/right bubble tails, culling bounds and stable transparency across 183 camera angles with near/far bubbles");
   const plain = createTextAsset(
     "白字",
     { text_color: "#fa0", text_size: 2 },

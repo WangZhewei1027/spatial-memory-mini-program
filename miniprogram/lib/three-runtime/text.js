@@ -59,7 +59,7 @@ function roundedShape(width, height, radius) {
   shape.quadraticCurveTo(x, y, x + r, y);
   return shape;
 }
-/** Translucent speech bubble: dark glass, white hairline, centred tail. */
+/** Translucent speech bubble: dark glass, white hairline, lower corner tail. */
 const BUBBLE = {
   color: "#1d1a2b",
   opacity: 0.6,
@@ -77,6 +77,7 @@ function traceBubble(
   radius,
   tailWidth = BUBBLE.tailWidth,
   tailHeight = BUBBLE.tailHeight,
+  tailX = 0,
 ) {
   const x = -width / 2,
     y = -height / 2,
@@ -84,10 +85,10 @@ function traceBubble(
     tw = Math.max(0, Math.min(tailWidth, width - r * 2)) / 2;
   path.moveTo(x + r, y);
   if (tw > 0 && tailHeight > 0) {
-    path.lineTo(-tw, y);
-    path.lineTo(-tw * 0.18, y - tailHeight * 0.86);
-    path.quadraticCurveTo(0, y - tailHeight, tw * 0.18, y - tailHeight * 0.86);
-    path.lineTo(tw, y);
+    path.lineTo(tailX - tw, y);
+    path.lineTo(tailX - tw * 0.18, y - tailHeight * 0.86);
+    path.quadraticCurveTo(tailX, y - tailHeight, tailX + tw * 0.18, y - tailHeight * 0.86);
+    path.lineTo(tailX + tw, y);
   }
   path.lineTo(x + width - r, y);
   path.quadraticCurveTo(x + width, y, x + width, y + r);
@@ -98,6 +99,17 @@ function traceBubble(
   path.lineTo(x, y + r);
   path.quadraticCurveTo(x, y, x + r, y);
   return path;
+}
+function bubbleGeometry(shape) {
+  const geometry = new THREE.ShapeGeometry(shape);
+  geometry.computeBoundingSphere();
+  // Three sorts transparent meshes by their bounding-sphere centres. The tail
+  // shifts the default centre down, letting the body paint over its own text
+  // when the camera tilts. Use the glyph plane's centre for every layer; expand
+  // the radius to keep the entire tail inside the culling bounds.
+  geometry.boundingSphere.radius += geometry.boundingSphere.center.length();
+  geometry.boundingSphere.center.set(0, 0, 0);
+  return geometry;
 }
 function safeColor(value, fallback) {
   return typeof value === "string" &&
@@ -174,13 +186,16 @@ function createTextAsset(
       padY = 0.055,
       bgWidth = width + padX * 2,
       bgHeight = height + padY * 2,
-      radius = Math.min(BUBBLE.radius, bgHeight / 2),
-      line = BUBBLE.border;
+      radius = Math.min(BUBBLE.radius, bgHeight / 2, bgWidth / 4),
+      line = BUBBLE.border,
+      tailWidth = Math.min(BUBBLE.tailWidth, bgWidth * 0.2),
+      tailSide = Math.random() < 0.5 ? -1 : 1,
+      tailX = tailSide * Math.max(0, bgWidth / 2 - radius - tailWidth / 2 - line * 1.5);
     // One outline with an integrated tail: overlapping translucent meshes
     // would double their alpha at the seams.
     const body = new THREE.Mesh(
-      new THREE.ShapeGeometry(
-        traceBubble(new THREE.Shape(), bgWidth, bgHeight, radius),
+      bubbleGeometry(
+        traceBubble(new THREE.Shape(), bgWidth, bgHeight, radius, tailWidth, BUBBLE.tailHeight, tailX),
       ),
       new THREE.MeshBasicMaterial({
         color: safeColor(config.background_color, BUBBLE.color),
@@ -196,12 +211,13 @@ function createTextAsset(
       bgWidth + line * 2,
       bgHeight + line * 2,
       radius + line,
-      BUBBLE.tailWidth + line * 2.4,
+      tailWidth + line * 2.4,
       BUBBLE.tailHeight + line * 1.6,
+      tailX,
     );
-    ring.holes.push(traceBubble(new THREE.Shape(), bgWidth, bgHeight, radius));
+    ring.holes.push(traceBubble(new THREE.Shape(), bgWidth, bgHeight, radius, tailWidth, BUBBLE.tailHeight, tailX));
     const border = new THREE.Mesh(
-      new THREE.ShapeGeometry(ring),
+      bubbleGeometry(ring),
       new THREE.MeshBasicMaterial({
         color: 0xffffff,
         transparent: true,
@@ -213,7 +229,7 @@ function createTextAsset(
     body.position.z = -0.003;
     border.position.z = -0.002;
     root.add(body, border);
-    root.userData.bubble = { width: bgWidth, height: bgHeight, opacity: BUBBLE.opacity };
+    root.userData.bubble = { width: bgWidth, height: bgHeight, opacity: BUBBLE.opacity, tailSide: tailSide < 0 ? "left" : "right" };
   }
   const mesh = new THREE.Mesh(
     new THREE.PlaneGeometry(width, height),
