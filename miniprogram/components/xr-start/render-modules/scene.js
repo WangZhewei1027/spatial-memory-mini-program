@@ -28,6 +28,12 @@ function registerScene({ layers, host, staggerMs }) {
       for (const asset of assets) if (!ids.has(asset.id)) { ids.add(asset.id); queue.push(asset); }
     },
     pendingIds: () => [...queue.map(asset => asset.id), ...(loading ? [loading.id] : [])],
+    remove(ids) {
+      queue = queue.filter(asset => !ids.has(asset.id));
+      // The asset's recognition token rejects its eventual async result. Releasing
+      // this queue slot lets unrelated GPS scenes continue without clearing the layer.
+      if (loading && ids.has(loading.id)) loading = null;
+    },
   };
 }
 module.exports = { registerScene };

@@ -545,6 +545,71 @@ async function main() {
   host._runtime.layers.start();
   console.log("PASS independent activity queue/nodes, rescan/match/movement preservation, module disable and session cleanup");
 
+  // Hybrid discovery runs GPS and matching together without clearing the other source.
+  host.retrievalMode = "hybrid";
+  host.currentGPS = { latitude: 31, longitude: 121, accuracy: 10, sampledAt: Date.now() };
+  host._sessionActive = true; host._cameraReady = true; host._arReady = true;
+  const gpsText = { id: "hybrid-gps", anchor_id: null, file_type: "text", text_content: "Nearby" };
+  const linkedText = { id: "hybrid-linked", anchor_id: "hybrid-target", file_type: "text", text_content: "Recognized" };
+  const hugeBase = { file_url: "/fixture.glb", latitude: 31.1, longitude: 121.1 };
+  wx.request = options => {
+    let data;
+    if (options.url.endsWith("/assets/nearby")) data = [gpsText, linkedText, { id: "missing-association", file_type: "text" }];
+    else if (options.url.endsWith("/assets/huge")) data = [{ ...hugeBase, id: "huge-gps", anchor_id: null }, { ...hugeBase, id: "huge-linked", anchor_id: "hybrid-target" }];
+    else if (options.url.endsWith("/anchors/content")) data = { anchor: { id: options.data.anchor_id }, assets: [linkedText] };
+    else { assert.ok(options.url.includes("/activities?")); data = []; }
+    options.success({ statusCode: 200, data });
+  };
+  await host.fetchNearbyAssets();
+  await host._drainPlaceQueue();
+  assert.deepEqual(Array.from(host.nodeList, entry => entry.assetId), [gpsText.id], "linked and unknown associations never appear through hybrid GPS discovery");
+  const gpsNode = host.nodeList[0].node, gpsLayerCurrent = host._renderModules.world.capture(), gpsEpoch = host._contentEpoch;
+  host._arReady = false; await host.fetchHugeAssets();
+  assert.deepEqual(Array.from(host._pendingHugeAssets, asset => asset.id), ["huge-gps"], "huge content follows the same association gate");
+  host._arReady = true; host._matchPhase = "scanning";
+  await host._acceptImageMatch({ id: "hybrid-target", reference_version: "version" });
+  await host._drainPlaceQueue();
+  assert.ok(host.nodeList.some(entry => entry.assetId === linkedText.id), "recognized content joins nearby content");
+  assert.equal(host.nodeList.find(entry => entry.assetId === gpsText.id).node, gpsNode);
+  assert.equal(host._contentEpoch, gpsEpoch); assert.equal(gpsLayerCurrent(), true);
+  assert.equal(host.nodeList.find(entry => entry.assetId === linkedText.id).repulsionEnabled, false);
+  host.recognizeAnchor = () => {};
+  host.rescan();
+  assert.deepEqual(Array.from(host.nodeList, entry => entry.assetId), [gpsText.id]);
+  assert.equal(gpsNode.parent, host.shadowRoot);
+  assert.equal(host._pendingHugeAssets.length, 1, "rescans preserve GPS huge models waiting for placement");
+  host._failFrameRecognition(new Error("fixture matching failure"), host._modeEpoch);
+  assert.equal(gpsNode.parent, host.shadowRoot, "recognition errors do not remove nearby content");
+
+  // A late matched download must not reappear after a rescan of the same target/placement.
+  host._preloadDone = false;
+  const stageImage = () => {
+    host._matchPhase = "tracking";
+    host._pendingMatchPlacement = { epoch: host._modeEpoch, matchedAt: Date.now(), candidate: { id: "hybrid-target" },
+      assets: [{ id: "hybrid-image", file_type: "image", file_url: "/fixture.png" }] };
+    host._finishMatchPlacement();
+    return host._pendingDisplayAssets.find(asset => asset.id === "hybrid-image");
+  };
+  const oldImage = stageImage();
+  let hybridImage;
+  host._canvas = { createImage() { return (hybridImage = { width: 24, height: 16 }); } };
+  const imageWork = host._placeImageAsset(oldImage);
+  await new Promise(setImmediate);
+  host.rescan();
+  const newImage = stageImage();
+  assert.equal(host._isAssetPlacementCurrent(oldImage), false);
+  assert.equal(host._isAssetPlacementCurrent(newImage), true);
+  hybridImage.onload(); await imageWork;
+  assert.deepEqual(Array.from(host.nodeList, entry => entry.assetId), [gpsText.id]);
+  host.restartRecognitionAfterMovement(host.currentGPS, { distanceMeters: 30, thresholdMeters: 20 });
+  assert.equal(host._isAssetPlacementCurrent(newImage), false);
+  assert.equal(gpsNode.parent, host.shadowRoot);
+  host.recognizeAnchor = recognize; host._preloadDone = true;
+  host.pauseRetrieval();
+  assert.equal(host.nodeList.length, 0); assert.equal(gpsLayerCurrent(), false);
+  host._retrievalPaused = false; host._runtime.layers.start();
+  console.log("PASS hybrid GPS/recognition filtering, coexistence, rescan/movement preservation, late same-ID cancellation and full pause cleanup");
+
   // Exercise real async placement, including switching away and back to the same anchor/id.
   const allow = (id) => {
     host.retrievalMode = "anchor";

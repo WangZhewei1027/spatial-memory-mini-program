@@ -43,6 +43,7 @@ function harness() {
     retrievalMode: "anchor", _contentEpoch: 0,
     _matchedAnchorId: timing.anchorId, _recognitionTiming: timing,
     _allowedAssetIds: new Set(["image", "model"]), nodeList: [],
+    _matchedAssetIds: new Set(["image", "model"]), _matchContentToken: null,
     _preloadDone: true, _placeQueue: [],
     _isInRepeatCooldown: () => false, _pickRevealBatch: (assets) => assets,
   };
@@ -247,11 +248,16 @@ test("missing capture timestamp is represented as null without losing match and 
 });
 
 test("GPS-originated placement stays silent even if old recognition timing remains", async () => {
-  const context = harness();
-  context.instance.retrievalMode = "gps";
-  startOne(context);
-  await completeOne(context);
-  assert.equal(context.logs.length, 0);
+  for (const mode of ["gps", "hybrid"]) {
+    const context = harness();
+    context.instance.retrievalMode = mode;
+    context.instance._matchedAssetIds.clear();
+    const originalAsset = context.asset;
+    context.asset = () => ({ ...originalAsset(), anchor_id: null });
+    startOne(context);
+    await completeOne(context);
+    assert.equal(context.logs.length, 0);
+  }
 });
 
 

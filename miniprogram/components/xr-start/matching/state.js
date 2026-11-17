@@ -66,6 +66,8 @@ function scanState() {
 function initialRecognitionState() {
   return {
     ...scanState(),
+    _matchedAssetIds: new Set(),
+    _matchContentToken: null,
     _referenceCache: new ReferenceCache(config.maxCachedReferences),
     _imageMatcher: null,
     _cameraReady: false,

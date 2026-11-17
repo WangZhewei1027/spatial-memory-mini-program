@@ -102,7 +102,19 @@ async function sceneQueueRegression() {
   module.enqueue([{ id: "pause-cancelled", _layerCurrent: module.layer.capture() }]);
   registry.pause(); registry.start(); registry.update(1100, true); await flush();
   assert.equal(pending.length, 2, "pause cancels queued work before it can issue IO");
+  let matchCurrent = true;
+  module.enqueue([{ id: "matched-scene", _layerCurrent: () => matchCurrent }, { id: "gps-scene", _layerCurrent: module.layer.capture() }]);
+  registry.update(1200, true); await flush();
+  const layerCurrent = module.layer.capture();
+  matchCurrent = false; module.remove(new Set(["matched-scene"]));
+  registry.update(1250, true); await flush();
+  assert.equal(pending.at(-1).id, "gps-scene", "clearing matching releases its queue slot for GPS scenes");
+  pending.at(-2).resolve(); await flush();
+  assert.deepEqual(module.pendingIds(), ["gps-scene"], "late matched completion cannot reset the GPS request");
+  pending.at(-1).resolve(); await flush();
+  assert.equal(layerCurrent(), true);
+  assert.deepEqual(mounted, ["same-scene", "gps-scene"]);
   registry.dispose();
-  console.log("PASS independent Scene queue, same-ID late completion and pause cancellation");
+  console.log("PASS independent Scene queue, same-ID late completion, selective hybrid cancellation and pause cleanup");
 }
 sceneQueueRegression().catch(error => { console.error(error); process.exitCode = 1; });

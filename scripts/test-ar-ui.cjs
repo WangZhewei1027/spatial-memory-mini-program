@@ -63,3 +63,28 @@ assert.equal(registry.dispatch({ moduleId: "first", action: "select" }), false);
 assert.equal(snapshots.length, beforeDispose, "disposed page ignores callbacks");
 assert.throws(() => registry.register({ id: "late", slot: "top" }), /disposed/);
 console.log("PASS AR UI slots, scoped actions/debug, selection, batching, unregister and per-page disposal");
+
+const recognitionModule = { exports: {} };
+const recognitionFile = path.resolve(__dirname, "../miniprogram/pages/ar/modules/recognition.ts");
+vm.runInNewContext(transformSync(fs.readFileSync(recognitionFile, "utf8"), { loader: "ts", format: "cjs" }).code,
+  { module: recognitionModule, exports: recognitionModule.exports });
+const recognition = recognitionModule.exports;
+for (const mode of ["hybrid", "anchor", "gps"]) {
+  let snapshot, binding, rescans = 0;
+  const ui = createUiRegistry(value => { snapshot = value; });
+  const page = { ...recognition.recognitionMethods,
+    data: { ...recognition.recognitionData, retrievalMode: mode, mapConfigReady: true }, _pageVisible: true,
+    setData(patch) { Object.assign(this.data, patch); }, syncUI() { binding.sync(); },
+    selectComponent() { return { rescan() { rescans++; } }; },
+  };
+  binding = recognition.registerRecognition(page, ui); binding.sync();
+  assert.equal(snapshot.bottomNavItems.some(item => item.key === "recognition"), mode !== "gps");
+  page.onRecognitionHint({ detail: { mode, active: true } });
+  assert.equal(page.data.recognitionHintActive, mode !== "gps");
+  page.onRescan(); assert.equal(rescans, mode === "gps" ? 0 : 1);
+  assert.equal(page.data.recognitionHintActive, false);
+  page.data.mapConfigReady = false; binding.sync();
+  assert.equal(snapshot.bottomNavItems.length, 0, "recognition waits for a valid map config");
+  ui.dispose();
+}
+console.log("PASS hybrid and image recognition expose hints/rescan; GPS and unloaded maps hide recognition");

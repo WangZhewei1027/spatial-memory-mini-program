@@ -97,6 +97,21 @@ test('a clear match locks after two spaced Worker results, releases inference, a
   f.host.rescan(); await settle(); assert.equal(f.host._matchPhase,'scanning'); assert.equal(f.host._matchedAnchorId,null);
   f.host.pauseRetrieval(); assert.equal(f.counts().closed,2);
 });
+test('hybrid mode starts camera matching and emits hybrid status while GPS retrieval remains available', async () => {
+  const f = fixture(); f.host.retrievalMode = 'hybrid';
+  await f.host.recognizeAnchor();
+  assert.equal(f.host._matchPhase, 'scanning');
+  await f.sample(); f.tick(); await f.sample();
+  assert.equal(f.host._matchPhase, 'locked');
+  assert.equal(f.host.displayed.length, 1);
+  assert.equal(f.statuses.at(-1).mode, 'hybrid');
+  let nearby = 0, huge = 0;
+  f.host.fetchNearbyAssets = () => nearby++;
+  f.host.fetchHugeAssets = () => huge++;
+  f.host.pauseRetrieval(); f.host.resumeRetrieval();
+  assert.equal(nearby, 1); assert.equal(huge, 1);
+  await settle(); f.host.pauseRetrieval();
+});
 test('recognition phases follow the declared lifecycle and cancellation restores every per-scan field', async () => {
   const state = require(path.join(base, 'components/xr-start/matching/state'));
   const { PHASES: P, canTransition } = state;

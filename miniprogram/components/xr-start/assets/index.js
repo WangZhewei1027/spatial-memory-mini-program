@@ -55,7 +55,8 @@ module.exports = function (XR_CONFIG) {
                   a.file_type === "audio" ||
                   a.file_type === "video" ||
                   a.file_type === "scene") &&
-                !a.is_huge,
+                !a.is_huge &&
+                (this.retrievalMode !== "hybrid" || a.anchor_id === null),
             ),
           );
         }
@@ -83,6 +84,9 @@ module.exports = function (XR_CONFIG) {
         (a) =>
           a &&
           (a._contentEpoch == null || a._contentEpoch === this._contentEpoch) &&
+          (!a._layerCurrent || a._layerCurrent()) &&
+          (this.retrievalMode !== "hybrid" || a.anchor_id === null ||
+            (this._matchedAnchorId && this._matchedAssetIds.has(a.id))) &&
           (this.retrievalMode !== "anchor" ||
             (this._matchedAnchorId && this._allowedAssetIds.has(a.id))),
       );
@@ -176,7 +180,7 @@ module.exports = function (XR_CONFIG) {
         const asset = this._placeQueue.shift();
         // 关联匹配请求，而非素材加载完成时碰巧处于活动状态的另一轮请求。
         const timing =
-          this.retrievalMode === "anchor" &&
+          (this.retrievalMode === "anchor" || (this.retrievalMode === "hybrid" && this._matchedAssetIds.has(asset.id))) &&
           this._recognitionTiming?.contentEpoch === asset._contentEpoch
             ? this._recognitionTiming
             : null;
@@ -220,7 +224,7 @@ module.exports = function (XR_CONFIG) {
           const completedAt = Date.now();
           const current =
             this._recognitionTiming === timing &&
-            this.retrievalMode === "anchor" &&
+            (this.retrievalMode === "anchor" || (this.retrievalMode === "hybrid" && this._matchedAssetIds.has(asset.id))) &&
             !this._disposed &&
             !this._retrievalPaused &&
             timing.contentEpoch === this._contentEpoch &&
@@ -344,8 +348,11 @@ module.exports = function (XR_CONFIG) {
     },
 
     // Discovery resets its own modules. Activity modules retain their own scope.
-    _clearRemoteAssets({ preserveActivities = false } = {}) {
+    _clearRemoteAssets({ preserveActivities = false, preserveGps = false } = {}) {
+      if (preserveGps && this.retrievalMode === "hybrid") return this._clearMatchedAssets();
       this._recognitionTiming = null;
+      this._matchContentToken = null;
+      this._matchedAssetIds.clear();
       this._contentEpoch++;
       this._matchedAnchorId = null;
       if (this._renderModules) {
@@ -356,6 +363,26 @@ module.exports = function (XR_CONFIG) {
       } else {
         this._clearAssetState(false); this._clearAssetState(true);
       }
+    },
+
+    // Hybrid scans own only the matched placements. GPS nodes, queues, huge models
+    // and their layer generations survive a rescan or a target replacement.
+    _clearMatchedAssets() {
+      const ids = this._matchedAssetIds;
+      this._matchContentToken = null;
+      this._recognitionTiming = null;
+      this._matchedAnchorId = null;
+      this._placeQueue = this._placeQueue.filter(asset => !ids.has(asset.id));
+      this._pendingDisplayAssets = this._pendingDisplayAssets.filter(asset => !ids.has(asset.id));
+      this._renderModules?.scene.remove(ids);
+      if (ids.has(this._placingAssetId)) {
+        this._placeDrain = null; this._placingBusy = false; this._placingAssetId = null;
+      }
+      for (const entry of [...this.nodeList]) if (ids.has(entry.assetId)) this._destroyNode(entry);
+      this.nodeList = this.nodeList.filter(entry => !ids.has(entry.assetId));
+      for (const id of ids) { this._allowedAssetIds.delete(id); this._seenAssets.delete(id); }
+      ids.clear();
+      if (!this._placingBusy && this._placeQueue.length) void this._drainPlaceQueue();
     },
 
     // Called by a layer's reset hook. Other layers keep their nodes and queues.

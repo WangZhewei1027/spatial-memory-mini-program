@@ -35,7 +35,7 @@ module.exports = (config) => ({
     if (!modules) return;
     modules.world.setEnabled(!this._scenePreviewMode);
     modules.danmaku.layer.setEnabled(!this._scenePreviewMode);
-    modules.confetti.setEnabled(!this._scenePreviewMode && this._confettiEnabled && this.retrievalMode === "gps");
+    modules.confetti.setEnabled(!this._scenePreviewMode && this._confettiEnabled && this.retrievalMode !== "anchor");
   },
   _getRenderLayer(type) { return type === "scene" ? this._renderModules?.scene.layer : this._renderModules?.world; },
   refreshActivityContent() { return this._renderModules?.danmaku.refresh(); },

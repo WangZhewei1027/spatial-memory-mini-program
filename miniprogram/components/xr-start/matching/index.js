@@ -95,7 +95,7 @@ module.exports = {
   },
   _recognitionCurrent(epoch) {
     return this._modeEpoch === epoch && !this._disposed && !this._retrievalPaused &&
-      this.retrievalMode === 'anchor' && this._sessionActive && this._cameraReady;
+      this.retrievalMode !== 'gps' && this._sessionActive && this._cameraReady;
   },
   _stopMatcher() { this._clearRecognitionHint(); this._imageMatcher?.close(); this._imageMatcher = null; },
   _cancelRetrieval(reason = 'cancel') {
@@ -112,9 +112,9 @@ module.exports = {
     this._isFetchingHuge = false;
   },
   rescan() {
-    if (this._disposed || this._retrievalPaused || this.retrievalMode !== 'anchor') return;
+    if (this._disposed || this._retrievalPaused || this.retrievalMode === 'gps') return;
     this._cancelRetrieval('rescan');
-    this._clearRemoteAssets({ preserveActivities: true });
+    this._clearRemoteAssets({ preserveActivities: true, preserveGps: true });
     this._recognitionStatus('正在准备重新扫描…');
     this._startMatchDiagnostics('rescan');
     // Keep the metric session and its established coordinate system alive.
@@ -122,15 +122,15 @@ module.exports = {
     void this.recognizeAnchor();
   },
   setRetrievalMode(mode) {
-    if (!['gps', 'anchor'].includes(mode) || mode === this.retrievalMode || this._disposed) return;
+    if (!['hybrid', 'gps', 'anchor'].includes(mode) || mode === this.retrievalMode || this._disposed) return;
     this._cancelRetrieval('mode_change'); this._clearRemoteAssets();
     this.retrievalMode = mode; this.setData({ retrievalMode: mode });
     this._syncRenderModules?.();
-    if (mode === 'anchor') this._startMatchDiagnostics('enter');
-    this._recognitionStatus(mode === 'anchor' ? '请将镜头对准目标' : '根据附近位置直接显示素材');
+    if (mode !== 'gps') this._startMatchDiagnostics('enter');
+    this._recognitionStatus(mode === 'gps' ? '根据附近位置直接显示素材' : '请将镜头对准目标');
     this._ensureARSession();
-    if (mode === 'anchor') void this.recognizeAnchor();
-    else if (this._arReady) { this._maybeStartConfetti?.(); this.fetchNearbyAssets(); this.fetchHugeAssets(); }
+    if (mode !== 'gps') void this.recognizeAnchor();
+    if (mode !== 'anchor' && this._arReady) { this._maybeStartConfetti?.(); this.fetchNearbyAssets(); this.fetchHugeAssets(); }
   },
   pauseRetrieval() {
     this._cancelScenePreview?.(); this._retrievalPaused = true;
@@ -143,7 +143,8 @@ module.exports = {
     this._runtime?.layers?.start();
     this._ensureARSession();
     if (this._scenePreviewMode) { if (this._arReady) this._beginScenePreview(); return; }
-    if (this.retrievalMode === 'anchor') { this._startMatchDiagnostics('resume'); void this.recognizeAnchor(); return; }
+    if (this.retrievalMode !== 'gps') { this._startMatchDiagnostics('resume'); void this.recognizeAnchor(); }
+    if (this.retrievalMode === 'anchor') return;
     this._maybeStartConfetti?.();
     if (this._arReady) { this.fetchNearbyAssets(); this.fetchHugeAssets(); }
   },
@@ -162,7 +163,7 @@ module.exports = {
     } finally { if (this._modeEpoch === epoch) this._matchLocating = false; }
   },
   restartRecognitionAfterMovement(gps, movement) {
-    this._cancelRetrieval('movement'); this._clearRemoteAssets({ preserveActivities: true });
+    this._cancelRetrieval('movement'); this._clearRemoteAssets({ preserveActivities: true, preserveGps: true });
     this._candidateRefreshGPS = gps;
     this._startMatchDiagnostics('movement');
     this._matchLog('移动后刷新目标', { distanceMeters: +movement.distanceMeters.toFixed(1),
@@ -281,7 +282,7 @@ module.exports = {
   handleRecognitionFrame(frame) {
     if (this._disposed || !this._sessionActive || this._retrievalPaused) return;
     if (!this._cameraReady) { this._cameraReady = true; this.setData({ cameraReady: true }); }
-    if (this.retrievalMode !== 'anchor' || this._scenePreviewMode) return;
+    if (this.retrievalMode === 'gps' || this._scenePreviewMode) return;
     const now = Date.now();
     const d = this._matchDiagnostics;
     if (d) { d.cameraFrames++; d.lastFrameAt = now; if (this._matchFrameBusy) d.busyFrames++; }
@@ -467,13 +468,17 @@ module.exports = {
     this._pendingMatchPlacement = null;
     const { epoch, matchedAt, candidate, assets } = pending;
     if (this._matchedAnchorId) this._matchLog('切换目标', { from: this._matchedAnchorId, to: candidate.id });
-    this._clearRemoteAssets({ preserveActivities: true }); this._matchedAnchorId = candidate.id;
-    for (const asset of assets) this._allowedAssetIds.add(asset.id);
+    this._clearRemoteAssets({ preserveActivities: true, preserveGps: true }); this._matchedAnchorId = candidate.id;
+    const token = this._matchContentToken = {};
+    for (const asset of assets) { this._allowedAssetIds.add(asset.id); this._matchedAssetIds.add(asset.id); }
     this._recognitionTiming = { requestId: `image-${epoch}-${matchedAt}`, startedAt: matchedAt, matchedAt,
       anchorId: candidate.id, contentEpoch: this._contentEpoch };
     this._setMatchPhase(PHASES.LOCKED);
     this._matchAttention = null; this._matchLockPose = this._cameraPose(); this._reacquireBlockedUntil = 0;
-    this.displayAssets(assets);
+    this.displayAssets(assets.map(asset => {
+      const current = this._getRenderLayer?.(asset.file_type)?.capture();
+      return { ...asset, _layerCurrent: () => this._matchContentToken === token && (!current || current()) };
+    }));
     this._matchLog('内容已锁定', { anchorId: candidate.id, assets: assets.length, space: 'world', elapsedMs: Date.now() - matchedAt,
       scanMs: Date.now() - this._matchScanStartedAt });
     this._matchLockStatus = `已识别：${candidate.name || '目标'}${assets.length ? ' · 内容已固定在空间中' : ' · 暂无关联内容'}`;

@@ -13,7 +13,7 @@ export const recognitionMethods = {
 
   onRecognitionHint(event: DetailEvent) {
     if ((this as any)._unloaded || (this as any)._pageVisible !== true || !this.data.mapConfigReady ||
-        this.data.retrievalMode !== "anchor" || event.detail.mode !== "anchor") return;
+        this.data.retrievalMode === "gps" || event.detail.mode !== this.data.retrievalMode) return;
     // Hints may precede the matching status event; the producer owns the phase gate.
     const active = event.detail.active === true;
     if (active === this.data.recognitionHintActive) return;
@@ -33,7 +33,7 @@ export const recognitionMethods = {
   },
 
   onRescan() {
-    if (this.data.retrievalMode !== "anchor") return;
+    if (this.data.retrievalMode === "gps") return;
     this.clearRecognitionHint();
     this.selectComponent("#main-frame")?.rescan();
   },
@@ -42,7 +42,7 @@ export function registerRecognition(page: ArPageContext, registry: ReturnType<ty
   const module = registry.register({ id: "recognition", slot: "bottom", order: 10,
     navigation: { label: "识别", icon: "scan-line" }, actions: { rescan: () => page.onRescan() } });
   return { sync() {
-    const enabled = page.data.mapConfigReady && page.data.retrievalMode === "anchor";
+    const enabled = page.data.mapConfigReady && page.data.retrievalMode !== "gps";
     module.update({ enabled, badge: page.data.recognitionLocked ? "ready" : "" });
     module.publishDebug(enabled ? [
       ...(page.data.recognitionDiagnostic ? [{ key: "status", label: "识别", value: page.data.recognitionDiagnostic,

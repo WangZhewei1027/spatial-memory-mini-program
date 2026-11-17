@@ -19,7 +19,7 @@ const hugeMethods = require("./assets/huge")(XR_CONFIG);
 const confettiMethods = require("./effects/confetti")(XR_CONFIG);
 function buildInitialState() {
   return {
-    retrievalMode: "gps",
+    retrievalMode: "hybrid",
     _modeEpoch: 0,
     _contentEpoch: 0,
     _allowedAssetIds: new Set(),
@@ -95,7 +95,7 @@ Component({
   data: {
     arReady: false,
     cameraReady: false,
-    retrievalMode: "gps",
+    retrievalMode: "hybrid",
     renderError: "",
     renderStatus: "正在启动 AR 相机…",
     canRetry: true,
@@ -265,10 +265,10 @@ Component({
       this.setData({ arReady: true, renderStatus: "", renderError: "" });
       if (!this._placingBusy && this._placeQueue?.length) this._drainPlaceQueue();
       if (this._scenePreviewMode) { this._beginScenePreview(); return; }
-      if (this.retrievalMode === "anchor") {
+      if (this.retrievalMode !== "gps") {
         if (this._matchPhase === "tracking") this._finishMatchPlacement();
         else void this.recognizeAnchor();
-        return;
+        if (this.retrievalMode === "anchor") return;
       }
       this._maybeStartFirstFetch();
       this.flushPendingDisplayAssets();
@@ -282,7 +282,8 @@ Component({
         return;
       }
       if (this._retrievalPaused) return;
-      if (this.retrievalMode === "anchor") { this._tickAttention(); return; }
+      if (this.retrievalMode !== "gps") this._tickAttention();
+      if (this.retrievalMode === "anchor") return;
       // Refresh nearby data periodically while spatial placement uses SLAM poses.
       const now = Date.now();
       if (now - this._lastFetchTime >= XR_CONFIG.gpsRefreshMs) {
@@ -297,7 +298,7 @@ Component({
         this._assetsLoaded &&
         this._confettiEnabled === true &&
         !this._retrievalPaused &&
-        this.retrievalMode === "gps"
+        this.retrievalMode !== "anchor"
       )
         this.startRandomConfetti();
     },

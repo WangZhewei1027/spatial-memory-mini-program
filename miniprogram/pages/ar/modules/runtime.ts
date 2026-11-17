@@ -1,6 +1,6 @@
 import type { ArPageContext, DetailEvent } from "./context";
 import type { createUiRegistry } from "../../../utils/ar-ui/registry";
-export const runtimeData = { retrievalMode: "gps", mapConfigReady: false, footerEnabled: false, runtimeState: "等待相机", runtimeError: "", renderLayers: [] as { id: string; label: string; enabled: boolean; state: string; nodes: number; error: string }[] };
+export const runtimeData = { retrievalMode: "hybrid", mapConfigReady: false, footerEnabled: false, runtimeState: "等待相机", runtimeError: "", renderLayers: [] as { id: string; label: string; enabled: boolean; state: string; nodes: number; error: string }[] };
 export const runtimeMethods = {
   onRenderLayers(event: DetailEvent) {
     this.setData({ renderLayers: Array.isArray(event.detail.layers) ? event.detail.layers : [] });

@@ -47,7 +47,7 @@ function launch(sceneId = "") {
 }
 
 async function main() {
-  for (const mode of ["anchor", "gps"]) {
+  for (const mode of ["hybrid", "anchor", "gps"]) {
     const app = launch(); await flush();
     app.host.startAR(); assert.deepEqual(app.starts, [], "slow configuration cannot start the default GPS camera");
     assert.equal(app.requests.length, 1);

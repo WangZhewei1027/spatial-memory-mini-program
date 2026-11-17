@@ -45,7 +45,8 @@ module.exports = function (XR_CONFIG) {
         dispose: o.dispose || null,
         onTap: o.onTap || null,
         tick: o.tick || null,
-        repulsionEnabled: o.repulsionEnabled !== false,
+        repulsionEnabled: o.repulsionEnabled !== false &&
+          !(this.retrievalMode === "hybrid" && this._matchedAssetIds.has(assetId)),
       };
       if (o.audioRefs?.ctx) this._pendingAudioContexts?.delete(o.audioRefs.ctx);
       // 异步加载结束时复检；快速切换回来、相同 asset id 也不能接收旧一轮节点。

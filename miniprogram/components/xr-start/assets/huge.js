@@ -50,7 +50,7 @@ module.exports = (XR_CONFIG) => ({
       if (statusCode === 200 && Array.isArray(data)) {
         this._pendingHugeAssets = data.filter(
           (a) =>
-            a.file_url &&
+            a.file_url && (this.retrievalMode !== "hybrid" || a.anchor_id === null) &&
             Number.isFinite(a.latitude) &&
             Number.isFinite(a.longitude),
         );
@@ -77,7 +77,7 @@ module.exports = (XR_CONFIG) => ({
         this._hugeDrain === drain && this._pendingHugeAssets.length &&
         !this._disposed &&
         !this._retrievalPaused &&
-        this.retrievalMode === "gps"
+        this.retrievalMode !== "anchor"
       ) {
         const asset = this._pendingHugeAssets.shift(),
           epoch = this._contentEpoch;
