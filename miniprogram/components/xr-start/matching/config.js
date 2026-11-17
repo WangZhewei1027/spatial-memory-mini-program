@@ -17,6 +17,11 @@ module.exports = {
   strongMargin: 0.2,
   strongObservations: 2,
   strongConfirmDurationMs: 500,
+  // Pair path: two look-alike targets that stay within minimumMargin of each other, both at
+  // minimumScore or above and ahead of every other target by minimumMargin, for this long.
+  // The one with the higher mean raw score over the window is taken. Not field-calibrated.
+  pairDurationMs: 3000,
+  pairMinimumFrames: 3,
   maxObservationGapMs: 4500,
   frameIntervalMs: 1000,
   leadFrameIntervalMs: 500, // Only while a target leads clearly (strongScore / strongMargin).

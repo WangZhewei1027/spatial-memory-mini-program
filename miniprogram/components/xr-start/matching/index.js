@@ -35,6 +35,9 @@ const deviceInfo = () => {
 // and which reference image matched best. Highest raw scores first, bounded.
 const targetScores = entries => [...entries].sort((a, b) => b.raw - a.raw).slice(0, config.frameLogTargets)
   .map(entry => ({ id: entry.reference.id, raw: round3(entry.raw), smooth: round3(entry.score), image: entry.image }));
+// Two look-alike targets being compared: current mean leader first, `lead` its mean raw lead.
+const pairFields = pair => pair ? { leader: pair.leader.reference.id, other: pair.other.reference.id,
+  frames: pair.frames, elapsedMs: pair.elapsedMs, lead: round3(pair.lead) } : null;
 
 module.exports = {
   ...diagnostics,
@@ -267,6 +270,7 @@ module.exports = {
         observationsRequired: config.minimumObservations, confirmDurationMs: config.confirmDurationMs,
         strongScore: config.strongScore, strongMargin: config.strongMargin, strongObservationsRequired: config.strongObservations,
         strongConfirmDurationMs: config.strongConfirmDurationMs, leadFrameIntervalMs: config.leadFrameIntervalMs,
+        pairDurationMs: config.pairDurationMs, pairMinimumFrames: config.pairMinimumFrames,
         maxFrameIntervalMs: config.maxFrameIntervalMs, maxResultAgeMs: config.maxResultAgeMs,
         blurSharpnessRatio: config.blurSharpnessRatio, maxBlurRetries: config.maxBlurRetries,
         maxContentPrefetches: config.maxContentPrefetches });
@@ -358,8 +362,13 @@ module.exports = {
       // Only a clear lead speeds up sampling: on a borderline lead, extra frames within the
       // same couple of seconds mostly repeat the same view and make false confirmations easier.
       this._nextMatchFrameAt = capturedAt + intervalFor(elapsed, config, result.strong && !shown);
+      // A look-alike pair still unresolved on its second frame prefetches its current mean leader.
+      const pair = !result.match ? result.pair : null;
+      const pairLeader = pair && pair.frames >= 2 && pair.leader.reference.id !== this._matchedAnchorId ? pair.leader.reference : null;
       if (match && !result.confirmed) this._prefetchMatchContent(match.reference, epoch);
+      else if (pairLeader && !result.confirmed) this._prefetchMatchContent(pairLeader, epoch);
       this._recordMatchDecision({ reason: shown ? 'shown_target' : result.confirmed ? 'confirmed' : match ? 'confirming' : result.reason,
+        pair: pairFields(result.pair),
         topId: result.best?.reference.id || null, topScore: result.best?.score,
         secondScore: result.second, margin: result.margin,
         frameTopId: result.frame.best?.reference.id || null, frameTopScore: result.frame.best?.score,
@@ -378,14 +387,19 @@ module.exports = {
         ` · 次高 ${score(result.second)} · 阈值 ${config.minimumScore} · 差 ${score(result.margin)}` +
         ` · ${elapsed}ms · 下次 ${((this._nextMatchFrameAt - capturedAt) / 1000).toFixed(1)}s 后`);
       if (!result.confirmed || shown) {
-        const hint = match ? `正在确认：${match.reference.name || '目标'} · 请保持镜头稳定` : this._scanStatusMessage || '自动识别中 · 请对准目标';
-        this._recognitionStatus(match ? `确认 ${result.progress}/${result.required}` : hint, hint);
+        const hint = match ? `正在确认：${match.reference.name || '目标'} · 请保持镜头稳定`
+          : pair ? '发现相似目标，正在区分 · 请保持镜头稳定' : this._scanStatusMessage || '自动识别中 · 请对准目标';
+        const diagnostic = match ? `确认 ${result.progress}/${result.required}`
+          : pair ? `相似目标 ${(pair.elapsedMs / 1000).toFixed(1)}/${config.pairDurationMs / 1000}s` : hint;
+        this._recognitionStatus(diagnostic, hint);
       }
       if (result.confirmed && shown) this._matchEvidence = null;
       else if (result.confirmed) {
+        const viaPair = result.via === 'pair';
         this._matchLog('确认命中', { anchorId: match.reference.id, score: +match.score.toFixed(4), margin: round3(result.margin),
           via: result.via, strong: result.strong, observations: result.progress, frames: this._matchFrameCount,
-          leadMs: capturedAt - result.evidence.since, scanMs: now - this._matchScanStartedAt, inferenceMs, elapsedMs: elapsed });
+          leadMs: viaPair ? result.pair.elapsedMs : capturedAt - result.evidence.since, scanMs: now - this._matchScanStartedAt,
+          inferenceMs, elapsedMs: elapsed, ...(viaPair ? { pair: pairFields(result.pair) } : {}) });
         void this._acceptImageMatch(match.reference);
       }
     } catch (error) { if (this._imageMatcher === matcher) this._failFrameRecognition(error, epoch); }

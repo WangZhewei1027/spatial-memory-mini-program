@@ -330,6 +330,38 @@ test('a single-frame spike on a competitor does not confirm it', () => {
   const back = policy.track(spike.evidence, toward(.8), [a, b], 4500, config);
   assert.equal(back.evidence.id, 'a'); assert.equal(back.evidence.count, 1); assert.equal(back.confirmed, false);
 });
+test('two look-alike targets within the margin are ruled after three seconds by their mean raw lead', () => {
+  const a = { id: 'a', vector: [1, 0, 0, 0] }, b = { id: 'b', vector: [0, 1, 0, 0] }, c = { id: 'c', vector: [0, 0, 1, 0] };
+  const frame = (sa, sb, sc = .1) => [sa, sb, sc, Math.sqrt(1 - sa * sa - sb * sb - sc * sc)];
+  const run = (frames, refs = [a, b, c]) => { let evidence = null, result;
+    frames.forEach((scores, i) => { result = policy.track(evidence, frame(...scores), refs, i * 1000, config); evidence = result.evidence; });
+    return result; };
+  // Both well ahead of the rest but never 0.08 apart: this used to wait forever.
+  const steady = Array(4).fill([.55, .52]);
+  const early = run(steady.slice(0, 3));
+  assert.equal(early.confirmed, false); assert.equal(early.reason, 'ambiguous_targets'); assert.equal(early.match, null);
+  assert.equal(early.pair.frames, 3); assert.equal(early.pair.leader.reference.id, 'a'); assert.equal(early.pair.elapsedMs, 2000);
+  const ruled = run(steady);
+  assert.equal(ruled.confirmed, true); assert.equal(ruled.via, 'pair'); assert.equal(ruled.match.reference.id, 'a');
+  assert.equal(ruled.pair.other.reference.id, 'b'); assert.ok(Math.abs(ruled.pair.lead - .03) < 1e-9);
+  // The mean over the window decides, not the last frame.
+  assert.equal(run([[.55, .60], [.55, .60], [.55, .60], [.56, .54]]).match.reference.id, 'b');
+  // An exact tie (the same photo uploaded for both) goes to the pair's leader when the window opened.
+  const tie = run(Array(4).fill([.5, .5])); assert.equal(tie.via, 'pair'); assert.equal(tie.match.reference.id, 'a');
+  // Only two targets nearby: no third one has to be left behind.
+  assert.equal(run(steady, [a, b]).via, 'pair');
+  // A third target close behind is not a pair: nothing is ruled.
+  const crowded = run(Array(6).fill([.55, .52, .47])); assert.equal(crowded.confirmed, false); assert.equal(crowded.pair, null);
+  // Either one falling under the threshold closes the window; a new one needs another three seconds.
+  const broken = run([[.55, .52], [.55, .52], [.55, .52], [.55, .2], [.55, .52], [.55, .52], [.55, .52]]);
+  assert.equal(broken.confirmed, false); assert.ok(broken.pair.elapsedMs < config.pairDurationMs);
+  // A slow phone: three seconds alone are not enough without three frames.
+  let evidence = null, result;
+  for (const at of [0, 3000, 4000]) {
+    result = policy.track(evidence, frame(.55, .52), [a, b, c], at, config); evidence = result.evidence;
+    assert.equal(result.confirmed, at === 4000, `${at} ms`);
+  }
+});
 test('all nearby references participate immediately, including targets beyond the old five-image batch', async () => {
   let embeddings = 0;
   const f = fixture({ fetchAnchorCandidates: async () => ({ statusCode: 200, data: { candidates: Array.from({ length: 7 }, (_, i) => target(String(i))) } }),
@@ -427,6 +459,24 @@ function shownContent(overrides = {}) {
     attend(ms) { for (let t = 0; t < ms; t += config.attentionIntervalMs) { f.tick(config.attentionIntervalMs); f.host._tickAttention(); } },
     async lock() { await f.host.recognizeAnchor(); await f.sample(); f.tick(); await f.sample(); assert.equal(f.host._matchPhase, 'locked'); } };
 }
+test('a look-alike pair says why it waits, prefetches its mean leader and is ruled after three seconds', async t => {
+  const f = shownContent(); t.after(() => f.host.pauseRetrieval());
+  f.seen.vector = [.55, .52, Math.sqrt(1 - .55 ** 2 - .52 ** 2)];
+  await f.host.recognizeAnchor(); await f.sample();
+  assert.match(f.statuses.at(-1).message, /发现相似目标，正在区分/); assert.equal(f.statuses.at(-1).diagnostic, '相似目标 0.0/3s');
+  assert.deepEqual(f.contentCalls(), [], 'a single frame is not a pair yet');
+  f.tick(); await f.sample(); assert.deepEqual(f.contentCalls(), ['a'], 'prefetched on the second frame');
+  f.tick(); await f.sample(); assert.equal(f.host._matchPhase, 'scanning'); assert.equal(f.statuses.at(-1).diagnostic, '相似目标 2.0/3s');
+  f.tick(); await f.sample(); await settle();
+  assert.equal(f.host._matchPhase, 'locked'); assert.equal(f.host._matchedAnchorId, 'a'); assert.deepEqual(f.contentCalls(), ['a']);
+  const confirmed = f.logs.find(([event]) => event === '确认命中')[1];
+  assert.equal(confirmed.via, 'pair'); assert.equal(confirmed.leadMs, config.pairDurationMs);
+  // Logged fields come from the module's own realm; compare them as JSON.
+  assert.equal(JSON.stringify(confirmed.pair), JSON.stringify({ leader: 'a', other: 'b', frames: 4, elapsedMs: 3000, lead: .03 }));
+  assert.equal(JSON.stringify(f.logs.filter(([event]) => event === '匹配结果').at(-2)[1].pair),
+    JSON.stringify({ leader: 'a', other: 'b', frames: 3, elapsedMs: 2000, lead: .03 }));
+  assert.equal(f.logs.find(([event]) => event === '内容就绪')[1].prefetched, true);
+});
 test('turning away keeps the content and matches again; only a different target replaces it', async () => {
   const f = shownContent(); await f.lock();
   assert.equal(f.host._matchedAnchorId, 'a'); assert.equal(f.counts().closed, 1);
@@ -730,7 +780,8 @@ test('field calibration logs every sampled frame with per-target scores, timing 
   const start = f.logs.find(([event]) => event === '扫描开始')[1];
   assert.equal(JSON.stringify(start.targets.map(t => [t.id, t.name, t.images])), JSON.stringify([['a', 'a', 2], ['b', 'b', 1]]));
   for (const key of ['minimumScore', 'minimumMargin', 'scoreSmoothingMs', 'strongScore', 'strongMargin', 'strongConfirmDurationMs',
-    'leadFrameIntervalMs', 'blurSharpnessRatio', 'maxBlurRetries', 'maxContentPrefetches']) assert.equal(start[key], config[key], key);
+    'leadFrameIntervalMs', 'pairDurationMs', 'pairMinimumFrames', 'blurSharpnessRatio', 'maxBlurRetries', 'maxContentPrefetches'])
+    assert.equal(start[key], config[key], key);
   for (let i = 0; i < 3; i++) { await f.sample(); f.tick(); }
   const frames = f.logs.filter(([event]) => event === '匹配结果').map(([, fields]) => fields);
   assert.equal(frames.length, 3, 'one line per sampled frame');

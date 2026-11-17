@@ -46,13 +46,31 @@ function hintActive(active, best, shownId, config) {
     (shownId == null || best.reference.id !== shownId) &&
     best.score >= (active ? config.hintReleaseScore : config.hintScore);
 }
-// Temporal evidence across frames, with two ways to confirm.
+// Two look-alike targets can hold each other under the margin for good. While the same
+// two both reach minimumScore on their averages and lead every other target by
+// minimumMargin, their raw scores are compared on each frame. The window does not restart
+// when their own gap passes the margin for a while; the other paths may confirm then.
+// `ids[0]` is the pair's leader when the window opened; it wins a tie (mean lead >= 0).
+function similarPair(previous, entries, now, config) {
+  const [first, second, third] = [...entries].sort((a, b) => b.score - a.score);
+  if (!second || second.score < config.minimumScore || (third && second.score - third.score < config.minimumMargin)) return null;
+  const same = !!previous && [first, second].every(entry => previous.ids.includes(entry.reference.id));
+  const ids = same ? previous.ids : [first.reference.id, second.reference.id];
+  const [a, b] = ids.map(id => (id === first.reference.id ? first : second));
+  const frames = (same ? previous.frames : 0) + 1, lead = (same ? previous.lead : 0) + a.raw - b.raw;
+  const ahead = lead >= 0;
+  return { state: { ids, since: same ? previous.since : now, frames, lead },
+    leader: ahead ? a : b, other: ahead ? b : a, frames, lead: Math.abs(lead) / frames };
+}
+// Temporal evidence across frames, with three ways to confirm.
 // Slow path: each target keeps a time-weighted moving average of its per-frame
 // (best-image) score. Threshold and margin are applied to the averages; a step is
 // counted on frames that would also pass on their own for the same target. A weak
 // frame pauses the count while the averaged lead holds; once the lead is lost the
 // target starts over. This is what confirms borderline targets.
 // Fast path: consecutive frames that each put the leader clearly ahead on their own.
+// Pair path: two similar targets still within the margin after pairDurationMs; the one
+// with the higher mean raw score over that window is taken.
 function track(evidence, vector, references, now, config) {
   if (!evidence || now - evidence.lastAt > config.maxObservationGapMs)
     evidence = { lastAt: now, scores: {}, id: null, since: now, count: 0 };
@@ -88,13 +106,19 @@ function track(evidence, vector, references, now, config) {
     (frame.margin == null || frame.margin >= config.strongMargin);
   if (!strong) strongCount = 0;
   else if (++strongCount === 1) strongSince = now;
-  const next = { lastAt: now, scores, id, since, count, strongCount, strongSince };
+  const pair = similarPair(evidence.pair, entries, now, config);
+  const next = { lastAt: now, scores, id, since, count, strongCount, strongSince, pair: pair ? pair.state : null };
   const fast = strong && strongCount >= config.strongObservations && now - strongSince >= config.strongConfirmDurationMs;
   const slow = !!leader && count >= config.minimumObservations && now - since >= config.confirmDurationMs;
+  // The pair is ruled on a frame where the two are within the margin of each other.
+  const pairMs = pair ? now - pair.state.since : 0;
+  const ruled = !fast && !slow && !!pair && reason === 'ambiguous_targets' &&
+    pair.frames >= config.pairMinimumFrames && pairMs >= config.pairDurationMs;
   // What the UI shows as "n / required": the streak while it runs, the slow count otherwise.
   const progress = strong ? strongCount : count, required = strong ? config.strongObservations : config.minimumObservations;
-  return { evidence: next, scores: entries, strong, progress, required, ...ranking, reason, match: leader, frame,
-    confirmed: fast || slow, via: fast ? 'fast' : slow ? 'slow' : null };
+  return { evidence: next, scores: entries, strong, progress, required, ...ranking, reason, match: ruled ? pair.leader : leader, frame,
+    pair: pair && { leader: pair.leader, other: pair.other, frames: pair.frames, elapsedMs: pairMs, lead: pair.lead },
+    confirmed: fast || slow || ruled, via: fast ? 'fast' : slow ? 'slow' : ruled ? 'pair' : null };
 }
 // Frame pacing follows the measured end-to-end time. While a target leads clearly,
 // frames come faster so confirmation finishes sooner; everything else keeps the slow pace.
