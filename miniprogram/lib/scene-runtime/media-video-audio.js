@@ -1,4 +1,5 @@
 const { mediaOperation, releaseNative } = require("./media-operation");
+const { ensureMediaAudioOutput } = require("../three-runtime/audio-output");
 // MediaAudioPlayer supports the MP4 audio track on iOS as well as Android.
 // An audio-only decoder keeps its native PTS clock independent of image seeks.
 //
@@ -13,6 +14,8 @@ function errorText(error) { return error?.message || error?.errMsg || String(err
 
 async function createVideoSoundtrack(url, { onError, onDiagnostic = () => {}, isCancelled, mediaContext, onCancel = () => () => {}, stepTimeoutMs = STEP_TIMEOUT_MS }) {
   if (!wx.createMediaAudioPlayer) throw new Error('此微信版本不支持视频音轨，请升级微信后重试');
+  await ensureMediaAudioOutput();
+  if (isCancelled()) throw new Error('视频音轨加载已取消');
   let disposed = false, desired = null, pipeline = null;
   let operation = Promise.resolve(), busy = false;
   let intent = 0, appliedIntent = -1, recoveries = 0;

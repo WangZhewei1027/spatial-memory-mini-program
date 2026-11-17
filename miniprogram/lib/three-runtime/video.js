@@ -1,4 +1,5 @@
 const { THREE } = require("./runtime");
+const { ensureMediaAudioOutput } = require("./audio-output");
 function createVideo(source, metadata = {}, onError = console.warn) {
   if (!wx.createVideoDecoder) throw new Error("当前微信版本不支持视频解码");
   const decoder = wx.createVideoDecoder();
@@ -56,6 +57,8 @@ function createVideo(source, metadata = {}, onError = console.warn) {
       playing = true;
       if (metadata.muted !== true && wx.createMediaAudioPlayer) {
         if (!audio) {
+          await ensureMediaAudioOutput();
+          if (disposed) return;
           audio = wx.createMediaAudioPlayer();
           audio.volume = Math.min(
             1,

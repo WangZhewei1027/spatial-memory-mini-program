@@ -4,6 +4,7 @@ const {
   removeFile,
   disposeTree,
 } = require("../../../lib/three-runtime/resources");
+const { ensureMediaAudioOutput } = require("../../../lib/three-runtime/audio-output");
 const { instantiateModel } = require("./model");
 module.exports = (XR_CONFIG) => ({
   async _placeAudioAsset(asset) {
@@ -31,6 +32,8 @@ module.exports = (XR_CONFIG) => ({
       }
       console.warn("[audio] 耳机模型加载失败，使用图形标记", error);
     }
+    // Route the sound as media before it exists; the check below covers leaving meanwhile.
+    await ensureMediaAudioOutput();
     const pos =
       this._isAssetPlacementCurrent(asset) && this._calcForwardPos("audio");
     if (!pos) {

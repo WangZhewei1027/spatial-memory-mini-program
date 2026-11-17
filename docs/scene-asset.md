@@ -51,6 +51,23 @@ Core 提供 `play/pause/seek/advance/sync/sample/subscribe/observe/bind/dispose`
 
 官方接口依据（2026-10-29 核对）：[VideoDecoder.start 支持 HTTP(S)](https://developers.weixin.qq.com/miniprogram/dev/api/media/video-decoder/VideoDecoder.start.html)、[InnerAudioContext 格式支持](https://developers.weixin.qq.com/miniprogram/dev/api/media/audio/InnerAudioContext.html)、[原生音频驱动及释放](https://developers.weixin.qq.com/miniprogram/dev/api/media/audio/wx.createInnerAudioContext.html)、[MediaAudioPlayer API](https://developers.weixin.qq.com/miniprogram/dev/api/media/audio/MediaAudioPlayer.html)。
 
+### iOS 静音开关与音频通道
+
+AR 声音按媒体播放：iOS 静音开关打开时仍应出声，并且走扬声器。`wx.setInnerAudioOption` 的 `obeyMuteSwitch` 默认是 `true`，即遵循静音开关，这就是此前静音模式下无声的原因。`lib/three-runtime/audio-output.js` 在每个运行时第一次创建声音前调用一次 `wx.setInnerAudioOption({ obeyMuteSwitch: false, mixWithOther: false, speakerOn: true })`，该选项对整个小程序全局生效，各播放点不再单独设置。这个调用不放在 `App.onLaunch`，只扫码或浏览无声内容时不会改动音频设置；文档没有说明设置调用本身是否会打断其他 App 的声音。调用失败会在下一次出声前重试；1 秒内没有回调就不再等待，也不重复调用；不支持该接口时照常播放。
+
+| 出声路径 | 接口 | 静音开关 |
+| --- | --- | --- |
+| 地图音频素材（`components/xr-start/assets/audio.js`）、Scene 普通音频（`media-audio.js`） | `InnerAudioContext`（`useWebAudioImplement: false`） | 文档明确受 `setInnerAudioOption` 控制；`InnerAudioContext.obeyMuteSwitch` 从基础库 2.3.0 起不生效 |
+| Scene 旧格式音频、旧容器视频音轨（`media-audio-buffered.js`） | `WebAudioContext` | 文档写明 `setInnerAudioOption` 不兼容 WebAudio，也没有给出其他开关；静音模式下的行为未确认 |
+| Scene 视频音轨（`media-video-audio.js`）、地图视频（`lib/three-runtime/video.js`） | `VideoDecoder` + `MediaAudioPlayer` | 文档未提静音开关和 `setInnerAudioOption`；行为未确认 |
+| Scene 视频画面（`media-video.js`） | `VideoDecoder`（`abortAudio: true`） | 不出声 |
+
+项目不使用 `<video>` 组件或背景音频。WebAudio 和视频音轨路径也会先调用该选项（不影响播放），但它们是否随之在静音模式下出声，只能在真机上确认。`speakerOn: true` 时客户端忽略 `mixWithOther`，强制与其他音频互斥，因此 AR 声音开始播放时会停止其他 App 的音乐。混播需要改用听筒，不适合 AR 外放。`mixWithOther: false` 只是把这一实际行为写明。
+
+`test-audio-output.cjs` 覆盖选项取值、全局只设置一次、失败重试与超时、各路径在创建原生播放器前完成设置，以及等待期间退出时不创建播放器；`test-ar-runtime.cjs` 覆盖地图音频。静音开关的实际效果只能在 iPhone 上验证：开关开/关 × 地图音频、Scene 音频、Scene 视频音轨、地图视频和旧格式音频，并观察其他 App 的音乐是在 AR 出声时才停止，而不是一打开小程序就停止。
+
+官方依据（2026-11-17 核对）：[wx.setInnerAudioOption](https://developers.weixin.qq.com/miniprogram/dev/api/media/audio/wx.setInnerAudioOption.html)（选项、默认值、全局生效、`speakerOn` 与 `mixWithOther` 的关系、不兼容 WebAudio）、[InnerAudioContext.obeyMuteSwitch 废弃说明](https://developers.weixin.qq.com/miniprogram/dev/api/media/audio/InnerAudioContext.html)、[wx.createMediaAudioPlayer](https://developers.weixin.qq.com/miniprogram/dev/api/media/audio/wx.createMediaAudioPlayer.html)、[wx.createWebAudioContext](https://developers.weixin.qq.com/miniprogram/dev/api/media/audio/wx.createWebAudioContext.html)。
+
 生产配置：媒体 OSS/CDN 域名须同时加入微信后台的 `request 合法域名`（MP4 Range 索引请求）和 `downloadFile 合法域名`（旧素材兼容路径及图片/模型）。开发者工具关闭域名校验不能替代体验版/正式版配置。
 
 ## 灯光与环境

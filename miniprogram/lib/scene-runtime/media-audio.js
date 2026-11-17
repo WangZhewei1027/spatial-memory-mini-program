@@ -1,7 +1,11 @@
 const buffered = require('./media-audio-buffered');
+const { ensureMediaAudioOutput } = require('../three-runtime/audio-output');
 
 // Native media decoders consume supported remote formats incrementally at 1x.
 async function createAudioPlayback(url, settings, options) {
+  // Route sound as media before any native source exists.
+  await ensureMediaAudioOutput();
+  if (options.isCancelled()) throw new Error('演出音频加载已取消');
   const extension = url.split(/[?#]/)[0].split("/").pop().match(/\.([a-z0-9]+)$/i)?.[1]?.toLowerCase();
   const legacyFormat = extension && !["mp3", "m4a", "aac", "wav"].includes(extension);
   if (options.forceBuffered || legacyFormat) {

@@ -254,6 +254,11 @@ async function main() {
     "PASS actual business GLB: geometry + embedded image via native resource adapter, no browser globals/temp leaks",
   );
 
+  const audioRoute = [];
+  wx.setInnerAudioOption = (options) => {
+    audioRoute.push({ obeyMuteSwitch: options.obeyMuteSwitch, mixWithOther: options.mixWithOther, speakerOn: options.speakerOn });
+    Promise.resolve().then(options.success);
+  };
   for (const scenario of ["ready", "failed", "cancelled"]) {
     let finishImport, failImport, current = true, imports = 0, acquisitions = 0, audioCreated = 0, entry;
     const packageReady = new Promise((resolve, reject) => { finishImport = resolve; failImport = reject; });
@@ -271,6 +276,7 @@ async function main() {
     };
     wx.createInnerAudioContext = () => {
       audioCreated++;
+      audioRoute.push("create");
       return { onError() {}, play() {}, pause() {}, stop() {}, destroy() {} };
     };
     const cache = new resources.ModelCache(canvas);
@@ -307,8 +313,12 @@ async function main() {
     cache.dispose();
     assert.equal(virtualFiles.size, 0, "audio temp files are released on exit and cancellation");
   }
+  assert.deepEqual(audioRoute, [
+    { obeyMuteSwitch: false, mixWithOther: false, speakerOn: true }, "create", "create",
+  ], "map audio is routed as media once, before the first native player, so iOS silent mode does not mute it");
+  delete wx.setInnerAudioOption;
   importPackage = async (file) => load(file);
-  console.log("PASS audio asset package: lazy load, actual model, download fallback and cancellation cleanup");
+  console.log("PASS audio asset package: lazy load, actual model, download fallback, cancellation cleanup and media audio route");
 
   const { ARRuntime } = lib("ar-runtime");
   const { RenderLayers } = lib("render-layers");
