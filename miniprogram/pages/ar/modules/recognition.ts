@@ -39,11 +39,11 @@ export const recognitionMethods = {
   },
 } satisfies ThisType<ArPageContext>;
 export function registerRecognition(page: ArPageContext, registry: ReturnType<typeof createUiRegistry>) {
-  const module = registry.register({ id: "recognition", slot: "bottom", order: 10,
-    navigation: { label: "识别", icon: "scan-line" }, actions: { rescan: () => page.onRescan() } });
+  const module = registry.register({ id: "recognition", slot: "top-center", order: 10,
+    actions: { rescan: () => page.onRescan() } });
   return { sync() {
     const enabled = page.data.mapConfigReady && page.data.retrievalMode !== "gps";
-    module.update({ enabled, badge: page.data.recognitionLocked ? "ready" : "" });
+    module.update({ enabled });
     module.publishDebug(enabled ? [
       ...(page.data.recognitionDiagnostic ? [{ key: "status", label: "识别", value: page.data.recognitionDiagnostic,
         level: page.data.recognitionPhase === "error" ? "error" as const : "info" as const, order: 25 }] : []),

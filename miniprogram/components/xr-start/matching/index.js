@@ -116,6 +116,7 @@ module.exports = {
   },
   rescan() {
     if (this._disposed || this._retrievalPaused || this.retrievalMode === 'gps') return;
+    if (this.data?.simulatedCamera) return this.recognizeAnchor();
     this._cancelRetrieval('rescan');
     this._clearRemoteAssets({ preserveActivities: true, preserveGps: true });
     this._recognitionStatus('正在准备重新扫描…');
@@ -176,7 +177,12 @@ module.exports = {
     return this.recognizeAnchor();
   },
   async recognizeAnchor() {
-    if (!this._recognitionCurrent(this._modeEpoch) || this._matchPreparing || this._matchLocating ||
+    if (!this._recognitionCurrent(this._modeEpoch)) return;
+    if (this.data?.simulatedCamera) {
+      this._recognitionStatus('模拟画面 · 请在真机上识别目标');
+      return;
+    }
+    if (this._matchPreparing || this._matchLocating ||
         [PHASES.LOADING, PHASES.TRACKING].includes(this._matchPhase) || Date.now() < this._nextRecognitionAt) return;
     if (!CONFIG.workspaceId) { this._nextRecognitionAt = Infinity; this._recognitionStatus('请先选择具体地图'); return; }
     // A discovery snapshot stays active until meaningful GPS movement or explicit rescan.

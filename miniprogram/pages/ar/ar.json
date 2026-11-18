@@ -4,8 +4,9 @@
     "shop-checkin": "../../components/shop-checkin/index",
     "ar-shell": "../../components/ar-shell/index",
     "ar-debug-bar": "../../components/ar-debug-bar/index",
+    "ar-shop-compass": "../../components/ar-shop-compass/index",
     "ar-shop-overlays": "../../components/ar-shop-overlays/index",
-    "ar-recognition-panel": "../../components/ar-recognition-panel/index",
+    "ar-recognition-controls": "../../components/ar-recognition-controls/index",
     "ar-danmaku-panel": "../../components/ar-danmaku-panel/index"
   },
   "disableScroll": true

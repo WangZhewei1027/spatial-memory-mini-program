@@ -1,4 +1,7 @@
 <view class="ar-renderer">
+  <view wx:if="{{simulatedCamera}}" class="simulated-view" aria-hidden="true">
+    <view class="simulated-floor" />
+  </view>
   <canvas id="ar-canvas" type="webgl2" class="ar-canvas" bindtouchend="onCanvasTap" bindwebglcontextlost="onContextLost" bindwebglcontextrestored="onContextRestored" />
   <view wx:if="{{!sceneId && (renderError || !cameraReady || (!arReady && retrievalMode !== 'anchor'))}}" class="ar-message">
     <text>{{renderError || renderStatus}}</text>

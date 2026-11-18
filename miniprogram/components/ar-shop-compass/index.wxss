@@ -1,0 +1,68 @@
+@import "../../styles/ar-theme.wxss";
+/* ===== 导航方向覆层 ===== */
+.nav-overlay {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.nav-compass-ring {
+  width: 120rpx;
+  height: 120rpx;
+  border-radius: 50%;
+  border: 4rpx solid rgba(143, 188, 143, 0.55);
+  background: rgba(0, 0, 0, 0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.nav-arrow-wrap {
+  width: 64rpx;
+  height: 64rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s ease-out;
+}
+
+.nav-arrow-head {
+  width: 0;
+  height: 0;
+  border-left: 14rpx solid transparent;
+  border-right: 14rpx solid transparent;
+  border-bottom: 28rpx solid var(--ar-accent);
+}
+
+.nav-arrow-tail {
+  width: 6rpx;
+  height: 18rpx;
+  background: var(--ar-accent);
+  border-radius: 0 0 4rpx 4rpx;
+  opacity: 0.7;
+}
+
+.nav-info-row {
+  margin-top: 14rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: rgba(0, 0, 0, 0.8);
+  border-radius: 32rpx;
+  padding: 8rpx 28rpx;
+  border: 1rpx solid rgba(143, 188, 143, 0.3);
+}
+
+.nav-shop-name {
+  color: #fff;
+  font-size: 26rpx;
+  font-weight: 600;
+  letter-spacing: 1rpx;
+}
+
+.nav-dist {
+  color: var(--ar-accent);
+  font-size: 22rpx;
+  margin-top: 4rpx;
+}

@@ -1,5 +1,6 @@
 const { THREE, probeWebGL2, createCanvasFacade, disposeRenderer } = require("./runtime");
 const { VKSessionController } = require("./vk-session");
+const { SimulatedCameraSession } = require("./simulated-camera");
 const { RenderLayers } = require("./render-layers");
 const {
   createCameraBackground,
@@ -8,7 +9,7 @@ const {
 class ARRuntime {
   constructor(
     canvas,
-    { width, height, onReady, onTick, onState, onCameraFrame, requireTracking, onLayersChange, onLayerError, debugTimings = false },
+    { width, height, onReady, onTick, onState, onCameraFrame, requireTracking, onLayersChange, onLayerError, debugTimings = false, simulatedCamera = false },
   ) {
     this.canvas = canvas;
     this.onReady = onReady;
@@ -17,9 +18,10 @@ class ARRuntime {
     this.onCameraFrame = onCameraFrame;
     this.requireTracking = requireTracking;
     this.debugTimings = debugTimings;
+    this.simulatedCamera = simulatedCamera;
     try {
       const gl = (this.gl = canvas.getContext("webgl2", {
-        alpha: false,
+        alpha: simulatedCamera,
         antialias: false,
       }));
       const capabilities = probeWebGL2(gl);
@@ -28,11 +30,11 @@ class ARRuntime {
       this.renderer = new THREE.WebGLRenderer({
         canvas: this.facade,
         context: gl,
-        alpha: false,
+        alpha: simulatedCamera,
         antialias: false,
       });
       this.renderer.autoClear = false;
-      this.renderer.setClearColor(0x14202b, 1);
+      this.renderer.setClearColor(0x14202b, simulatedCamera ? 0 : 1);
       this.renderer.debug.onShaderError = (context, program) => {
         this.shaderError =
           context.getProgramInfoLog(program) || "Three shader 编译失败";
@@ -44,23 +46,29 @@ class ARRuntime {
         getRenderError: () => { const message = this.shaderError; this.shaderError = null; return message ? new Error(message) : null; },
       });
       this.renderer.info.autoReset = false;
-      this.background = createCameraBackground(gl);
+      if (!simulatedCamera) this.background = createCameraBackground(gl);
       this.renderer.resetState();
       this.resize(width, height);
-      this.session = new VKSessionController({
+      const sessionState = (state, message) => {
+        if (state === "error") {
+          this.ready = false;
+          this.layers.pause();
+        }
+        this.onState(state, message);
+      };
+      this.session = simulatedCamera ? new SimulatedCameraSession(canvas, now => {
+        this.renderer.info.reset();
+        this.renderer.clear();
+        this.updateTracking(true);
+        this.renderTrackedContent(now);
+      }, sessionState) : new VKSessionController({
         api: wx,
         gl,
         maxFps: 30,
         mode: "slam",
         size: () => ({ width: canvas.width, height: canvas.height }),
         onFrame: (frame, timing) => this.frame(frame, timing),
-        onState: (state, message) => {
-          if (state === "error") {
-            this.ready = false;
-            this.layers.pause();
-          }
-          this.onState(state, message);
-        },
+        onState: sessionState,
       });
     } catch (error) {
       this.layers?.dispose();
@@ -75,7 +83,7 @@ class ARRuntime {
     this.renderer.setSize(width, height, false);
     this.layers?.resize(width, height);
     // Before the first native pose; afterwards VisionKit supplies the projection.
-    if (!this.session) {
+    if (!this.session || this.simulatedCamera) {
       this.camera.aspect = width / height;
       this.camera.updateProjectionMatrix();
     }
@@ -150,7 +158,10 @@ class ARRuntime {
         throw new Error("空间定位超过 30 秒，请在光线充足、有纹理的环境中重试");
       return;
     }
-    this.validFrameAt = start;
+    this.renderTrackedContent(now, frame.camera, this.debugTimings && { start, acquireMs, matrixMs, backgroundMs });
+  }
+  renderTrackedContent(now, nativeCamera, timings) {
+    this.validFrameAt = Date.now();
     this.trackingWaitAt = null;
     if (!this.ready) {
       this.ready = true;
@@ -167,14 +178,21 @@ class ARRuntime {
     this.onTick(dt);
     this.layers.update(now, true);
     const far = this.layers.farPlane();
-    if (far !== this.camera.far) syncVKCamera(this.camera, frame.camera, 0.01, far);
+    if (far !== this.camera.far) {
+      if (nativeCamera) syncVKCamera(this.camera, nativeCamera, 0.01, far);
+      else {
+        this.camera.far = far;
+        this.camera.updateProjectionMatrix();
+      }
+    }
     const businessMs = Date.now() - businessAt,
       renderAt = Date.now();
     this.layers.render(true);
     if (this.shaderError) throw new Error(this.shaderError);
     this.frames = (this.frames || 0) + 1;
     if (!this.reportAt) this.reportAt = now;
-    if (this.debugTimings && now - this.reportAt >= 2000) {
+    if (timings && now - this.reportAt >= 2000) {
+      const { start, acquireMs, matrixMs, backgroundMs } = timings;
       console.log(
         "[ThreeAR][timings]",
         JSON.stringify({
@@ -199,7 +217,7 @@ class ARRuntime {
     this.disposed = true;
     this.stop();
     this.layers.dispose();
-    this.background.dispose();
+    this.background?.dispose();
     disposeRenderer(this.renderer);
   }
 }

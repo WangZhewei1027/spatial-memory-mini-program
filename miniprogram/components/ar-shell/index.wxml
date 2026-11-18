@@ -1,10 +1,11 @@
 <view class="ar-shell ar-theme">
   <view class="scene-slot"><slot name="scene" /></view>
   <view class="top-slot"><slot name="top" /></view>
+  <view class="top-center-slot"><slot name="top-center" /></view>
   <view class="overlay-slot"><slot name="overlay" /></view>
   <view wx:if="{{items.length}}" class="bottom-area {{keyboardHeight > 0 ? 'bottom-area--typing' : ''}}" style="bottom: {{keyboardHeight}}px;">
     <view class="bottom-panel {{expanded ? '' : 'bottom-panel--collapsed'}}"><slot name="bottom" /></view>
-    <view class="bottom-navbar" aria-label="AR 功能导航">
+    <view class="bottom-navbar" aria-label="AR 活动导航">
       <button wx:for="{{items}}" wx:key="key" size="mini"
         class="bottom-nav-item {{active === item.key && expanded ? 'bottom-nav-item--active' : ''}}"
         data-panel="{{item.key}}" bindtap="onSelect"

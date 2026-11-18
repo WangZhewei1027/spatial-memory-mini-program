@@ -4,7 +4,7 @@ const round = value => Number.isFinite(value) ? +value.toFixed(3) : null;
 // Bounded, permanent diagnostics. No images, embeddings, URLs or coordinates.
 module.exports = {
   _startMatchDiagnostics(source = 'automatic') {
-    if (config.debugLogs === false || this._matchDiagnostics) return;
+    if (this.data?.simulatedCamera || config.debugLogs === false || this._matchDiagnostics) return;
     const now = Date.now();
     const d = this._matchDiagnostics = { source, startedAt: now, stage: 'waiting_camera', stageAt: now,
       cameraFrames: 0, captured: 0, inferred: 0, invalidPixels: 0, blurredFrames: 0, staleResults: 0, busyFrames: 0,

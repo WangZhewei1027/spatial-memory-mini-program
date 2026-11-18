@@ -1,4 +1,5 @@
 const XR_CONFIG = require("./config");
+const { usesSimulatedCamera } = require("../../utils/camera-environment");
 const { reportError } = require("../../utils/report-error");
 const scenePreview = require("./scene-preview");
 const gps = require("./gps");
@@ -93,6 +94,7 @@ Component({
     },
   },
   data: {
+    simulatedCamera: usesSimulatedCamera(),
     arReady: false,
     cameraReady: false,
     retrievalMode: "hybrid",
@@ -120,6 +122,7 @@ Component({
             const canvas = (this._canvas = result[0]?.node);
             if (!canvas) throw new Error("无法创建 AR 画布");
             this._runtime = new ARRuntime(canvas, {
+              simulatedCamera: this.data.simulatedCamera,
               width: this.data.width,
               height: this.data.height,
               onReady: () => this.handleARReady(),
@@ -208,13 +211,14 @@ Component({
       this._firstFetchStarted = false;
       this._arReady = false;
       this._cameraReady = false;
+      this._lastRecognitionStatus = null;
       this._sessionActive = true;
       this.setData({ arReady: false, cameraReady: false, renderError: "", renderStatus: "正在启动空间追踪…" });
       this._runtime.start();
       return this._arReady;
     },
     onARState(state, message) {
-      if (this._runtime?.session) {
+      if (this._runtime?.session && !this.data.simulatedCamera) {
         console[state === "error" ? "error" : "log"]("[SLAM] 相机会话", JSON.stringify({
           state, message, native: this._runtime.session.getDiagnostics(),
         }));
@@ -256,13 +260,14 @@ Component({
       this.triggerEvent("renderstatus", {
         state,
         message: message || "",
-        renderer: "visionkit-three",
+        renderer: this.data.simulatedCamera ? "simulated-three" : "visionkit-three",
       });
     },
     handleARReady() {
       this._arReady = true;
       this._firstFetchStarted = false;
-      this.setData({ arReady: true, renderStatus: "", renderError: "" });
+      if (this.data.simulatedCamera) this._cameraReady = true;
+      this.setData({ arReady: true, cameraReady: this._cameraReady, renderStatus: "", renderError: "" });
       if (!this._placingBusy && this._placeQueue?.length) this._drainPlaceQueue();
       if (this._scenePreviewMode) { this._beginScenePreview(); return; }
       if (this.retrievalMode !== "gps") {

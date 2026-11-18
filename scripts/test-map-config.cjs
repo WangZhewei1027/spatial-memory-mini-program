@@ -95,8 +95,8 @@ async function main() {
   scene.component.lifetimes.detached.call(scene.host);
   const wxml = fs.readFileSync(path.join(root, "pages/ar/ar.wxml"), "utf8");
   assert.doesNotMatch(wxml, /onRetrievalModeChange|retrieval-switch/);
-  assert.match(wxml, /<ar-recognition-panel[^>]+slot="bottom"/);
-  assert.match(fs.readFileSync(path.join(root, "components/ar-recognition-panel/index.wxml"), "utf8"), /onRescan/);
+  assert.match(wxml, /<ar-recognition-controls[^>]+slot="top-center"/);
+  assert.match(fs.readFileSync(path.join(root, "components/ar-recognition-controls/index.wxml"), "utf8"), /onRescan/);
   console.log("PASS map config: server-selected startup, errors/retry, hide/show refresh, stale responses, team scope and Scene isolation");
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

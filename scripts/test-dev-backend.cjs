@@ -2,6 +2,7 @@ const assert = require("node:assert/strict");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const { spawnSync } = require("node:child_process");
 const { selectAddress, syncDevelopmentBackend, outputRelativePath } = require("./sync-dev-backend.cjs");
 
 const ipv4 = (address, internal = false) => ({ address, internal, family: "IPv4" });
@@ -58,3 +59,25 @@ for (const name of ["beforeCompile", "beforePreview"]) {
 assert.equal(config.scripts.beforeUpload, "sh scripts/before-upload.sh");
 assert.match(fs.readFileSync(path.join(__dirname, "before-upload.sh"), "utf8"), /sync-dev-backend\.sh[\s\S]*check-upload-package\.cjs/);
 console.log("PASS DevTools hook declarations for compile, preview and upload; IDE UI enablement must be verified separately");
+
+// Finder-launched DevTools does not inherit the terminal's Node PATH. Run the
+// configured preview hook with only system tools, including a project path with spaces.
+if (process.platform === "darwin") {
+  const hookRoot = fs.mkdtempSync(path.join(os.tmpdir(), "miniapp preview hook "));
+  try {
+    fs.mkdirSync(path.join(hookRoot, "scripts"));
+    for (const file of ["node.sh", "sync-dev-backend.sh", "sync-dev-backend.cjs"]) {
+      fs.copyFileSync(path.join(__dirname, file), path.join(hookRoot, "scripts", file));
+    }
+    fs.writeFileSync(path.join(hookRoot, ".miniapp-dev.local.json"), JSON.stringify({ host: "192.168.5.6" }));
+    const result = spawnSync("/bin/sh", ["-c", config.scripts.beforePreview], {
+      cwd: hookRoot, env: { ...process.env, PATH: "/usr/bin:/bin:/usr/sbin:/sbin" }, encoding: "utf8", timeout: 10000,
+    });
+    assert.equal(result.error, undefined);
+    assert.equal(result.status, 0, `desktop preview hook must find installed Node: ${result.stderr}`);
+    assert.match(fs.readFileSync(path.join(hookRoot, outputRelativePath), "utf8"), /http:\/\/192\.168\.5\.6:3000/);
+    console.log("PASS configured preview hook with desktop PATH and a project path containing spaces");
+  } finally {
+    fs.rmSync(hookRoot, { recursive: true, force: true });
+  }
+}

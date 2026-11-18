@@ -1,15 +1,17 @@
-export type UiSlot = "scene" | "top" | "overlay" | "bottom";
+export type UiSlot = "scene" | "top" | "top-center" | "overlay" | "bottom";
 export type DebugItem = { key: string; label: string; value: string; level?: "info" | "warning" | "error"; order?: number };
 export type ModuleAction = { moduleId: string; action: string; payload?: any };
 export type ModuleDefinition = {
   id: string; slot: UiSlot; order?: number;
   navigation?: { label: string; icon: string };
+  /** False keeps this panel closed when it becomes the automatic selection. */
+  autoExpand?: boolean;
   actions?: Record<string, (payload: any) => unknown>;
   onActivate?: () => void;
 };
 export const emptyUiSnapshot = () => ({ bottomNavItems: [] as { key: string; label: string; icon: string; badge: string }[],
   activeBottomPanel: "", bottomPanelExpanded: true, debugItems: [] as DebugItem[],
-  slots: { scene: [] as string[], top: [] as string[], overlay: [] as string[], bottom: [] as string[] } });
+  slots: { scene: [] as string[], top: [] as string[], "top-center": [] as string[], overlay: [] as string[], bottom: [] as string[] } });
 type Snapshot = ReturnType<typeof emptyUiSnapshot>;
 
 /** Per-page registry. It owns selection, scoped actions and diagnostic contributions, never business state. */
@@ -20,7 +22,12 @@ export function createUiRegistry(onChange: (snapshot: Snapshot) => void) {
     if (disposed || batching) return;
     const sorted = [...modules.values()].sort((a, b) => (a.definition.order || 0) - (b.definition.order || 0));
     const available = sorted.filter(m => m.enabled && m.definition.slot === "bottom" && m.definition.navigation);
-    if (!chosen || !available.some(m => m.definition.id === selected)) selected = available[0]?.definition.id || "";
+    if (!chosen || !available.some(m => m.definition.id === selected)) {
+      const fallback = available[0];
+      const next = fallback?.definition.id || "";
+      if (next !== selected) expanded = fallback?.definition.autoExpand !== false;
+      selected = next;
+    }
     const snapshot = emptyUiSnapshot();
     snapshot.activeBottomPanel = selected;
     snapshot.bottomPanelExpanded = expanded;
@@ -41,7 +48,7 @@ export function createUiRegistry(onChange: (snapshot: Snapshot) => void) {
     register(definition: ModuleDefinition) {
       if (disposed) throw new Error("AR UI registry is disposed");
       if (!definition.id || modules.has(definition.id)) throw new Error(`Duplicate AR UI module: ${definition.id}`);
-      if (!["scene", "top", "overlay", "bottom"].includes(definition.slot)) throw new Error(`Unknown AR UI slot: ${definition.slot}`);
+      if (!["scene", "top", "top-center", "overlay", "bottom"].includes(definition.slot)) throw new Error(`Unknown AR UI slot: ${definition.slot}`);
       if (definition.navigation && definition.slot !== "bottom") throw new Error("Only bottom modules can register navigation");
       const entry = { definition, enabled: false, badge: "", debug: [] as DebugItem[] };
       modules.set(definition.id, entry);

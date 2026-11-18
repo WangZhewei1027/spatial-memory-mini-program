@@ -13,6 +13,7 @@ import {
   WorkspaceSummary,
 } from "../../utils/backend";
 import { reportError } from "../../utils/report-error";
+import { usesSimulatedCamera } from "../../utils/camera-environment";
 
 /** 历史记录在下拉菜单中的展示形态 */
 interface HistoryItem extends ScanHistoryEntry {
@@ -27,8 +28,8 @@ interface HistoryItem extends ScanHistoryEntry {
 /** AR 体验依赖的授权 scope 及其展示名 */
 const REQUIRED_SCOPES: { scope: keyof WechatMiniprogram.AuthSetting; label: string }[] = [
   { scope: "scope.userLocation", label: "位置" },
-  { scope: "scope.camera", label: "相机" },
 ];
+if (!usesSimulatedCamera()) REQUIRED_SCOPES.push({ scope: "scope.camera", label: "相机" });
 
 Page({
   data: {

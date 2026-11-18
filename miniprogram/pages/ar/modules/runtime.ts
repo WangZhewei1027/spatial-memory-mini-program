@@ -23,7 +23,9 @@ export const runtimeMethods = {
     this.syncUI();
   },
   onRenderStatus(event: DetailEvent) {
-    this.setData({ runtimeState: event.detail.state || "未知", runtimeError: event.detail.state === "error" ? event.detail.message || "相机异常" : "" });
+    const { state, renderer, message } = event.detail;
+    this.setData({ runtimeState: renderer === "simulated-three" && state === "trackingready" ? "模拟画面" : state || "未知",
+      runtimeError: state === "error" ? message || "相机异常" : "" });
     this.syncUI();
   },
 } satisfies ThisType<ArPageContext>;

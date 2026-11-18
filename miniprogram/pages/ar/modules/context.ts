@@ -3,10 +3,11 @@ import type { recognitionData } from "./recognition";
 import type { runtimeData } from "./runtime";
 import type { sensorData } from "./sensors";
 import type { uiData } from "./ui";
+import type { shopData } from "./shop";
 import type { ActivityPlacement } from "../../../utils/activity-state";
 
 /** Composition-time host contract; feature modules retain their own data and actions. */
-type ArPageData = typeof activityData & typeof recognitionData & typeof runtimeData & typeof sensorData & typeof uiData & {
+type ArPageData = typeof activityData & typeof recognitionData & typeof runtimeData & typeof sensorData & typeof uiData & typeof shopData & {
   width: number; height: number; renderWidth: number; renderHeight: number;
 };
 export type DetailEvent = Pick<WechatMiniprogram.CustomEvent, "detail">;

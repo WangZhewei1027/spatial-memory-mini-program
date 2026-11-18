@@ -1,0 +1,13 @@
+<!-- 导航方向覆层 -->
+<view class="nav-overlay ar-theme" wx:if="{{active && navigation.visible}}">
+  <view class="nav-compass-ring">
+    <view class="nav-arrow-wrap" style="transform: rotate({{navigation.angle}}deg)">
+      <view class="nav-arrow-head"></view>
+      <view class="nav-arrow-tail"></view>
+    </view>
+  </view>
+  <view class="nav-info-row">
+    <text class="nav-shop-name">{{navigation.title}}</text>
+    <text class="nav-dist">{{navigation.distance}}</text>
+  </view>
+</view>

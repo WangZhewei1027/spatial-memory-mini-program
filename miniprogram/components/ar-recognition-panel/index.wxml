@@ -1,8 +1,0 @@
-<view wx:if="{{active}}" class="feature-panel recognition-panel ar-theme">
-  <view wx:if="{{hintActive}}" class="recognition-hint-border" aria-hidden="true"></view>
-  <view class="panel-heading">
-    <text class="panel-title">{{hintActive ? '画面中可能有目标' : '匹配识别'}}</text>
-    <button size="mini" class="panel-action" bindtap="onRescan">重新扫描</button>
-  </view>
-  <text class="retrieval-status">{{status}}</text>
-</view>

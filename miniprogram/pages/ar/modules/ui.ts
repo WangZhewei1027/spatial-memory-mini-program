@@ -4,6 +4,7 @@ import { registerActivities } from "./activities";
 import { registerRecognition } from "./recognition";
 import { registerRuntime } from "./runtime";
 import { registerSensors } from "./sensors";
+import { registerShop } from "./shop";
 
 export const uiData = { ...emptyUiSnapshot(), keyboardHeight: 0 };
 export const uiMethods = {
@@ -15,7 +16,7 @@ export const uiMethods = {
       this.setData({ ...snapshot, ...(selectionChanged ? { keyboardHeight: 0 } : {}) });
     });
     (this as any)._uiRegistry = registry;
-    (this as any)._uiModules = [registerRuntime(this, registry), registerRecognition(this, registry), registerActivities(this, registry), registerSensors(this, registry)];
+    (this as any)._uiModules = [registerRuntime(this, registry), registerRecognition(this, registry), registerActivities(this, registry), registerShop(this, registry), registerSensors(this, registry)];
   },
   syncUI() {
     if ((this as any)._unloaded) return;

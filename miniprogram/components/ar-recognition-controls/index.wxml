@@ -1,0 +1,8 @@
+<view class="recognition-controls ar-theme">
+  <view wx:if="{{hintActive}}" class="recognition-hint-border" aria-hidden="true"></view>
+  <view class="recognition-copy">
+    <text class="recognition-title">{{hintActive ? '画面中可能有目标' : '图像识别'}}</text>
+    <text class="recognition-status">{{status}}</text>
+  </view>
+  <button size="mini" class="rescan-button" bindtap="onRescan">重新扫描</button>
+</view>

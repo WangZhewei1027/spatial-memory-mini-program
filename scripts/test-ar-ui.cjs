@@ -64,11 +64,43 @@ assert.equal(snapshots.length, beforeDispose, "disposed page ignores callbacks")
 assert.throws(() => registry.register({ id: "late", slot: "top" }), /disposed/);
 console.log("PASS AR UI slots, scoped actions/debug, selection, batching, unregister and per-page disposal");
 
+{
+  let snapshot, opened = 0;
+  const ui = createUiRegistry(value => { snapshot = value; });
+  const manual = ui.register({ id: "manual", slot: "bottom", autoExpand: false,
+    navigation: { label: "Manual", icon: "manual" }, onActivate() { opened++; } });
+  const compass = ui.register({ id: "compass", slot: "top-center" });
+  ui.batch(() => { manual.update({ enabled: true }); compass.update({ enabled: true }); });
+  assert.equal(snapshot.activeBottomPanel, "manual");
+  assert.equal(snapshot.bottomPanelExpanded, false, "an opt-in feature does not open just because it is the only entry");
+  assert.deepEqual(Array.from(snapshot.slots["top-center"]), ["compass"]);
+  assert.equal(opened, 0);
+  ui.select("compass");
+  assert.equal(snapshot.bottomPanelExpanded, false, "top-center is a presentation slot, not a bottom entry");
+  manual.update({ enabled: true });
+  assert.equal(opened, 0, "background availability updates cannot activate an opt-in feature");
+  ui.select("manual");
+  assert.equal(snapshot.bottomPanelExpanded, true);
+  assert.equal(opened, 1, "the first tap opens the automatically selected but collapsed feature");
+  ui.select("manual"); manual.update({ enabled: true });
+  assert.equal(snapshot.bottomPanelExpanded, false);
+  manual.update({ enabled: false }); manual.update({ enabled: true });
+  assert.equal(snapshot.bottomPanelExpanded, false, "returning availability still requires a tap");
+  assert.equal(opened, 1);
+  compass.unregister();
+  assert.equal(snapshot.slots["top-center"].length, 0);
+  ui.dispose();
+}
+console.log("PASS top-center contributions and explicit activation of opt-in panels");
+
 const recognitionModule = { exports: {} };
 const recognitionFile = path.resolve(__dirname, "../miniprogram/pages/ar/modules/recognition.ts");
 vm.runInNewContext(transformSync(fs.readFileSync(recognitionFile, "utf8"), { loader: "ts", format: "cjs" }).code,
   { module: recognitionModule, exports: recognitionModule.exports });
 const recognition = recognitionModule.exports;
+const controlsTag = fs.readFileSync(path.resolve(__dirname, "../miniprogram/pages/ar/ar.wxml"), "utf8").match(/<ar-recognition-controls\b[^>]+>/)[0];
+assert.match(controlsTag, /slot="top-center"/);
+const controlsCondition = controlsTag.match(/wx:if="\{\{(.*?)\}\}"/)[1];
 for (const mode of ["hybrid", "anchor", "gps"]) {
   let snapshot, binding, rescans = 0;
   const ui = createUiRegistry(value => { snapshot = value; });
@@ -78,13 +110,20 @@ for (const mode of ["hybrid", "anchor", "gps"]) {
     selectComponent() { return { rescan() { rescans++; } }; },
   };
   binding = recognition.registerRecognition(page, ui); binding.sync();
-  assert.equal(snapshot.bottomNavItems.some(item => item.key === "recognition"), mode !== "gps");
+  assert.equal(snapshot.bottomNavItems.length, 0, "recognition never registers as an activity, even without other modules");
+  assert.equal(snapshot.slots["top-center"].includes("recognition"), mode !== "gps");
+  assert.equal(vm.runInNewContext(controlsCondition, page.data), mode !== "gps", "recognition controls do not need an activity panel");
+  ui.select("recognition");
+  assert.equal(snapshot.activeBottomPanel, "", "recognition cannot be selected as a bottom activity");
   page.onRecognitionHint({ detail: { mode, active: true } });
   assert.equal(page.data.recognitionHintActive, mode !== "gps");
-  page.onRescan(); assert.equal(rescans, mode === "gps" ? 0 : 1);
+  assert.equal(ui.dispatch({ moduleId: "recognition", action: "rescan" }), mode !== "gps");
+  assert.equal(rescans, mode === "gps" ? 0 : 1);
   assert.equal(page.data.recognitionHintActive, false);
   page.data.mapConfigReady = false; binding.sync();
-  assert.equal(snapshot.bottomNavItems.length, 0, "recognition waits for a valid map config");
+  assert.equal(snapshot.slots["top-center"].length, 0, "recognition waits for a valid map config");
+  assert.equal(vm.runInNewContext(controlsCondition, page.data), false);
+  assert.equal(ui.dispatch({ moduleId: "recognition", action: "rescan" }), false);
   ui.dispose();
 }
-console.log("PASS hybrid and image recognition expose hints/rescan; GPS and unloaded maps hide recognition");
+console.log("PASS recognition controls live outside activity navigation and retain hints/rescan in hybrid and image modes");

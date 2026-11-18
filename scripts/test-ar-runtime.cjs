@@ -321,6 +321,38 @@ async function main() {
   console.log("PASS audio asset package: lazy load, actual model, download fallback, cancellation cleanup and media audio route");
 
   const { ARRuntime } = lib("ar-runtime");
+  {
+    const { usesSimulatedCamera } = load(path.join(root, "utils/camera-environment"));
+    const accountInfo = wx.getAccountInfoSync;
+    for (const envVersion of ["develop", "trial", "release", undefined]) {
+      for (const platform of ["devtools", "ios", "android", undefined]) {
+        wx.getAccountInfoSync = () => ({ miniProgram: { envVersion } });
+        wx.getDeviceInfo = () => ({ platform });
+        assert.equal(usesSimulatedCamera(), envVersion === "develop" && platform === "devtools");
+      }
+    }
+    wx.getAccountInfoSync = accountInfo;
+    delete wx.getDeviceInfo;
+    const { SimulatedCameraSession } = lib("simulated-camera");
+    const pending = new Map(), errors = [];
+    let id = 0, frames = 0;
+    const session = new SimulatedCameraSession({
+      requestAnimationFrame(callback) { pending.set(++id, callback); return id; },
+      cancelAnimationFrame(handle) { pending.delete(handle); },
+    }, () => { frames++; }, (state, message) => { if (state === "error") errors.push(message); });
+    session.start();
+    const stale = pending.get(id);
+    session.stop();
+    assert.equal(pending.size, 0);
+    session.start();
+    const before = frames;
+    stale();
+    assert.equal(frames, before);
+    assert.equal(pending.size, 1, "a stale callback cannot restart the old camera loop");
+    session.stop();
+    assert.deepEqual(errors, []);
+    console.log("PASS simulator camera routing by environment and platform; hide/re-entry cancels stale frames");
+  }
   const { RenderLayers } = lib("render-layers");
   const attachLayers = (runtime) => runtime.layers = new RenderLayers({ renderer: runtime.renderer,
     camera: runtime.camera, onError: ({ error }) => { throw error; },
@@ -436,6 +468,22 @@ async function main() {
   host.loadMapConfig = () => {};
   component.lifetimes.attached.call(host);
   host._mapConfigReady = true;
+  {
+    const events = [];
+    const simulator = { ...host, data: { simulatedCamera: true }, _sessionActive: true,
+      setData(patch) { Object.assign(this.data, patch); },
+      triggerEvent(name, detail) { events.push({ name, ...detail }); },
+      retrievalMode: "anchor", _ensureARSession() { throw new Error("rescan restarted the camera"); },
+    };
+    simulator.handleARReady();
+    simulator.rescan();
+    simulator._startMatchDiagnostics();
+    assert.equal(simulator.data.cameraReady, true);
+    assert.equal(simulator.data.arReady, true);
+    assert.ok(events.some(event => event.name === "recognitionstatus" && event.message.includes("模拟画面")));
+    assert.equal(simulator._imageMatcher, null);
+    assert.equal(simulator._matchDiagnostics, null);
+  }
   host._runtime = {
     camera: new THREE.PerspectiveCamera(),
     renderer: { render() {}, clearDepth() {} },

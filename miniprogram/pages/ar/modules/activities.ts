@@ -6,10 +6,9 @@ import { acceptActivityDiscovery, activityParticipantId, activityRequestKey, dan
 import type { createUiRegistry } from "../../../utils/ar-ui/registry";
 
 export const activityData = {
-  textContent: "", isSubmitting: false, canSubmit: false, showShopPanel: false, shopCheckinEnabled: false,
+  textContent: "", isSubmitting: false, canSubmit: false, shopCheckinEnabled: false,
   shopActivities: [] as ActivityPlacement[], danmakuActivities: [] as ActivityPlacement[], activeDanmaku: null as ActivityPlacement | null,
   selectedDanmakuIdx: 0, danmakuLimit: 200, danmakuInRange: false, activitiesLoading: false, activitiesError: "",
-  shopNavigation: { visible: false, title: "", distance: "", angle: 0 }, shopReward: { visible: false, title: "", image: "" },
 };
 export const activityMethods = {
   onTextInput(e: DetailEvent) {
@@ -25,7 +24,7 @@ export const activityMethods = {
     const workspaceId = CONFIG.workspaceId;
     const organizationId = CONFIG.organizationId;
     if (!organizationId || CONFIG.sceneId) {
-      this.setData({ shopActivities: [], danmakuActivities: [], activeDanmaku: null, shopCheckinEnabled: false, showShopPanel: false, canSubmit: false, activitiesLoading: false, activitiesError: "" });
+      this.setData({ shopActivities: [], danmakuActivities: [], activeDanmaku: null, shopCheckinEnabled: false, canSubmit: false, activitiesLoading: false, activitiesError: "" });
       this.syncUI();
       return;
     }
@@ -43,7 +42,7 @@ export const activityMethods = {
       if (!this.applyActivities([], discoverySequence)) return;
       console.error("[活动] 加载失败:", error);
       reportError("activities.load", error);
-      this.setData({ shopActivities: [], danmakuActivities: [], activeDanmaku: null, shopCheckinEnabled: false, showShopPanel: false, canSubmit: false, activitiesError: "活动加载失败，点击重试" });
+      this.setData({ shopActivities: [], danmakuActivities: [], activeDanmaku: null, shopCheckinEnabled: false, canSubmit: false, activitiesError: "活动加载失败，点击重试" });
       this.selectComponent("#main-frame")?.setNavigationTarget(null);
     } finally {
       if (!(this as any)._unloaded && requestId === (this as any)._activityRequest) {
@@ -72,7 +71,7 @@ export const activityMethods = {
     const selected = Math.max(0, danmakuActivities.findIndex((activity) => activity.id === this.data.activeDanmaku?.id));
     const activeDanmaku = danmakuActivities[selected] || null;
     this.setData({ shopActivities, danmakuActivities, activeDanmaku, selectedDanmakuIdx: selected, danmakuLimit: danmakuMaxLength(activeDanmaku),
-      shopCheckinEnabled: shopActivities.length > 0, showShopPanel: shopActivities.length > 0 && this.data.showShopPanel });
+      shopCheckinEnabled: shopActivities.length > 0 });
     this.selectComponent("#main-frame")?.applyActivityAvailability?.(activities, discoverySequence);
     if (!shopActivities.length) this.selectComponent("#main-frame")?.setNavigationTarget(null);
     this.refreshCanSubmit();
@@ -141,21 +140,9 @@ export function registerActivities(page: ArPageContext, registry: ReturnType<typ
       submit: () => page.submitText(), retry: () => page.refreshActivities(),
       keyboard: payload => page.onKeyboardHeightChange({ detail: payload }), blur: () => page.onComposerBlur(),
     } });
-  const shop = registry.register({ id: "shop", slot: "bottom", order: 30,
-    navigation: { label: "打卡", icon: "circle-check-big" },
-    onActivate() { if (page.data.showShopPanel) page.selectComponent("#shop-checkin")?.loadProgress?.(); else page.setData({ showShopPanel: true }); },
-    actions: {
-      target: ({ shop }: any) => { page.selectComponent("#main-frame")?.setNavigationTarget(shop); if (!shop) page.setData({ shopNavigation: { visible: false, title: "", distance: "", angle: 0 } }); },
-      compass: navigation => page.setData({ shopNavigation: navigation }), reward: reward => page.setData({ shopReward: reward }),
-      closeReward: () => page.selectComponent("#shop-checkin")?.closeCheckinModal(), saveReward: () => page.selectComponent("#shop-checkin")?.saveCheckinImage(),
-    } });
-  const overlays = registry.register({ id: "shop-overlays", slot: "overlay", order: 20 });
   return { sync() {
     const d = page.data;
     danmaku.update({ enabled: !!d.activeDanmaku || d.activitiesLoading || !!d.activitiesError, badge: d.activitiesError ? "warning" : "" });
-    shop.update({ enabled: d.mapConfigReady && d.shopCheckinEnabled });
-    overlays.update({ enabled: d.mapConfigReady && d.shopCheckinEnabled });
     danmaku.publishDebug([{ key: "activities", label: "活动", value: d.activitiesError ? "读取失败" : d.activitiesLoading ? "加载中" : `${d.danmakuActivities.length} 留言 / ${d.shopActivities.length} 打卡`, level: d.activitiesError ? "error" : "info", order: 60 }]);
-    if (!d.shopCheckinEnabled && (d.shopNavigation.visible || d.shopReward.visible)) page.setData({ shopNavigation: activityData.shopNavigation, shopReward: activityData.shopReward });
   } };
 }

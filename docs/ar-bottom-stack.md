@@ -1,6 +1,6 @@
 # AR 页面 Slots、调试栏与功能导航
 
-`pages/ar/ar` 负责组合模块与页面生命周期。`ar-shell` 使用原生 `multipleSlots: true`，将场景、顶部诊断、业务覆层和底部操作分开，保留主要 AR 观看区域。定位由传感器模块提供，不作为底部业务入口；`retrievalMode` 只决定普通素材怎样发现，不决定能否参与活动。
+`pages/ar/ar` 负责组合模块与页面生命周期。`ar-shell` 使用原生 `multipleSlots: true`，将场景、顶部诊断、顶部居中提示、业务覆层和底部操作分开，保留主要 AR 观看区域。定位由传感器模块提供，不作为底部业务入口；`retrievalMode` 只决定普通素材怎样发现，不决定能否参与活动。
 
 ## 页面装配
 
@@ -8,12 +8,13 @@
 | --- | --- | --- |
 | `scene` | `xr-start` | 相机、识别与空间内容 |
 | `top` | `ar-debug-bar` | 单行诊断，可横向滚动 |
-| `overlay` | Logo、`ar-shop-overlays` | 品牌、打卡罗盘与奖励弹窗 |
-| `bottom` | `ar-recognition-panel`、`ar-danmaku-panel`、`shop-checkin` | 当前业务面板；图标导航由 shell 统一绘制 |
+| `top-center` | `ar-recognition-controls`、`ar-shop-compass` | 诊断栏下方的识别控件与打卡罗盘；纵向排列，位置由 shell 管理 |
+| `overlay` | Logo、`ar-shop-overlays` | 品牌与打卡奖励弹窗 |
+| `bottom` | `ar-danmaku-panel`、`shop-checkin` | 当前活动面板；活动导航由 shell 统一绘制 |
 
 静态组件声明在 [`ar.json`](../miniprogram/pages/ar/ar.json)，slot 装配在 [`ar.wxml`](../miniprogram/pages/ar/ar.wxml)，布局在 [`ar-shell`](../miniprogram/components/ar-shell/index.wxml)。注册表提供模块可用状态、顺序、导航、动作和调试分发，不动态加载任意 WXML；新增界面仍须在 `usingComponents` 与页面模板中声明。
 
-页面方法按 [`pages/ar/modules/`](../miniprogram/pages/ar/modules/) 拆分：`context.ts` 定义组合接口，`ui.ts` 管理注册表与事件转发，`activities.ts` 管理留言和打卡动作，`recognition.ts` 接收识别状态，`runtime.ts` 接收地图和相机状态，`sensors.ts` 管理定位、罗盘及订阅释放。
+页面方法按 [`pages/ar/modules/`](../miniprogram/pages/ar/modules/) 拆分：`context.ts` 定义组合接口，`ui.ts` 管理注册表与事件转发，`activities.ts` 管理活动可用性和留言，`shop.ts` 管理打卡面板激活、导航和奖励动作，`recognition.ts` 接收识别状态，`runtime.ts` 接收地图和相机状态，`sensors.ts` 管理定位、罗盘及订阅释放。
 
 ## 导航与状态保留
 
@@ -21,21 +22,24 @@
 
 | 入口 | 显示条件 | 业务内容 |
 | --- | --- | --- |
-| 识别 | 地图配置就绪且为 `anchor` 模式 | 面向访客的识别提示、重新扫描 |
 | 留言 | 有 `activeDanmaku`，或活动正在加载、加载失败 | 活动选择、字数、范围提示、输入与发送、加载及重试提示 |
 | 打卡 | 地图配置就绪且 `shopCheckinEnabled` | 活动选择、服务端进度、打卡点距离与操作 |
 
 注册表输出 `bottomNavItems`、`activeBottomPanel`、`bottomPanelExpanded`。未手动选择时默认第一个可用入口；手动选择仍可用时保留，否则回到第一个可用入口。没有可用业务时不绘制底栏，顶部诊断仍可显示。
 
-图像识别的低阈值线索只在识别面板内沿显示呼吸边框，并提示“画面中可能有目标”。navbar 保持原样，图标和标签不闪烁；提示不会改变当前入口或展开状态，面板不显示时不绘制边框。具体相似度门槛与失效规则见[识别流程](anchor-recognition.md#调度与释放)。
+底部模块可声明 `autoExpand: false`，在自动选中或回退到该模块时保持收起，点击后才展开并调用 `onActivate`。打卡采用此设置：即使地图只有打卡活动，也不会自动加载进度或启动导航；其他模块默认展开。后台同步不会重新展开已收起的面板。
+
+识别是 AR 通用能力，不注册底部活动导航。地图配置就绪且为 `anchor` 或 `hybrid` 模式时，`ar-recognition-controls` 在 `top-center` 显示识别状态与“重新扫描”，没有活动或活动面板收起时仍可使用；GPS 模式隐藏。低阈值线索只在识别控件内沿显示呼吸边框，并提示“画面中可能有目标”，不改变活动选择、展开状态或输入焦点。具体相似度门槛与失效规则见[识别流程](anchor-recognition.md#调度与释放)。
 
 shell 的 `panelchange` 经 `onPanelChange()` 转给注册表 `select()`：切换入口时展开对应面板，再次点击当前入口可收起或展开。标签切换不会关闭业务模块或重新挂载 `xr-start`。留言草稿和所选活动继续保留；打卡组件在启用期间保持挂载，首次打开后保留 `visible`，`panelCollapsed` 只隐藏详情列表。`onActivate` 在重新打开打卡面板时刷新服务端进度。
 
-打卡业务组件通过 `shop` 模块发布 `target`、`compass`、`reward` 动作：目标转给 XR，罗盘与奖励状态转给独立的 `ar-shop-overlays`。覆层再发送 `closeReward`、`saveReward`，由注册动作调用打卡组件。覆层不占底部面板高度，切换标签不丢失当前导航、奖励或在途请求。
+打卡业务组件通过 `shop` 模块发布 `target`、`compass`、`reward` 动作：目标转给 XR，导航数据交给 `ar-shop-compass`，奖励交给 `ar-shop-overlays`。`shop.ts` 将三个展示位置分别注册为 `shop`（`bottom`）、`shop-compass`（`top-center`）、`shop-overlays`（`overlay`）；shell 负责位置，展示组件只绘制数据。
+
+罗盘只在打卡面板展开且有有效导航数据时显示，切换标签或收起面板时隐藏。导航数据、当前店铺、进度和在途请求继续保留，迟到进度响应或罗盘传感器更新不能绕过显示条件。奖励弹窗独立于面板展开状态，通过 `closeReward`、`saveReward` 回传操作；活动移除时清理各展示状态及 slot 可用性。
 
 ## 调试与模块接口
 
-顶部汇总 GPS 精度、经纬度、海拔、朝向、相机状态、活动加载状态和匹配数据；底部保留用户需要采取行动的提示、活动选择、范围、距离与打卡进度。识别事件 `recognitionstatus` 的 `message` 用于业务面板，`diagnostic`、`phase` 用于顶部；技术准备数量、确认次数和原始错误进入诊断。`matchprogress` 保留原接口并进入顶部。字段详情见 [识别流程](anchor-recognition.md#页面状态接口)。
+顶部诊断栏汇总 GPS 精度、经纬度、海拔、朝向、相机状态、活动加载状态和匹配数据；底部仅承载活动选择、范围、距离、打卡进度与留言操作。识别事件 `recognitionstatus` 的 `message` 用于顶部识别控件，`diagnostic`、`phase` 用于顶部；技术准备数量、确认次数和原始错误进入诊断。`matchprogress` 保留原接口并进入顶部。字段详情见 [识别流程](anchor-recognition.md#页面状态接口)。
 
 [`createUiRegistry`](../miniprogram/utils/ar-ui/registry.ts) 每页创建一次，不拥有业务数据。`register()` 返回 `update()`、`publishDebug()`、`unregister()`；`batch()` 合并状态同步，`select()` 管理面板，`dispatch()` 仅执行已启用模块声明的动作，`dispose()` 在页面退出时释放注册。调试贡献独立于模块启用状态，模块应以 `publishDebug([])` 主动清除；每次发布替换该模块的完整调试列表。
 

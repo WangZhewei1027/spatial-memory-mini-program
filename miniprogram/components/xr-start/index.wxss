@@ -1,5 +1,14 @@
 :host { display:block; width:100%; height:100%; }
 .ar-renderer { width:100%;height:100%;position:relative;background:#14202b; }
-.ar-canvas { width:100%;height:100%; }
+.simulated-view {
+  position:absolute; inset:0; overflow:hidden; pointer-events:none;
+  background:linear-gradient(180deg,#91aebc 0%,#dce6e6 48%,#859596 48.2%,#526667 100%);
+}
+.simulated-floor {
+  position:absolute; inset:48% 0 0;
+  background-image:repeating-conic-gradient(from 0deg at 50% -4%,rgba(225,238,237,.35) 0deg .3deg,transparent .3deg 12deg),
+    linear-gradient(to bottom,transparent 7%,rgba(225,238,237,.3) 7.2%,transparent 7.4% 16%,rgba(225,238,237,.3) 16.2%,transparent 16.4% 32%,rgba(225,238,237,.3) 32.2%,transparent 32.4% 62%,rgba(225,238,237,.3) 62.2%,transparent 62.4%);
+}
+.ar-canvas { position:relative;width:100%;height:100%; }
 .ar-message { position:absolute;top:35%;left:24px;right:24px;padding:20px;background:rgba(10,18,28,.85);color:#fff;border-radius:12px;text-align:center;font-size:14px; }
 .ar-message text { display:block;line-height:1.6;margin-bottom:12px; }

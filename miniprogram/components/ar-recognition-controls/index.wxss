@@ -1,0 +1,47 @@
+@import "../../styles/ar-theme.wxss";
+:host { display: block; width: 100%; max-width: 640rpx; }
+.recognition-controls {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 20rpx;
+  padding: 16rpx 20rpx;
+  border-radius: 20rpx;
+  background: rgba(0, 0, 0, 0.8);
+}
+.recognition-copy { display: flex; flex-direction: column; gap: 4rpx; flex: 1; min-width: 0; }
+.recognition-title { color: var(--ar-accent-text); font-size: 24rpx; font-weight: 600; }
+.recognition-status { color: #f5f5f3; font-size: 22rpx; line-height: 32rpx; }
+.recognition-controls .rescan-button {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 12rpx 20rpx;
+  border-radius: 12rpx;
+  color: var(--ar-accent-text);
+  background: var(--ar-accent-muted);
+  font-size: 24rpx;
+  line-height: 40rpx;
+  pointer-events: auto;
+}
+.rescan-button::after { border: none; }
+.rescan-button:active { opacity: 0.7; }
+/* Keep the hint local to the AR controls without changing activity navigation. */
+.recognition-hint-border {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 3rpx var(--ar-accent);
+  pointer-events: none;
+  opacity: 0.8;
+  animation: recognition-border-pulse 1.6s ease-in-out infinite;
+}
+@keyframes recognition-border-pulse {
+  0%, 100% { opacity: 0.25; }
+  50% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .recognition-hint-border { animation: none; opacity: 0.8; }
+}

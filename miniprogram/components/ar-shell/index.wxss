@@ -2,6 +2,19 @@
 :host { display: block; width: 100%; height: 100%; }
 .ar-shell, .scene-slot { position: relative; width: 100%; height: 100%; }
 .top-slot { position: fixed; top: 0; left: 0; right: 0; height: var(--ar-debug-height); z-index: 110; }
+.top-center-slot {
+  position: fixed;
+  top: calc(var(--ar-debug-height) + 24rpx);
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(100% - 32rpx);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16rpx;
+  z-index: 90;
+  pointer-events: none;
+}
 .overlay-slot { position: relative; z-index: 120; }
 .bottom-area {
   position: fixed;

@@ -11,6 +11,16 @@ const point = (n) => ({ id: uuid(200 + n), point_id: uuid(200 + n), name: `Point
 const activity = (n, type = "danmaku", points = []) => ({ id: uuid(n), activity_id: uuid(20 + n), workspace_id: uuid(900 + n), workspace_name: `Map ${n}`, type, name: `Activity ${n}`, display_name: `Activity ${n}`, config: {}, location: null, radius_meters: null, points });
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
+// Evaluate the production bindings as well as the page state; retained navigation
+// data must not make the compass visible outside its active panel.
+const arWxml = fs.readFileSync(path.join(root, "pages/ar/ar.wxml"), "utf8");
+const compassBinding = arWxml.match(/<ar-shop-compass\b[\s\S]*?active="\{\{(.*?)\}\}"/)[1];
+const compassCondition = fs.readFileSync(path.join(root, "components/ar-shop-compass/index.wxml"), "utf8").match(/wx:if="\{\{(.*?)\}\}"/)[1];
+function compassVisible(page) {
+  const active = vm.runInNewContext(compassBinding, page.data);
+  return vm.runInNewContext(compassCondition, { active, navigation: page.data.shopNavigation });
+}
+
 function launch(storage = new Map()) {
   const calls = { requests: [], toasts: [], writes: [], navigation: [], danmaku: [], reports: [], keyboardHides: 0, retrieval: [], moduleActions: [], headings: [], sensorStops: 0 };
   let sensorTime = Date.now(), compassCallback;
@@ -111,7 +121,7 @@ async function main() {
   assert.equal(sensorPage.data.compassHeading, 359, "late sensor callbacks cannot update an unloaded page");
   assert.equal(sensors.calls.sensorStops, 1);
 
-  // Recognition hints only decorate navigation; they never take over a panel or
+  // Recognition hints only decorate the AR controls; they never take over a panel or
   // revive after a map/page lifecycle reset, even if status and hint arrive apart.
   {
     const hints = launch(), hintPage = hints.page(), activities = [activity(31), activity(32)];
@@ -121,11 +131,11 @@ async function main() {
     const hint = (active, mode = "anchor") => hintPage.onRecognitionHint({ detail: { mode, active } });
     const map = (retrievalMode = "anchor", ready = true) => hintPage.onMapConfigLoad({ detail: { ready, retrievalMode } });
     const status = (phase, locked = false) => hintPage.onRecognitionStatus({ detail: { mode: "anchor", phase, locked, message: phase } });
-    const navigation = () => hintPage.data.bottomNavItems.find(item => item.key === "recognition");
+    const recognitionAvailable = () => hintPage.data.slots["top-center"].includes("recognition");
     map(); hint(true);
     assert.equal(hintPage.data.recognitionHintActive, false, "events before the page is visible are ignored");
     hintPage.onShow(); hints.respond(200, activities); await tick();
-    hintPage.onPanelChange({ detail: { id: "recognition" } });
+    hintPage.onPanelChange({ detail: { id: "danmaku" } });
     assert.equal(hintPage.data.bottomPanelExpanded, false);
     const originalNavigation = copy(hintPage.data.bottomNavItems);
     hint(true);
@@ -145,7 +155,9 @@ async function main() {
     const keyboardHides = hints.calls.keyboardHides;
     hint(false); hint(true); status("reacquiring", true);
     assert.equal(hintPage.data.recognitionHintActive, true);
-    assert.equal(navigation().badge, "ready", "shown content remains ready while another target is hinted");
+    assert.equal(hintPage.data.recognitionLocked, true, "shown content remains locked while another target is hinted");
+    assert.equal(recognitionAvailable(), true);
+    assert.ok(!hintPage.data.bottomNavItems.some(item => item.key === "recognition"));
     assert.equal(hintPage.data.activeBottomPanel, "danmaku");
     assert.equal(hintPage.data.bottomPanelExpanded, true);
     assert.equal(hintPage.data.activeDanmaku.id, selectedActivity);
@@ -161,12 +173,12 @@ async function main() {
     assert.equal(hintPage.data.recognitionHintActive, false);
     hint(true); map("anchor", false); hint(true);
     assert.equal(hintPage.data.recognitionHintActive, false, "loading maps cannot accept hints");
-    assert.equal(navigation(), undefined);
+    assert.equal(recognitionAvailable(), false);
     map();
     assert.equal(hintPage.data.recognitionHintActive, false, "loaded maps never restore a previous hint");
     hint(true); map("gps"); hint(true);
     assert.equal(hintPage.data.recognitionHintActive, false, "GPS mode ignores anchor hints");
-    assert.equal(navigation(), undefined);
+    assert.equal(recognitionAvailable(), false);
     map(); hint(true); hintPage.onHide();
     assert.equal(hintPage.data.recognitionHintActive, false);
     const hiddenWrites = pageWrites;
@@ -232,9 +244,8 @@ async function main() {
   app.respond(200, { id: uuid(503), placement_id: uuid(2) }); await anchorSubmission;
   assert.equal(app.calls.danmaku.at(-1), "Hi", "matching uses acknowledged activity records too");
   const selectPanel = (panel) => page.onPanelChange({ detail: { id: panel } });
-  assert.deepEqual(copy(page.data.bottomNavItems.map(item => item.key)), ["recognition", "danmaku", "shop"]);
-  assert.equal(page.data.activeBottomPanel, "recognition", "a matching map starts with the recognition component");
-  selectPanel("danmaku");
+  assert.deepEqual(copy(page.data.bottomNavItems.map(item => item.key)), ["danmaku", "shop"]);
+  assert.equal(page.data.activeBottomPanel, "danmaku", "recognition mode does not determine the selected activity");
   page.onTextInput({ detail: { value: "Hi" } });
   page.onKeyboardHeightChange({ detail: { height: 280 } });
   assert.equal(page.data.keyboardHeight, 280);
@@ -243,12 +254,13 @@ async function main() {
   assert.equal(page.data.showShopPanel, true);
   assert.equal(app.calls.keyboardHides, 1);
   selectPanel("recognition");
+  assert.equal(page.data.activeBottomPanel, "shop", "recognition is not a selectable activity");
+  selectPanel("danmaku"); selectPanel("danmaku");
   assert.equal(page.data.showShopPanel, true, "switching tabs leaves shop navigation mounted and active");
   assert.equal(page.data.textContent, "Hi", "tab changes preserve the comment draft");
   assert.deepEqual(app.calls.retrieval, [], "navbar never pauses or restarts recognition");
   page.onKeyboardHeightChange({ detail: { height: 280 } });
   assert.equal(page.data.keyboardHeight, 0, "late keyboard events from a removed composer cannot move other panels");
-  selectPanel("recognition");
   assert.equal(page.data.bottomPanelExpanded, false);
   page.syncUI();
   assert.equal(page.data.bottomPanelExpanded, false, "discovery refresh does not reopen a collapsed panel");
@@ -260,7 +272,7 @@ async function main() {
   assert.equal(page.data.recognitionStatus, "正在准备图像识别…");
   assert.equal(page.data.debugItems.find(item => item.key === "recognition:status").value, "正在准备参考图（2/7）…");
   selectPanel("location"); selectPanel("unknown");
-  assert.equal(page.data.activeBottomPanel, "recognition", "diagnostics are not a business navigation item");
+  assert.equal(page.data.activeBottomPanel, "danmaku", "diagnostics are not a business navigation item");
   assert.equal(page.data.bottomPanelExpanded, false, "diagnostics cannot reopen the bottom panel");
   selectPanel("danmaku");
   assert.equal(page.data.textContent, "Hi");
@@ -277,22 +289,24 @@ async function main() {
   const composer = app.uiComponent("ar-danmaku-panel", (name, detail) => { assert.equal(name, "moduleaction"); page.onModuleAction({ detail }); });
   composer.onInput({ detail: { value: "OK" } });
   assert.equal(page.data.textContent, "OK", "presentation events reach the registered feature handler");
-  const recognitionPanel = app.uiComponent("ar-recognition-panel", (name, detail) => page.onModuleAction({ detail }));
-  recognitionPanel.onRescan();
+  const recognitionControls = app.uiComponent("ar-recognition-controls", (name, detail) => page.onModuleAction({ detail }));
+  recognitionControls.onRescan();
   assert.equal(app.calls.retrieval.at(-1), "rescan");
   assert.equal(page.onModuleAction({ detail: { moduleId: "recognition", action: "toString" } }), false);
   page.onModuleAction({ detail: { moduleId: "shop", action: "compass", payload: { visible: true, title: "Cafe", distance: "12m", angle: 90 } } });
   selectPanel("recognition");
-  assert.equal(page.data.shopNavigation.visible, true, "overlay presentation lives independently of the bottom panel");
+  assert.equal(page.data.shopNavigation.visible, true, "navigation data survives a panel switch");
+  assert.equal(compassVisible(page), false, "recognition actions do not open the shop compass");
   page.onHide();
   assert.equal(page.data.keyboardHeight, 0, "returning to AR cannot retain a stale keyboard offset");
   page._activityVisible = true;
   const refreshed = page.refreshActivities(); app.respond(200, []); await refreshed;
   assert.equal(page.data.shopCheckinEnabled, false);
   assert.equal(page.data.shopNavigation.visible, false, "removed deployments clear their overlay");
+  assert.deepEqual(copy(page.data.slots["top-center"]), ["recognition"], "removing shops retains the independent recognition controls");
   assert.equal(page.data.activeDanmaku, null);
-  assert.equal(page.data.activeBottomPanel, "recognition", "removed activity falls back to an available feature");
-  assert.deepEqual(copy(page.data.bottomNavItems.map(item => item.key)), ["recognition"]);
+  assert.equal(page.data.activeBottomPanel, "", "removing all activities leaves no bottom panel");
+  assert.deepEqual(copy(page.data.bottomNavItems), []);
   await page.submitText(); assert.equal(app.calls.requests.length, 0);
   const stale = page.refreshActivities(); page.onHide(); app.respond(200, definitions); await stale;
   assert.equal(page.data.activeDanmaku, null, "a response after hiding cannot re-enable activities");
@@ -317,6 +331,79 @@ async function main() {
   page.onActivitiesLoad({ detail: { activities: [], error: true, discoverySequence: newerDiscoverySequence } });
   assert.equal(page.data.danmakuActivities.length, 2, "an older XR failure cannot erase newer page discovery");
   console.log("PASS activity discovery, multiple deployments, scope/limits, disabled entry points and acknowledged/idempotent danmaku");
+
+  for (const mode of ["gps", "anchor", "hybrid"]) {
+    const shops = launch(), shopPage = shops.page();
+    const deployments = [activity(40, "shop_checkin", [point(1), point(2)])];
+    const { host: shop, definition } = shops.component(deployments);
+    const select = shopPage.selectComponent.bind(shopPage);
+    shopPage.selectComponent = id => id === "#shop-checkin" ? shop : select(id);
+    const setData = shopPage.setData.bind(shopPage);
+    shopPage.setData = patch => {
+      setData(patch);
+      if ("showShopPanel" in patch && shop.properties.visible !== patch.showShopPanel) {
+        shop.properties.visible = patch.showShopPanel;
+        definition.observers.visible.call(shop, patch.showShopPanel);
+      }
+    };
+    const trigger = shop.triggerEvent.bind(shop);
+    shop.triggerEvent = (name, detail) => {
+      trigger(name, detail);
+      if (name === "moduleaction") shopPage.onModuleAction({ detail });
+    };
+    const choose = id => shopPage.onPanelChange({ detail: { id } });
+    const apply = values => shopPage.applyActivities(values, shops.state.nextActivityDiscoverySequence());
+    shopPage.onMapConfigLoad({ detail: { ready: true, retrievalMode: mode } });
+    apply(deployments);
+    assert.deepEqual(copy(shopPage.data.slots["top-center"]), mode === "gps" ? ["shop-compass"] : ["recognition", "shop-compass"]);
+    assert.equal(shopPage.data.activeBottomPanel, "shop");
+    assert.equal(shopPage.data.bottomPanelExpanded, false, "even a shop-only map waits for a tap");
+    assert.equal(shopPage.data.showShopPanel, false);
+    assert.equal(compassVisible(shopPage), false);
+    assert.equal(shops.calls.requests.length, 0, "merely discovering shops does not start navigation or fetch progress");
+    shopPage.syncUI();
+    assert.equal(shopPage.data.showShopPanel, false);
+
+    choose("shop");
+    assert.equal(shopPage.data.bottomPanelExpanded, true);
+    assert.equal(shops.calls.requests.length, 1);
+    choose("shop"); // Collapse while progress is in flight.
+    shops.respond(200, { point_ids: [point(1).point_id] }); await tick();
+    assert.equal(shopPage.data.shopNavigation.visible, true);
+    assert.equal(compassVisible(shopPage), false, "a late progress response cannot reveal a collapsed compass");
+    assert.equal(shop.data.checkedInCount, 1);
+    choose("shop");
+    assert.equal(compassVisible(shopPage), true);
+    shops.respond(200, { point_ids: [point(1).point_id] }); await tick();
+    shop.onSwiperChange({ detail: { current: 1 } });
+    assert.equal(shopPage.data.shopNavigation.title, point(2).name);
+    shop._showReward(point(1));
+    apply([...deployments, activity(41)]);
+    choose("danmaku");
+    assert.equal(compassVisible(shopPage), false);
+    assert.equal(shop.data.selectedShopIdx, 1, "switching panels preserves the selected shop");
+    assert.equal(shop.data.checkedInCount, 1, "switching panels preserves server progress");
+    assert.equal(shopPage.data.shopReward.visible, true, "reward presentation has an independent overlay lifetime");
+    shop.properties.compassHeading = 180;
+    definition.observers.compassHeading.call(shop);
+    assert.equal(compassVisible(shopPage), false, "sensor updates cannot reveal another panel's compass");
+    const reward = shops.uiComponent("ar-shop-overlays", (name, detail) => shopPage.onModuleAction({ detail }));
+    reward.onClose();
+    assert.equal(shopPage.data.shopReward.visible, false, "reward actions still reach the shop module");
+
+    choose("shop");
+    assert.equal(compassVisible(shopPage), true);
+    assert.equal(shopPage.data.shopNavigation.title, point(2).name);
+    assert.equal(shops.calls.requests.length, 1, "reopening refreshes server progress");
+    apply([]);
+    definition.lifetimes.detached.call(shop);
+    shops.respond(200, { point_ids: [] }); await tick();
+    assert.equal(compassVisible(shopPage), false, "removed activities cannot be revived by pending progress");
+    assert.equal(shopPage.data.shopNavigation.visible, false);
+    assert.deepEqual(copy(shopPage.data.slots["top-center"]), mode === "gps" ? [] : ["recognition"]);
+    assert.equal(shopPage.onModuleAction({ detail: { moduleId: "shop", action: "compass", payload: { visible: true } } }), false);
+    console.log(`PASS ${mode}: shop compass requires a tap, follows panel visibility and preserves selection/progress across switches`);
+  }
 
   const shops = launch();
   const a = activity(10, "shop_checkin", [point(1), point(2), { ...point(3), latitude: null, longitude: null }]);
@@ -413,7 +500,7 @@ async function main() {
     console.log(`PASS ${mode}: independent discovery, throttling, moderation, scope and layer cancellation`);
   }
 
-  const presentations = ["ar-shell", "ar-debug-bar", "ar-recognition-panel", "ar-danmaku-panel", "ar-shop-overlays"];
+  const presentations = ["ar-shell", "ar-debug-bar", "ar-recognition-controls", "ar-danmaku-panel", "ar-shop-compass", "ar-shop-overlays"];
   for (const [file, handlers] of [["pages/ar/ar.wxml", page], ["components/shop-checkin/index.wxml", host],
     ...presentations.map(name => [`components/${name}/index.wxml`, launch().uiComponent(name)])]) {
     for (const match of fs.readFileSync(path.join(root, file), "utf8").matchAll(/bind[\w:]+="(\w+)"/g)) assert.equal(typeof handlers[match[1]], "function", `${file}: ${match[1]}`);

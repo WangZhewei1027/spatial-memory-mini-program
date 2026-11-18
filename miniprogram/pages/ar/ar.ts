@@ -4,10 +4,11 @@ import { recognitionData, recognitionMethods } from "./modules/recognition";
 import { runtimeData, runtimeMethods } from "./modules/runtime";
 import { sensorData, sensorMethods } from "./modules/sensors";
 import { uiData, uiMethods } from "./modules/ui";
+import { shopData } from "./modules/shop";
 
 Page({
   data: { width: 300, height: 300, renderWidth: 300, renderHeight: 300,
-    ...activityData, ...recognitionData, ...runtimeData, ...sensorData, ...uiData },
+    ...activityData, ...recognitionData, ...runtimeData, ...sensorData, ...uiData, ...shopData },
   ...activityMethods, ...recognitionMethods, ...runtimeMethods, ...sensorMethods, ...uiMethods,
   onHide() {
     (this as any)._pageVisible = false;

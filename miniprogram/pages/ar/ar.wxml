@@ -4,11 +4,13 @@
     bind:matchprogress="onMatchProgress" bind:renderstatus="onRenderStatus" bind:asseterror="onAssetError" bind:renderlayers="onRenderLayers" />
 
   <ar-debug-bar slot="top" items="{{debugItems}}" />
+  <ar-recognition-controls slot="top-center" wx:if="{{mapConfigReady && retrievalMode !== 'gps'}}" status="{{recognitionStatus}}" hint-active="{{recognitionHintActive}}" bind:moduleaction="onModuleAction" />
+  <ar-shop-compass slot="top-center" navigation="{{shopNavigation}}"
+    active="{{mapConfigReady && shopCheckinEnabled && showShopPanel && bottomPanelExpanded && activeBottomPanel === 'shop'}}" />
 
   <image slot="overlay" wx:if="{{footerEnabled}}" class="ar-top-logo" src="/assets/DHL-Outlined.png" mode="aspectFit" />
-  <ar-shop-overlays slot="overlay" navigation="{{shopNavigation}}" reward="{{shopReward}}" bind:moduleaction="onModuleAction" />
+  <ar-shop-overlays slot="overlay" reward="{{shopReward}}" bind:moduleaction="onModuleAction" />
 
-  <ar-recognition-panel slot="bottom" active="{{bottomPanelExpanded && activeBottomPanel === 'recognition'}}" status="{{recognitionStatus}}" hint-active="{{recognitionHintActive}}" bind:moduleaction="onModuleAction" />
   <ar-danmaku-panel slot="bottom" active="{{bottomPanelExpanded && activeBottomPanel === 'danmaku'}}"
     activity="{{activeDanmaku}}" activities="{{danmakuActivities}}" selected="{{selectedDanmakuIdx}}" submitting="{{isSubmitting}}"
     text="{{textContent}}" limit="{{danmakuLimit}}" loading="{{activitiesLoading}}" error="{{activitiesError}}"
