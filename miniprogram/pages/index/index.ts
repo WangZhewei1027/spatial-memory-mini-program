@@ -1,344 +1,118 @@
-import {
-  setConfig,
-  CONFIG,
-  fetchOrganizations,
-  fetchWorkspaces,
-  fetchTeamWorkspaces,
-  fetchScenes,
-  loadScanHistory,
-  recordScanHistory,
-  saveScanHistory,
-  scanHistoryKey,
-  ScanHistoryEntry,
-  WorkspaceSummary,
-} from "../../utils/backend";
-import { reportError } from "../../utils/report-error";
-import { usesSimulatedCamera } from "../../utils/camera-environment";
+import { fetchPublicScenes, setConfig } from "../../utils/backend";
+import type { PublicScene, ScanConfig } from "../../utils/backend";
+import { scenePreviewUrl } from "../../utils/entry-navigation";
 
-/** 历史记录在下拉菜单中的展示形态 */
-interface HistoryItem extends ScanHistoryEntry {
-  key: string;
-  kind: "Scene" | "Map";
-  /** 列表展示文案，如「东明 / test」 */
-  label: string;
-  /** 是否为当前选中项 */
-  active: boolean;
+const PAGE_SIZE = 12;
+
+interface SceneCard {
+  id: string;
+  organizationId: string;
+  name: string;
+  cover: string;
 }
 
-/** AR 体验依赖的授权 scope 及其展示名 */
-const REQUIRED_SCOPES: { scope: keyof WechatMiniprogram.AuthSetting; label: string }[] = [
-  { scope: "scope.userLocation", label: "位置" },
-];
-if (!usesSimulatedCamera()) REQUIRED_SCOPES.push({ scope: "scope.camera", label: "相机" });
+function coverImage(thumbnail: PublicScene["thumbnail"]): string {
+  if (thumbnail?.kind === "image") return thumbnail.url;
+  if (thumbnail?.kind === "video" &&
+      /^https:\/\/[^/]+\.oss-cn-[a-z-]+\.aliyuncs\.com\/[^?#]+$/.test(thumbnail.url)) {
+    return `${thumbnail.url}?x-oss-process=video/snapshot,t_0,f_jpg,w_640`;
+  }
+  return "";
+}
 
 Page({
+  _openingEntry: false,
+  _requestedScenes: false,
+  _nextOffset: 0,
+  _retryFromStart: true,
   data: {
-    title: "",
-    subtitle: "",
-    loaded: false,
-    showFooter: false,
-    history: [] as HistoryItem[],
-    dropdownOpen: false,
-    /** 被用户明确拒绝的权限名称，如「位置、相机」；为空则不显示引导条 */
-    deniedPermText: "",
-    openingScene: false,
-    isScene: false,
-    needsMap: false,
-    mapChoices: [] as WorkspaceSummary[],
-    mapsError: "",
+    scenes: [] as SceneCard[],
+    loading: true,
+    error: false,
+    hasMore: false,
   },
 
-  async onLoad(options: Record<string, string | undefined>) {
+  onLoad(options: ScanConfig & { select?: string }) {
     setConfig(options);
-    // 显式扫码优先；普通启动恢复缓存。select=1 可直接调试内容选择页。
-    const entry = options.sceneId ? options : CONFIG;
-    if (entry.sceneId && options.select !== "1") {
-      this.setData({ openingScene: true });
-      wx.navigateTo({
-        url: `/pages/scene/scene?sceneId=${encodeURIComponent(entry.sceneId)}&organizationId=${encodeURIComponent(entry.organizationId || "")}`,
-        success: () => {
-          // 保留首页在页面栈中，Scene 只用系统返回键即可切换内容。
-          this.setData({ openingScene: false });
-          void this.fetchNames();
-          void this.refreshHistoryNames();
-        },
-        fail: () => {
-          this.setData({ openingScene: false });
-          void this.fetchNames();
-        },
-      });
-      return;
+
+    // 已印制的二维码仍从主页分发到对应的体验页。
+    if (options.sceneId && options.select !== "1") {
+      this.openLinkedPage(scenePreviewUrl(options));
+    } else if (options.select === "1" || options.workspaceId || options.organizationId) {
+      this.openLinkedPage("/pages/entry/entry");
     }
-    await this.fetchNames();
-    // 首屏渲染后异步刷新历史列表名称，反映后端重命名（不阻塞首屏）
-    this.refreshHistoryNames();
   },
 
   onShow() {
-    if (this.data.openingScene) return;
-    // 从 AR 等页面返回时刷新历史列表的选中态
-    this.refreshHistory();
-    // 用户可能在 AR 页拒绝过授权，或从系统设置返回，每次展示都重查
-    this.checkPermissions();
+    if (!this._openingEntry && !this._requestedScenes) void this.loadScenes(true);
   },
 
-  /**
-   * 检查 AR 所需权限是否被用户明确拒绝过。
-   * authSetting 中 undefined 表示从未询问（首次使用时会正常弹授权框），
-   * 只有显式为 false 才需要引导去设置页——拒绝后 wx.authorize 不会再弹窗。
-   */
-  checkPermissions() {
-    wx.getSetting({
-      success: (res) => {
-        const denied = REQUIRED_SCOPES.filter(
-          (s) => res.authSetting[s.scope] === false,
-        ).map((s) => s.label);
-        this.setData({ deniedPermText: denied.join("、") });
-      },
-    });
-  },
-
-  /** 设置页返回后的回调：直接用返回的 authSetting 刷新引导条 */
-  onOpenSetting(e: WechatMiniprogram.CustomEvent) {
-    const authSetting =
-      (e.detail && e.detail.authSetting) || ({} as Record<string, boolean>);
-    const denied = REQUIRED_SCOPES.filter(
-      (s) => authSetting[s.scope] === false,
-    ).map((s) => s.label);
-    this.setData({ deniedPermText: denied.join("、") });
-    if (!denied.length) {
-      wx.showToast({ title: "权限已开启", icon: "success" });
-    }
-  },
-
-  async fetchNames() {
-    const selected = { ...CONFIG };
-    const cached = loadScanHistory().find((e) => scanHistoryKey(e) === scanHistoryKey(selected));
-    try {
-      // 并行拉取团队与内容名称，避免串行 await 阻塞首屏渲染。
-      const orgPromise = selected.organizationId
-        ? fetchOrganizations([selected.organizationId]).catch(() => null)
-        : Promise.resolve(null);
-      const wsPromise = selected.workspaceId
-        ? fetchWorkspaces([selected.workspaceId], selected.organizationId).catch(() => null)
-        : Promise.resolve(null);
-      const needsMap = !selected.sceneId && !selected.workspaceId;
-      const mapsPromise = needsMap && selected.organizationId
-        ? fetchTeamWorkspaces(selected.organizationId).catch(() => null)
-        : Promise.resolve(null);
-      const scenePromise = selected.sceneId && selected.organizationId
-        ? fetchScenes([selected.sceneId], selected.organizationId).catch(() => null)
-        : Promise.resolve(null);
-
-      const [orgRes, wsRes, sceneRes, mapsRes] = await Promise.all([orgPromise, wsPromise, scenePromise, mapsPromise]);
-      if (scanHistoryKey(selected) !== scanHistoryKey(CONFIG)) return;
-
-      // 只使用当前目标的缓存，切换时不能残留其他目标的标题或 footer。
-      const patch: Record<string, unknown> = {
-        title: cached?.orgName || "",
-        subtitle: selected.sceneId ? cached?.sceneName || "场景名称暂不可用" : cached?.workspaceName || "",
-        isScene: !!selected.sceneId,
-        showFooter: false,
-        needsMap,
-        mapChoices: needsMap && mapsRes?.statusCode === 200 && Array.isArray(mapsRes.data)
-          ? mapsRes.data.filter((map) => map.organization_id === selected.organizationId) : [],
-        mapsError: needsMap && (!mapsRes || mapsRes.statusCode !== 200) ? "地图加载失败，点击重试" : "",
-      };
-      if (
-        orgRes &&
-        orgRes.statusCode === 200 &&
-        Array.isArray(orgRes.data) &&
-        orgRes.data.length > 0
-      ) {
-        patch.title = orgRes.data[0].name;
-      }
-      if (
-        wsRes &&
-        wsRes.statusCode === 200 &&
-        Array.isArray(wsRes.data) &&
-        wsRes.data.length > 0
-      ) {
-        const map = wsRes.data.find((row) => row.id === selected.workspaceId && row.organization_id === selected.organizationId);
-        if (map) {
-          patch.subtitle = map.name;
-          patch.showFooter = map.config?.footer_enabled === true;
-        }
-      }
-      const sceneName = sceneRes?.statusCode === 200 && Array.isArray(sceneRes.data)
-        ? sceneRes.data.find((s) => s.id === selected.sceneId)?.name
-        : undefined;
-      if (sceneName) patch.subtitle = sceneName;
-      // 单次 setData 批量更新，减少 WXML diff
-      this.setData({ ...patch, loaded: true });
-
-      // 回填名称到历史记录（去重置顶），再刷新下拉列表
-      recordScanHistory({
-        ...selected,
-        orgName: (patch.title as string) || undefined,
-        workspaceName: selected.sceneId ? undefined : (patch.subtitle as string) || undefined,
-        sceneName,
-      });
-      this.refreshHistory();
-    } catch (err) {
-      console.error("[index] fetchNames error:", err);
-      reportError("index.fetchNames", err);
-      this.setData({ loaded: true });
-      this.refreshHistory();
-    }
-  },
-
-  /** 从 Storage 重新加载历史，构建展示用 label 与选中态 */
-  refreshHistory() {
-    const currentKey = scanHistoryKey(CONFIG);
-    const history: HistoryItem[] = loadScanHistory().map((e) => {
-      const org = e.orgName || "未命名组织";
-      const label = e.sceneId
-        ? e.sceneName || "场景名称暂不可用"
-        : e.workspaceName || (e.workspaceId ? "地图名称暂不可用" : "选择地图合集");
-      return {
-        ...e,
-        key: scanHistoryKey(e),
-        kind: e.sceneId ? "Scene" : "Map",
-        orgName: org,
-        label,
-        active: scanHistoryKey(e) === currentKey,
-      };
-    });
-    this.setData({ history });
-  },
-
-  /**
-   * 批量异步刷新历史记录的展示名称，反映后端重命名。
-   * 团队和地图批量查询；Scene 按团队分组，名称变化时写回 Storage。
-   */
-  async refreshHistoryNames() {
-    const list = loadScanHistory();
-    if (!list.length) return;
-
-    const orgIds = [
-      ...new Set(list.map((e) => e.organizationId).filter(Boolean)),
-    ];
-    const wsIds = [
-      ...new Set(list.map((e) => e.workspaceId).filter(Boolean)),
-    ] as string[];
-    const scenesByOrg = new Map<string, string[]>();
-    list.forEach((e) => {
-      if (e.sceneId) scenesByOrg.set(e.organizationId, [...(scenesByOrg.get(e.organizationId) || []), e.sceneId]);
-    });
-
-    try {
-      const [orgRes, wsRes, sceneResults] = await Promise.all([
-        orgIds.length
-          ? fetchOrganizations(orgIds).catch(() => null)
-          : Promise.resolve(null),
-        wsIds.length
-          ? fetchWorkspaces(wsIds).catch(() => null)
-          : Promise.resolve(null),
-        Promise.all([...scenesByOrg].map(async ([organizationId, ids]) => ({
-          organizationId, response: await fetchScenes(ids, organizationId).catch(() => null),
-        }))),
-      ]);
-
-      const orgMap: Record<string, string> = {};
-      if (orgRes && orgRes.statusCode === 200 && Array.isArray(orgRes.data)) {
-        orgRes.data.forEach((o) => (orgMap[o.id] = o.name));
-      }
-      const wsMap: Record<string, string> = {};
-      if (wsRes && wsRes.statusCode === 200 && Array.isArray(wsRes.data)) {
-        wsRes.data.forEach((w) => (wsMap[w.id] = w.name));
-      }
-      const sceneMap: Record<string, string> = {};
-      sceneResults.forEach(({ organizationId, response }) => {
-        if (response?.statusCode === 200 && Array.isArray(response.data)) {
-          response.data.forEach((s) => (sceneMap[scanHistoryKey({ organizationId, sceneId: s.id })] = s.name));
-        }
-      });
-
-      // 仅在确有名称变化时写回，避免无谓的 Storage 写入与重渲染。
-      // 后端查不到（已删除）的条目保留旧名，不清空。
-      let changed = false;
-      const updated = loadScanHistory().map((e) => {
-        const next = { ...e };
-        const newOrg = orgMap[e.organizationId];
-        if (newOrg && newOrg !== e.orgName) {
-          next.orgName = newOrg;
-          changed = true;
-        }
-        const newWs = e.workspaceId ? wsMap[e.workspaceId] : undefined;
-        if (newWs && newWs !== e.workspaceName) {
-          next.workspaceName = newWs;
-          changed = true;
-        }
-        const newScene = e.sceneId ? sceneMap[scanHistoryKey(e)] : undefined;
-        if (newScene && newScene !== e.sceneName) {
-          next.sceneName = newScene;
-          changed = true;
-        }
-        return next;
-      });
-
-      if (changed) {
-        saveScanHistory(updated);
-        this.refreshHistory();
-      }
-    } catch (err) {
-      console.error("[index] refreshHistoryNames error:", err);
-      reportError("index.refreshHistoryNames", err);
-    }
-  },
-
-  toggleDropdown() {
-    this.setData({ dropdownOpen: !this.data.dropdownOpen });
-  },
-
-  /** 选择一条历史记录，切换当前场景或地图合集。 */
-  onSelectHistory(e: WechatMiniprogram.TouchEvent) {
-    const { org, ws, scene } = e.currentTarget.dataset as {
-      org: string;
-      ws?: string;
-      scene?: string;
-    };
-    this.setData({ dropdownOpen: false });
-    const next = { organizationId: org, workspaceId: ws, sceneId: scene };
-    if (scanHistoryKey(next) === scanHistoryKey(CONFIG)) {
-      return; // 已是当前选中项，无需切换
-    }
-    // 复用 setConfig：写入内存 CONFIG 并持久化为当前扫码参数
-    setConfig(next);
-    // 切换期间回到骨架态，避免旧组织/空间名残留
-    this.setData({ loaded: false });
-    this.fetchNames();
-  },
-
-  goToAR() {
-    if (CONFIG.sceneId) {
-      wx.navigateTo({ url: `/pages/scene/scene?sceneId=${encodeURIComponent(CONFIG.sceneId)}&organizationId=${encodeURIComponent(CONFIG.organizationId || "")}` });
-      return;
-    }
-    if (!CONFIG.organizationId || !CONFIG.workspaceId) {
-      wx.showToast({ title: "请先选择地图合集", icon: "none" });
-      return;
-    }
-    const params: string[] = [];
-    if (CONFIG.organizationId)
-      params.push(`organizationId=${CONFIG.organizationId}`);
-    if (CONFIG.workspaceId) params.push(`workspaceId=${CONFIG.workspaceId}`);
-    const query = params.length ? `?${params.join("&")}` : "";
+  openLinkedPage(url: string) {
+    if (this._openingEntry) return;
+    this._openingEntry = true;
     wx.navigateTo({
-      url: `/pages/ar/ar${query}`,
+      url,
+      fail: () => {
+        wx.showToast({ title: "暂时无法打开，请重试", icon: "none" });
+        if (!this._requestedScenes) void this.loadScenes(true);
+      },
+      complete: () => { this._openingEntry = false; },
     });
   },
 
-  onChooseMap(e: WechatMiniprogram.CustomEvent) {
-    const map = this.data.mapChoices[Number(e.detail.value)];
-    if (!map || map.organization_id !== CONFIG.organizationId) return;
-    setConfig({ organizationId: map.organization_id, workspaceId: map.id });
-    this.setData({ loaded: false, showFooter: false });
-    void this.fetchNames();
+  async loadScenes(reset: boolean) {
+    if (this._requestedScenes && this.data.loading) return;
+    this._requestedScenes = true;
+    this._retryFromStart = reset;
+    this.setData({ loading: true, error: false });
+    try {
+      const offset = reset ? 0 : this._nextOffset;
+      const { scenes, hasMore } = await fetchPublicScenes(offset, PAGE_SIZE);
+      this._nextOffset = offset + scenes.length;
+      const cards = scenes.map((scene): SceneCard => ({
+        id: scene.id,
+        organizationId: scene.organization_id,
+        name: scene.name?.trim() || "未命名场景",
+        cover: coverImage(scene.thumbnail),
+      }));
+      const existing = reset ? [] : this.data.scenes;
+      const ids = new Set(existing.map((scene) => scene.id));
+      this.setData({
+        scenes: existing.concat(cards.filter((scene) => !ids.has(scene.id))),
+        hasMore: hasMore && scenes.length > 0,
+      });
+    } catch {
+      this.setData({ error: true });
+    } finally {
+      this.setData({ loading: false });
+    }
   },
 
-  retryMaps() {
-    this.setData({ loaded: false });
-    void this.fetchNames();
+  retryScenes() {
+    return this.loadScenes(this._retryFromStart);
+  },
+
+  loadMoreScenes() {
+    return this.loadScenes(false);
+  },
+
+  async onPullDownRefresh() {
+    await this.loadScenes(true);
+    wx.stopPullDownRefresh();
+  },
+
+  onCoverError(event: WechatMiniprogram.CustomEvent) {
+    const { id, cover } = event.currentTarget.dataset;
+    const index = this.data.scenes.findIndex((scene) => scene.id === id && scene.cover === cover);
+    if (index >= 0) this.setData({ [`scenes[${index}].cover`]: "" });
+  },
+
+  onOpenScene(event: WechatMiniprogram.TouchEvent) {
+    if (this._openingEntry) return;
+    const scene = this.data.scenes.find((item) => item.id === event.currentTarget.dataset.id);
+    if (!scene) return;
+    const selection = { sceneId: scene.id, organizationId: scene.organizationId };
+    setConfig(selection, { sceneName: scene.name });
+    this.openLinkedPage(scenePreviewUrl(selection));
   },
 });

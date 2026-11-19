@@ -10,20 +10,20 @@ GPS、巨大模型、商户及识别点接口返回地图 Placement，返回值�
 
 ## 微信扫码独立预览
 
-管理端 Scene 编辑器的二维码与地图合集共享微信生成和 OSS 缓存流程。入口为 `pages/index/index?organizationId=<teamId>&sceneId=<sceneId>`，首页缓存当前 Scene 与扫码历史后打开 `pages/scene/scene`，保留首页供系统返回；Scene 不请求 GPS。无参数真机调试可恢复最近的 Scene。
+管理端 Scene 编辑器的二维码与地图合集共享微信生成和 OSS 缓存流程。入口为 `pages/index/index?organizationId=<teamId>&sceneId=<sceneId>`。扫码或从主页选择公共场景时，小程序先记录入口，再打开 `pages/scene/scene`。Scene 不请求 GPS。已打开的场景可在「我」的浏览记录中再次打开；直接调试无参数的 Scene 页面也可恢复最近的 Scene。
 
 预览页调用 `POST /api/miniapp/scenes/preview`，请求 `{ scene_id, organization_id }`。接口校验团队归属、团队和场景的归档状态，返回不可缓存的当前场景。已归档 Scene 的独立预览不可用。未保存的本地编辑不会进入预览。
 
 - 场景模型、文字与媒体占位对象准备后，获得有效相机帧即启用「放置场景」按钮。只有点击才显示整场，不再等待两秒自动放置。
 - 显示时取 SLAM 相机的位置与水平朝向，用共享 Scene Core 的 `scenePlacementFromCamera` 对齐场景的 `content.viewerPosition`。缺省观看位置为 `(0, 1.5, 2)` 米，对应场景原点在手机前方 2 米、下方 1.5 米；QR、GPS 和识别点触发的 Scene 使用同一基准。Web 保存自定义观看位置后，下次加载按同一位置参数放置，实例局部坐标不变。1.5 米是约定的观看高度，不是设备实测地面；Scene 放置后留在 SLAM 世界空间，不使用平面 hitTest。
 - 点击时若相机帧已超过 250ms，等待新相机画面，等新帧后可再次点击。隐藏页面、AR 错误、重试或卸载会取消加载并释放迟到的资源。
-- 画布占满页面，悬浮按钮显示加载 / 定位 / 放置 / 重试状态。放置后提供暂停、继续和重播控制，纯音频或出场后没有可点击内容时仍可操作。错误通过临时提示展示，空场景不会占用播放容量。
+- 画布占满页面，悬浮按钮显示加载 / 定位 / 放置 / 重试状态。放置后显示两个圆形图标按钮，用于切换播放/暂停，以及从头播放。纯音频或出场后没有可点击内容时仍可操作。错误通过临时提示展示，空场景不会占用播放容量。
 
 ## 播放器
 
 运行时接收 `schemaVersion: 4/5/7/8/9` 的 composition manifest；后端将 schema 6 编辑文档编译为播放协议，不是资产内容版本。旧平铺模型为 4，带分组模型为 5，包含文字、媒体或出入场的演出为 7，透明度、音量关键帧或空间音频为 8，显式保存观看位置为 9。协议 9 必须包含有限 XYZ `viewerPosition`，水平 X/Z 不能同时为零；省略观看位置的既有场景使用共享默认位置。发布这些 Web 新功能时须配套发布本播放器，旧小程序会拒绝不支持的协议。资源、实例、关键帧数量、演出时长及分组层数不设业务上限。校验保留有限数值、正尺寸/速率、非负时间、透明度/音量 0–1、引用完整性及显式 visited 循环检测。实例独立克隆，使用米制 `position`、Euler XYZ 弧度 `rotation` 和 `scale`，不归一化尺寸。Web 旋转字段显示度，保存与两端采样使用弧度并保留多圈值。
 
-`lib/scene-runtime/composition.js` 使用与 Web 同源的零依赖 `@spatial-memory/scene-core` 2.7.0。实例结构为 instanceRoot → `pivot` → GLB：`lib/three-runtime/pivot.js` 的 `groundOffset` 按包围盒把底部中心对齐到实例原点，与 Web 场景编辑器同一规则；普通地图模型的尺寸归一化不适用于 Scene，偏移在 AnimationMixer 驱动的子树之外。schema 5 清单可带 `groups`：分组是带变换和轨道的空 `THREE.Group`，实例和子分组按 `parent` 挂到对应分组下，Core 用同一时钟采样分组与实例；schema 4 平铺清单从不构建分组。每实例可选 `tracks` 保存 9 个变换通道，以及 schema 8 的 `opacity`、`volume` 数值关键帧（音量仅用于音频/视频）：`{ time, value, handles: [inX, inY, outX, outY], connectedRight }`；time 为秒，`connectedRight: false` 表示保持到下一关键帧，其余使用左右相邻帧的 Bezier 出/入柄采样。没有轨道时使用静态姿态。GLB 动画继续由 Three.AnimationMixer 求值。每个播放器持有独立 Core，`dispose` 清空订阅、绑定与内容引用；宿主释放模型、媒体资源和帧时钟。暂停不推进时间；循环保留跨边界余量；结束冻结。地图、识别命中和扫码查看的 Scene 共用同一套加载与挂载（`assets/scene.js`），放置后自动播放，轻触画面不控制播放；只有扫码场景页提供“暂停演出/重播”按钮。整场登记一个 `nodeList` 条目，容量桶最多 1 场，替换时整场回收。实例不参与普通素材斥力。任一资源、动画片段或播放中的画面解码失败会释放整场并报告错误（视频音轨失败只降级为无声）；已挂载失败场景也会退出容量队列。
+`lib/scene-runtime/composition.js` 使用与 Web 同源的零依赖 `@spatial-memory/scene-core` 2.7.0。实例结构为 instanceRoot → `pivot` → GLB：`lib/three-runtime/pivot.js` 的 `groundOffset` 按包围盒把底部中心对齐到实例原点，与 Web 场景编辑器同一规则；普通地图模型的尺寸归一化不适用于 Scene，偏移在 AnimationMixer 驱动的子树之外。schema 5 清单可带 `groups`：分组是带变换和轨道的空 `THREE.Group`，实例和子分组按 `parent` 挂到对应分组下，Core 用同一时钟采样分组与实例；schema 4 平铺清单从不构建分组。每实例可选 `tracks` 保存 9 个变换通道，以及 schema 8 的 `opacity`、`volume` 数值关键帧（音量仅用于音频/视频）：`{ time, value, handles: [inX, inY, outX, outY], connectedRight }`；time 为秒，`connectedRight: false` 表示保持到下一关键帧，其余使用左右相邻帧的 Bezier 出/入柄采样。没有轨道时使用静态姿态。GLB 动画继续由 Three.AnimationMixer 求值。每个播放器持有独立 Core，`dispose` 清空订阅、绑定与内容引用；宿主释放模型、媒体资源和帧时钟。暂停不推进时间；循环保留跨边界余量；结束冻结。地图、识别命中和扫码查看的 Scene 共用同一套加载与挂载（`assets/scene.js`），放置后自动播放，轻触画面不控制播放；独立场景预览页提供播放和从头播放按钮。整场登记一个 `nodeList` 条目，容量桶最多 1 场，替换时整场回收。实例不参与普通素材斥力。任一资源、动画片段或播放中的画面解码失败会释放整场并报告错误（视频音轨失败只降级为无声）；已挂载失败场景也会退出容量队列。
 
 ### 演出素材与同一时间轴
 

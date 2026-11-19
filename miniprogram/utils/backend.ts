@@ -1,4 +1,4 @@
-// 后端访问层：小程序只和 Web 平台的公开接口 /api/miniapp/* 通信
+// 后端访问层：小程序只和 Web 平台的公开接口通信
 // （服务端文档：spatial-memory/docs/miniapp-api.md），不再直连数据库。
 // 素材发现与活动参与使用独立接口；只有最终的 AR 渲染复用现有展示器。
 import { resolveBackendBaseUrl } from "./backend-environment";
@@ -170,7 +170,7 @@ export const CONFIG: ScanConfig = {
 };
 
 /** 从页面 query 参数更新 CONFIG；若有扫码参数则持久化到 Storage */
-export function setConfig(params: ScanConfig) {
+export function setConfig(params: ScanConfig, names?: Pick<ScanHistoryEntry, "sceneName">) {
   const hasScanParams = !!(params.organizationId || params.workspaceId || params.sceneId);
   if (!hasScanParams) return;
   // Scene 必须携带自己的团队，不能从上一个地图入口借用团队 ID。
@@ -190,7 +190,7 @@ export function setConfig(params: ScanConfig) {
   }
   persistScanConfig({ ...CONFIG });
   // 在网络请求和页面跳转前落盘，真机调试无启动参数时也可恢复。
-  recordScanHistory({ ...CONFIG });
+  recordScanHistory({ ...CONFIG, ...names });
 }
 
 type ApiResponse<T> = { statusCode: number; data: T };
@@ -210,7 +210,7 @@ function recognitionHeaders() {
 }
 
 /** wx.request 的 Promise 封装（公开接口，无需鉴权头） */
-function request<T>(
+function requestApi<T>(
   path: string,
   method: "GET" | "POST",
   data?: Record<string, any>,
@@ -218,7 +218,7 @@ function request<T>(
 ): Promise<ApiResponse<T>> {
   return new Promise((resolve, reject) => {
     wx.request({
-      url: `${API_BASE_URL}${API_PREFIX}${path}`,
+      url: `${API_BASE_URL}${path}`,
       method,
       timeout: 20000,
       header: { "Content-Type": "application/json", ...headers },
@@ -227,13 +227,22 @@ function request<T>(
       fail: (error: { errMsg?: string; message?: string }) => {
         // wx.request rejects with errMsg, while scene UI consumes Error.message.
         const message = error.errMsg || error.message || "网络请求失败，请稍后重试";
-        const endpoint = `${API_BASE_URL}${API_PREFIX}${path.split("?")[0]}`;
+        const endpoint = `${API_BASE_URL}${path.split("?")[0]}`;
         console.error("[backend] request failed", { method, endpoint, message });
         reportError("backend.request", message, { method: method, endpoint });
         reject(Object.assign(new Error(message), error));
       },
     });
   });
+}
+
+function request<T>(
+  path: string,
+  method: "GET" | "POST",
+  data?: Record<string, any>,
+  headers?: Record<string, string>,
+): Promise<ApiResponse<T>> {
+  return requestApi(`${API_PREFIX}${path}`, method, data, headers);
 }
 
 export interface OrganizationSummary {
@@ -251,6 +260,26 @@ export interface WorkspaceSummary {
 export interface SceneSummary {
   id: string;
   name: string;
+}
+
+export interface PublicScene {
+  id: string;
+  organization_id: string;
+  name: string | null;
+  thumbnail: { kind: "image" | "video"; url: string } | null;
+}
+
+export async function fetchPublicScenes(offset: number, limit: number) {
+  const response = await requestApi<{ data: PublicScene[]; page: { hasMore: boolean } }>(
+    `/api/templates?type=scene&limit=${limit}&offset=${offset}`,
+    "GET",
+  );
+  const { data, page } = response.data ?? {};
+  if (response.statusCode !== 200 || !Array.isArray(data) || typeof page?.hasMore !== "boolean" ||
+      data.some((scene) => !scene || !isSceneConfig({ sceneId: scene.id, organizationId: scene.organization_id }))) {
+    throw new Error("公共场景目录响应无效");
+  }
+  return { scenes: data, hasMore: page.hasMore };
 }
 
 /** 按团队刷新已扫码 Scene 的名称，不加载模型或场景内容。 */

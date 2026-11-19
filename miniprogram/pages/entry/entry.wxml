@@ -1,0 +1,48 @@
+<view class="container">
+  <view class="header">
+    <view class="logo-mark"></view>
+    <block wx:if="{{loaded}}">
+      <text class="title">{{title || '无组织名'}}</text>
+      <text class="subtitle" wx:if="{{subtitle}}">{{subtitle}}</text>
+    </block>
+    <block wx:else>
+      <view class="skeleton skeleton-title"></view>
+      <view class="skeleton skeleton-subtitle"></view>
+    </block>
+  </view>
+
+  <view class="menu">
+    <view class="perm-banner" wx:if="{{deniedPermText}}">
+      <view class="perm-content">
+        <text class="perm-title">{{deniedPermText}}权限未开启</text>
+        <text class="perm-desc">开启后才能获取附近的 AR 素材与相机画面</text>
+      </view>
+      <button
+        class="perm-btn"
+        open-type="openSetting"
+        bindopensetting="onOpenSetting"
+      >去开启</button>
+    </view>
+
+    <block wx:if="{{loaded && needsMap}}">
+      <picker wx:if="{{mapChoices.length}}" range="{{mapChoices}}" range-key="name" bindchange="onChooseMap">
+        <view class="card"><text class="card-title">选择地图合集</text><view class="arrow"></view></view>
+      </picker>
+      <button wx:elif="{{mapsError}}" class="card card-title" bindtap="retryMaps">{{mapsError}}</button>
+      <text wx:else class="card-desc">暂无可用地图合集</text>
+    </block>
+    <view wx:elif="{{loaded}}" class="card" bindtap="goToAR">
+      <view class="card-content">
+        <text class="card-title">{{isScene ? '预览场景' : '开启旅程'}}</text>
+        <text class="card-desc">{{isScene ? '进入后点击按钮，将场景放置在前方' : '探索 AR 景观与互动体验'}}</text>
+      </view>
+      <view class="card-action">
+        <view class="arrow"></view>
+      </view>
+    </view>
+  </view>
+
+  <view class="footer" wx:if="{{showFooter}}">
+    <image class="footer-logo" src="/assets/DHL-Outlined.png" mode="aspectFit" />
+  </view>
+</view>

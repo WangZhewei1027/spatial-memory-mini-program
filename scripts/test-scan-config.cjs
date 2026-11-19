@@ -79,42 +79,43 @@ async function main() {
   assert.equal(first.calls.permissions, 0, "Scene entry must not invoke map permissions");
   assert.equal(first.calls.navigations[0], `/pages/scene/scene?sceneId=${SCENE}&organizationId=${ORG}`);
 
-  // A brand new JS runtime, like restarting real-device debugging with no query.
+  // Ordinary cold starts stay on the public catalog, with no synthetic history.
   const cold = launch(first.storage);
   assert.deepEqual(copy(cold.backend.CONFIG), sceneTarget, "default map must not leak into Scene");
-  await cold.page("index").onLoad({});
-  assert.equal(cold.calls.navigations[0], first.calls.navigations[0]);
+  const coldHome = cold.page("index");
+  coldHome.onLoad({});
+  coldHome.onShow();
+  await flush();
+  assert.equal(cold.calls.navigations.length, 0);
+  assert.match(cold.calls.requests[0].url, /api\/templates\?type=scene/);
+  assert.equal(cold.backend.loadScanHistory().length, 1);
   const scene = cold.page("scene");
   scene.onLoad({});
-  assert.equal(scene.data.sceneId, SCENE);
+  assert.equal(scene.data.sceneId, SCENE, "direct developer preview can still restore the saved Scene");
   assert.equal(scene.data.organizationId, ORG);
   assert.equal(scene.data.invalid, false);
 
-  // Explicitly opening the selector keeps the cache but does not bounce back into AR.
+  // Historical maps still show the map entry, while scenes open directly.
+  first.backend.setConfig(mapTarget);
+  const historyApp = launch(first.storage);
+  const me = historyApp.page("me");
+  me.onShow();
+  await flush();
+  assert.equal(me.data.history.length, 2);
+  me.onSelectHistory({ currentTarget: { dataset: { key: historyApp.backend.scanHistoryKey(mapTarget) } } });
+  assert.equal(historyApp.calls.navigations[0], "/pages/entry/entry");
+  const entry = historyApp.page("entry");
+  await entry.onLoad();
+  assert.equal(entry.data.isScene, false);
+  assert.deepEqual(historyApp.storage.get(CURRENT), mapTarget);
+  entry.goToAR();
+  assert.equal(historyApp.calls.navigations[1], `/pages/ar/ar?organizationId=${ORG}&workspaceId=${MAP}`);
+  me.onSelectHistory({ currentTarget: { dataset: { key: historyApp.backend.scanHistoryKey(sceneTarget) } } });
+  assert.equal(historyApp.calls.navigations[2], first.calls.navigations[0]);
+  assert.deepEqual(historyApp.storage.get(CURRENT), sceneTarget);
   const selectorApp = launch(first.storage);
-  const selector = selectorApp.page("index");
-  await selector.onLoad({ select: "1" });
-  await flush();
-  selector.onShow();
-  assert.equal(selectorApp.calls.navigations.length, 0);
-  assert.equal(selector.data.isScene, true);
-  assert.ok(selector.data.history.some((e) => e.sceneId === SCENE && e.active));
-  selector.goToAR();
-  assert.equal(selectorApp.calls.navigations[0], first.calls.navigations[0]);
-  selector.onSelectHistory({ currentTarget: { dataset: { org: ORG, ws: MAP } } });
-  await flush();
-  assert.equal(selector.data.isScene, false);
-  assert.deepEqual(selectorApp.storage.get(CURRENT), mapTarget);
-  selector.goToAR();
-  assert.equal(selectorApp.calls.navigations[1], `/pages/ar/ar?organizationId=${ORG}&workspaceId=${MAP}`);
-  const mapRestart = launch(selectorApp.storage);
-  await mapRestart.page("index").onLoad({});
-  assert.equal(mapRestart.calls.navigations.length, 0);
-  selector.onSelectHistory({ currentTarget: { dataset: { org: ORG, scene: SCENE } } });
-  await flush();
-  assert.equal(selector.data.isScene, true);
-  assert.deepEqual(selectorApp.storage.get(CURRENT), sceneTarget);
-  assert.equal(selector.data.history.filter((e) => e.active).length, 1);
+  await selectorApp.page("index").onLoad({ select: "1" });
+  assert.equal(selectorApp.calls.navigations[0], "/pages/entry/entry");
 
   // Explicit scans supersede cache; incomplete or invalid Scene links never borrow the previous organization.
   for (const target of [{ organizationId: ORG, sceneId: SECOND }, mapTarget, { organizationId: ORG }]) {
@@ -122,7 +123,8 @@ async function main() {
     await app.page("index").onLoad(target);
     assert.deepEqual(app.storage.get(CURRENT), target);
     assert.deepEqual(copy(launch(app.storage).backend.CONFIG), target);
-    assert.equal(app.calls.navigations.length, target.sceneId ? 1 : 0);
+    assert.equal(app.calls.navigations[0], target.sceneId
+      ? `/pages/scene/scene?sceneId=${SECOND}&organizationId=${ORG}` : "/pages/entry/entry");
   }
   for (const target of [{ sceneId: SECOND }, { organizationId: ORG, sceneId: "invalid" }]) {
     const app = launch(new Map([[CURRENT, sceneTarget]]));
@@ -151,7 +153,7 @@ async function main() {
   // An in-flight name refresh cannot erase a Scene scanned after the request started.
   const pending = [];
   const race = launch(new Map([[HISTORY, [{ ...mapTarget, ts: 1 }]]]), { request: (options) => pending.push(options) });
-  const refresh = race.page("index").refreshHistoryNames();
+  const refresh = race.page("me").refreshHistoryNames();
   race.backend.setConfig(sceneTarget);
   pending.forEach((request) => request.success({ statusCode: 200, data: [{ id: request.url.includes("organizations") ? ORG : MAP, name: "Renamed" }] }));
   await refresh;
@@ -174,27 +176,17 @@ async function main() {
     } else data = [{ id: MAP, name: "老街地图" }];
     options.success({ statusCode: 200, data });
   } });
-  let navigation;
-  names.wx.navigateTo = (options) => { navigation = options; names.calls.navigations.push(options.url); };
-  const namesPage = names.page("index");
-  await namesPage.onLoad({});
-  namesPage.onShow(); // Initial index show is skipped while navigation starts.
-  navigation.success();
+  const namesPage = names.page("me");
+  namesPage.onShow();
   await flush();
-  assert.equal(namesPage.data.subtitle, sceneName);
-  assert.equal(namesPage.data.showFooter, false, "Scene selection has no team footer");
-  assert.equal(namesPage.data.history.find((e) => e.kind === "Scene").label, sceneName);
-  assert.equal(namesPage.data.history.find((e) => e.kind === "Map").label, "老街地图");
-  namesPage.onShow(); // System back shows the retained index; never opens Scene again.
-  assert.equal(names.calls.navigations.length, 1);
+  assert.equal(namesPage.data.history.find((e) => e.kind === "场景").name, sceneName);
+  assert.equal(namesPage.data.history.find((e) => e.kind === "地图").name, "老街地图");
   sceneName = "新舞台";
   await namesPage.refreshHistoryNames();
-  assert.equal(namesPage.data.history.find((e) => e.kind === "Scene").label, sceneName);
-  const offlineNames = launch(names.storage);
-  const offlinePage = offlineNames.page("index");
-  await offlinePage.onLoad({ select: "1" });
-  assert.equal(offlinePage.data.subtitle, sceneName);
-  assert.equal(offlinePage.data.history.find((e) => e.kind === "Scene").label, sceneName);
+  assert.equal(namesPage.data.history.find((e) => e.kind === "场景").name, sceneName);
+  const offlinePage = launch(names.storage).page("me");
+  offlinePage.onShow();
+  assert.equal(offlinePage.data.history.find((e) => e.kind === "场景").name, sceneName);
 
   // Team-only QR requires explicit selection; even one available map is not selected silently.
   const maps = [{ id: MAP, organization_id: ORG, name: "河岸", config: { footer_enabled: true } }];
@@ -202,8 +194,10 @@ async function main() {
     const url = new URL(options.url);
     options.success({ statusCode: 200, data: url.pathname.endsWith("/workspaces") ? maps : [{ id: ORG, name: "Team", config: { footer_enabled: false } }] });
   } });
-  const chooser = chooserApp.page("index");
-  await chooser.onLoad({ organizationId: ORG });
+  await chooserApp.page("index").onLoad({ organizationId: ORG });
+  assert.deepEqual(chooserApp.calls.navigations.splice(0), ["/pages/entry/entry"]);
+  const chooser = chooserApp.page("entry");
+  await chooser.onLoad();
   assert.equal(chooser.data.needsMap, true);
   assert.equal(chooser.data.mapChoices.length, 1);
   chooser.goToAR();
@@ -216,14 +210,15 @@ async function main() {
   chooser.goToAR();
   assert.match(chooserApp.calls.navigations[0], new RegExp(`workspaceId=${MAP}`));
   const offlineTeam = launch(new Map([[CURRENT, { organizationId: ORG }]]));
-  const offlineChooser = offlineTeam.page("index"); await offlineChooser.onLoad({});
+  const offlineChooser = offlineTeam.page("entry"); await offlineChooser.onLoad();
   assert.equal(offlineChooser.data.needsMap, true); assert.ok(offlineChooser.data.mapsError);
   offlineChooser.goToAR(); assert.equal(offlineTeam.calls.navigations.length, 0);
   const emptyTeam = launch(new Map(), { request(options) { options.success({ statusCode: 200, data: [] }); } });
-  const emptyChooser = emptyTeam.page("index"); await emptyChooser.onLoad({ organizationId: ORG });
+  emptyTeam.backend.setConfig({ organizationId: ORG });
+  const emptyChooser = emptyTeam.page("entry"); await emptyChooser.onLoad();
   assert.equal(emptyChooser.data.mapChoices.length, 0); assert.equal(emptyChooser.data.mapsError, "");
   emptyTeam.page("ar").onLoad({});
-  assert.match(emptyTeam.calls.redirects[0], /pages\/index\/index\?select=1/);
+  assert.equal(emptyTeam.calls.redirects[0], "/pages/entry/entry");
 
   // Denied/full storage must not stop an explicit Scene preview.
   const broken = launch(new Map(), {
@@ -233,7 +228,40 @@ async function main() {
   await broken.page("index").onLoad(sceneTarget);
   assert.equal(broken.calls.navigations[0], first.calls.navigations[0]);
   assert.deepEqual(copy(broken.backend.CONFIG), sceneTarget);
-  console.log("PASS scan config: Scene cold starts, map switching, named/type-labelled history, system back and storage failures");
+  // The real catalog client paginates, retries the failed page and stores the selected scene name.
+  let failPage = true;
+  const catalog = launch(new Map(), { request(options) {
+    const url = new URL(options.url);
+    assert.equal(url.pathname, "/api/templates");
+    assert.equal(url.searchParams.get("type"), "scene");
+    const offset = Number(url.searchParams.get("offset"));
+    if (offset === 1 && failPage) {
+      failPage = false;
+      options.success({ statusCode: 503, data: { error: "offline" } });
+      return;
+    }
+    options.success({ statusCode: 200, data: {
+      data: [{ id: offset ? SECOND : SCENE, organization_id: ORG, name: offset ? "雨过营地" : "路口让行", thumbnail: null }],
+      page: { hasMore: offset === 0 },
+    } });
+  } });
+  const home = catalog.page("index");
+  home.onLoad({});
+  home.onShow();
+  await flush();
+  assert.deepEqual(copy(home.data.scenes.map((item) => item.name)), ["路口让行"]);
+  assert.equal(catalog.backend.loadScanHistory().length, 0);
+  await home.loadMoreScenes();
+  assert.equal(home.data.error, true);
+  assert.equal(home.data.scenes.length, 1);
+  await home.retryScenes();
+  assert.deepEqual(copy(home.data.scenes.map((item) => item.name)), ["路口让行", "雨过营地"]);
+  assert.equal(home.data.hasMore, false);
+  home.onOpenScene({ currentTarget: { dataset: { id: SECOND } } });
+  assert.equal(catalog.calls.navigations[0], `/pages/scene/scene?sceneId=${SECOND}&organizationId=${ORG}`);
+  assert.equal(catalog.backend.loadScanHistory()[0].sceneName, "雨过营地");
+
+  console.log("PASS public catalog, map and Scene QR routing, browse history, retry and storage failures");
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; });

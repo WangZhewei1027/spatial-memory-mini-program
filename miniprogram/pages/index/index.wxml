@@ -1,73 +1,53 @@
-<view class="container">
-  <view class="header">
-    <view class="logo-mark"></view>
-    <block wx:if="{{loaded}}">
-      <text class="title">{{title || '无组织名'}}</text>
-      <text class="subtitle" wx:if="{{subtitle}}">{{subtitle}}</text>
-    </block>
-    <block wx:else>
-      <view class="skeleton skeleton-title"></view>
-      <view class="skeleton skeleton-subtitle"></view>
-    </block>
+<view class="tab-content">
+  <view class="tab-heading" role="heading">公共场景</view>
 
-    <view class="switcher" wx:if="{{loaded && history.length > 1}}">
-      <view class="switcher-trigger" bindtap="toggleDropdown">
-        <text class="switcher-label">切换 Scene / Map</text>
-        <view class="switcher-arrow {{dropdownOpen ? 'open' : ''}}"></view>
+  <view class="scene-list" wx:if="{{scenes.length}}">
+    <button
+      wx:for="{{scenes}}"
+      wx:key="id"
+      class="scene-card"
+      hover-class="scene-card-pressed"
+      data-id="{{item.id}}"
+      bindtap="onOpenScene"
+    >
+      <view class="scene-cover">
+        <image
+          wx:if="{{item.cover}}"
+          class="cover-image"
+          src="{{item.cover}}"
+          mode="aspectFill"
+          lazy-load
+          data-id="{{item.id}}"
+          data-cover="{{item.cover}}"
+          binderror="onCoverError"
+          aria-hidden="{{true}}"
+        />
+        <view wx:else class="cover-mark" aria-hidden="{{true}}"></view>
       </view>
-      <view class="dropdown" wx:if="{{dropdownOpen}}">
-        <view
-          wx:for="{{history}}"
-          wx:key="key"
-          class="dropdown-item {{item.active ? 'active' : ''}}"
-          data-org="{{item.organizationId}}"
-          data-ws="{{item.workspaceId}}"
-          data-scene="{{item.sceneId}}"
-          bindtap="onSelectHistory"
-        >
-          <text class="dropdown-kind">{{item.kind}}</text>
-          <view class="dropdown-content">
-            <text class="dropdown-text">{{item.label}}</text>
-            <text class="dropdown-org">{{item.orgName}}</text>
-          </view>
-          <view class="dropdown-check" wx:if="{{item.active}}"></view>
-        </view>
+      <view class="scene-details">
+        <text class="scene-name">{{item.name}}</text>
+        <view class="list-arrow" aria-hidden="{{true}}"></view>
       </view>
-    </view>
+    </button>
   </view>
 
-  <view class="menu">
-    <view class="perm-banner" wx:if="{{deniedPermText}}">
-      <view class="perm-content">
-        <text class="perm-title">{{deniedPermText}}权限未开启</text>
-        <text class="perm-desc">开启后才能获取附近的 AR 素材与相机画面</text>
-      </view>
-      <button
-        class="perm-btn"
-        open-type="openSetting"
-        bindopensetting="onOpenSetting"
-      >去开启</button>
-    </view>
-
-    <block wx:if="{{loaded && needsMap}}">
-      <picker wx:if="{{mapChoices.length}}" range="{{mapChoices}}" range-key="name" bindchange="onChooseMap">
-        <view class="card"><text class="card-title">选择地图合集</text><view class="arrow"></view></view>
-      </picker>
-      <button wx:elif="{{mapsError}}" class="card card-title" bindtap="retryMaps">{{mapsError}}</button>
-      <text wx:else class="card-desc">暂无可用地图合集</text>
-    </block>
-    <view wx:elif="{{loaded}}" class="card" bindtap="goToAR">
-      <view class="card-content">
-        <text class="card-title">{{isScene ? '预览场景' : '开启旅程'}}</text>
-        <text class="card-desc">{{isScene ? '进入后点击按钮，将场景放置在前方' : '探索 AR 景观与互动体验'}}</text>
-      </view>
-      <view class="card-action">
-        <view class="arrow"></view>
-      </view>
+  <view wx:if="{{loading && !scenes.length}}" class="scene-list" aria-label="正在加载公共场景">
+    <view wx:for="{{[1, 2]}}" wx:key="*this" class="scene-card">
+      <view class="scene-cover skeleton"></view>
+      <view class="scene-details"><view class="skeleton skeleton-name"></view></view>
     </view>
   </view>
-
-  <view class="footer" wx:if="{{showFooter}}">
-    <image class="footer-logo" src="/assets/DHL-Outlined.png" mode="aspectFit" />
+  <view wx:elif="{{error}}" class="tab-message">
+    <text>公共场景加载失败</text>
+    <button class="tab-action" bindtap="retryScenes">重试</button>
   </view>
+  <view wx:elif="{{!scenes.length}}" class="tab-message">
+    <text>暂无公共场景</text>
+  </view>
+  <button
+    wx:elif="{{hasMore}}"
+    class="tab-action more-scenes"
+    disabled="{{loading}}"
+    bindtap="loadMoreScenes"
+  >{{loading ? '正在加载…' : '加载更多'}}</button>
 </view>

@@ -1,0 +1,58 @@
+page {
+  background: #1f1f1f;
+  color: #e8e8e8;
+}
+
+.tab-content {
+  box-sizing: border-box;
+  max-width: 1100rpx;
+  margin: 0 auto;
+  padding: 36rpx 36rpx 48rpx;
+}
+
+.tab-heading {
+  margin-bottom: 28rpx;
+  color: #ffffff;
+  font-size: 48rpx;
+  font-weight: 500;
+  line-height: 1.25;
+}
+
+.tab-content button::after {
+  border: 0;
+}
+
+.list-arrow {
+  flex-shrink: 0;
+  width: 14rpx;
+  height: 14rpx;
+  border-top: 3rpx solid #8fbc8f;
+  border-right: 3rpx solid #8fbc8f;
+  transform: rotate(45deg);
+}
+
+.tab-message {
+  padding: 64rpx 0;
+  color: #aaaaaa;
+  text-align: center;
+  font-size: 28rpx;
+}
+
+.tab-message .tab-action {
+  margin: 28rpx auto 0;
+}
+
+.tab-action {
+  display: table;
+  min-height: 88rpx;
+  padding: 0 32rpx;
+  border-radius: 12rpx;
+  background: #2a2a2a;
+  color: #b9d6b9;
+  font-size: 28rpx;
+  line-height: 88rpx;
+}
+
+.tab-action.button-hover {
+  background: #333333;
+}

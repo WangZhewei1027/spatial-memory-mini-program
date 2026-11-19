@@ -27,11 +27,11 @@ Page({
     this.selectComponent("#main-frame")?.resumeRetrieval();
   },
   onLoad(_options: Record<string, string | undefined>) {
-    // CONFIG 已由 index.ts 的 setConfig 设置（扫码 → Storage → 模块初始化）；
+    // CONFIG 已在扫码或选择浏览记录时设置；
     // ar.ts 始终由 goToAR() 跳转进入，不应在此持久化 URL 参数，
     // 否则微信「最近使用」场景下的过期 URL 会覆盖更新的 Storage 扫码结果。
     if (!CONFIG.organizationId || !CONFIG.workspaceId) {
-      wx.redirectTo({ url: "/pages/index/index?select=1" });
+      wx.redirectTo({ url: "/pages/entry/entry" });
       return;
     }
     const {

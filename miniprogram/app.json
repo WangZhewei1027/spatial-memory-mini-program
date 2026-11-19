@@ -1,6 +1,8 @@
 {
   "pages": [
     "pages/index/index",
+    "pages/me/me",
+    "pages/entry/entry",
     "pages/ar/ar",
     "pages/scene/scene"
   ],
@@ -62,5 +64,25 @@
   "workers": {
     "path": "workers",
     "isSubpackage": true
+  },
+  "tabBar": {
+    "color": "#aaaaaa",
+    "selectedColor": "#8fbc8f",
+    "backgroundColor": "#1f1f1f",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/index/index",
+        "text": "主页",
+        "iconPath": "assets/tab-home.png",
+        "selectedIconPath": "assets/tab-home-selected.png"
+      },
+      {
+        "pagePath": "pages/me/me",
+        "text": "我",
+        "iconPath": "assets/tab-me.png",
+        "selectedIconPath": "assets/tab-me-selected.png"
+      }
+    ]
   }
 }

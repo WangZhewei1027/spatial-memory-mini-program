@@ -2,7 +2,21 @@
   <xr-start wx:if="{{sceneId && !invalid}}" id="preview" scene-id="{{sceneId}}" scene-organization-id="{{organizationId}}" width="{{renderWidth}}" height="{{renderHeight}}" style="width:{{width}}px;height:{{height}}px" bindscenestatus="onSceneStatus" bindsceneplayback="onScenePlayback" bindrenderstatus="onRenderStatus" />
   <button wx:if="{{state !== 'ready' && !invalid}}" class="place-button" disabled="{{state !== 'placeable' && state !== 'error' && state !== 'empty'}}" bindtap="place">{{state === 'error' || state === 'empty' ? '重试' : state === 'placeable' ? '放置场景' : state === 'tracking' ? '正在定位…' : '正在加载…'}}</button>
   <view wx:if="{{state === 'ready'}}" class="transport">
-    <button bindtap="togglePlayback">{{playback === 'playing' ? '暂停演出' : playback === 'ended' ? '重新播放' : '继续播放'}}</button>
-    <button wx:if="{{playback !== 'ended'}}" bindtap="restart">重播</button>
+    <button
+      class="transport-button transport-play"
+      hover-class="transport-pressed"
+      bindtap="togglePlayback"
+      aria-label="{{playback === 'playing' ? '暂停播放' : '播放'}}"
+    >
+      <image
+        class="transport-icon"
+        src="{{playback === 'playing' ? '/assets/scene-pause.svg' : '/assets/scene-play.svg'}}"
+        mode="aspectFit"
+        aria-hidden="{{true}}"
+      />
+    </button>
+    <button class="transport-button" hover-class="transport-pressed" bindtap="restart" aria-label="从头播放">
+      <image class="transport-icon" src="/assets/scene-reset.svg" mode="aspectFit" aria-hidden="{{true}}" />
+    </button>
   </view>
 </view>

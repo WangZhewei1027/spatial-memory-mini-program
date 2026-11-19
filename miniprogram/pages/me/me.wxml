@@ -1,0 +1,26 @@
+<view class="tab-content">
+  <view class="tab-heading" role="heading">浏览记录</view>
+  <view wx:if="{{history.length}}" class="history-list">
+    <button
+      wx:for="{{history}}"
+      wx:key="key"
+      class="history-row"
+      hover-class="history-row-pressed"
+      data-key="{{item.key}}"
+      bindtap="onSelectHistory"
+    >
+      <text class="history-kind">{{item.kind}}</text>
+      <view class="history-details">
+        <text class="history-name">{{item.name}}</text>
+        <view wx:if="{{item.organization || item.viewedAt}}" class="history-meta">
+          <text wx:if="{{item.organization}}">{{item.organization}}</text>
+          <text wx:if="{{item.viewedAt}}">{{item.viewedAt}}</text>
+        </view>
+      </view>
+      <view class="list-arrow" aria-hidden="{{true}}"></view>
+    </button>
+  </view>
+  <view wx:else class="tab-message">
+    <text>暂无浏览记录</text>
+  </view>
+</view>

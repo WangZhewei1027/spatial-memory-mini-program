@@ -1,304 +1,81 @@
-.container {
-  min-height: 100vh;
-  padding: 60rpx 40rpx;
-  background-color: #1f1f1f;
+@import "../../styles/tabs.wxss";
+
+.scene-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24rpx;
+}
+
+.scene-list .scene-card {
+  width: 100%;
+  min-width: 0;
+  max-width: none;
+  margin: 0;
+  overflow: hidden;
+  padding: 0;
   box-sizing: border-box;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
+  border-radius: 24rpx;
+  background: #2a2a2a;
   color: #e8e8e8;
+  text-align: left;
+  line-height: 1.4;
 }
 
-.header {
-  margin-top: 100rpx;
-  display: flex;
-  flex-direction: column;
-}
-
-.logo-mark {
-  width: 60rpx;
-  height: 60rpx;
-  background-color: #8fbc8f; /* Sage Green */
-  border-radius: 50%;
-  margin-bottom: 40rpx;
-  position: relative;
-}
-
-.logo-mark::after {
-  content: "";
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: 30rpx;
-  height: 30rpx;
-  background-color: #1f1f1f;
-  border-radius: 50%;
-}
-
-.title {
-  font-size: 64rpx;
-  font-weight: 300; /* Lighter weight for elegance */
-  letter-spacing: 4rpx;
-  margin-bottom: 24rpx;
-  color: #ffffff;
-}
-
-.subtitle {
-  font-size: 28rpx;
-  color: #888888;
-  letter-spacing: 2rpx;
-  font-weight: 300;
-}
-
-/* 名称加载中的骨架占位，尺寸与 title/subtitle 对齐避免布局跳动 */
-.skeleton {
-  border-radius: 6rpx;
-  background: linear-gradient(90deg, #2a2a2a 25%, #383838 50%, #2a2a2a 75%);
-  background-size: 400% 100%;
-  animation: skeleton-shimmer 1.4s ease infinite;
-}
-
-.skeleton-title {
-  width: 380rpx;
-  height: 76rpx;
-  margin-bottom: 28rpx;
-}
-
-.skeleton-subtitle {
-  width: 220rpx;
-  height: 36rpx;
-}
-
-@keyframes skeleton-shimmer {
-  0% {
-    background-position: 100% 0;
-  }
-  100% {
-    background-position: 0 0;
-  }
-}
-
-.switcher {
-  margin-top: 32rpx;
-  position: relative;
-}
-
-.switcher-trigger {
-  display: inline-flex;
-  align-items: center;
-  padding: 14rpx 24rpx;
-  background: #2a2a2a;
-  border-radius: 4rpx;
-  border-left: 4rpx solid #8fbc8f;
-}
-
-.switcher-trigger:active {
+.scene-list .scene-card-pressed {
   background: #333333;
 }
 
-.switcher-label {
-  font-size: 24rpx;
-  color: #b8b8b8;
-  letter-spacing: 2rpx;
-}
-
-.switcher-arrow {
-  width: 12rpx;
-  height: 12rpx;
-  border-right: 2px solid #888888;
-  border-bottom: 2px solid #888888;
-  transform: rotate(45deg);
-  margin-left: 16rpx;
-  margin-top: -6rpx;
-  transition: transform 0.2s ease;
-}
-
-.switcher-arrow.open {
-  transform: rotate(-135deg);
-  margin-top: 6rpx;
-}
-
-.dropdown {
-  position: absolute;
-  top: 100%;
-  left: 0;
-  margin-top: 12rpx;
-  min-width: 420rpx;
-  max-width: 620rpx;
-  max-height: 480rpx;
-  overflow-y: auto;
-  background: #2a2a2a;
-  border-radius: 8rpx;
-  box-shadow: 0 12rpx 36rpx rgba(0, 0, 0, 0.4);
-  z-index: 10;
-}
-
-.dropdown-item {
+.scene-cover {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 24rpx 28rpx;
-  border-bottom: 1px solid #383838;
-}
-
-.dropdown-item:last-child {
-  border-bottom: none;
-}
-
-.dropdown-item:active {
-  background: #333333;
-}
-
-.dropdown-item.active {
+  justify-content: center;
+  aspect-ratio: 16 / 9;
   background: #313a31;
 }
 
-.dropdown-text {
-  font-size: 26rpx;
-  color: #e8e8e8;
-  letter-spacing: 1rpx;
+.cover-image {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
 }
 
-.dropdown-kind {
-  flex-shrink: 0;
-  min-width: 76rpx;
-  margin-right: 20rpx;
-  padding: 6rpx 10rpx;
-  border: 1rpx solid #667866;
-  border-radius: 6rpx;
-  color: #b9d6b9;
-  font-size: 22rpx;
-  text-align: center;
-}
-
-.dropdown-content { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 8rpx; }
-.dropdown-text { overflow-wrap: anywhere; }
-.dropdown-org { color: #999999; font-size: 22rpx; }
-
-.dropdown-check {
-  width: 14rpx;
-  height: 14rpx;
-  border-radius: 50%;
-  background: #8fbc8f;
-  margin-left: 24rpx;
-  flex-shrink: 0;
-}
-
-.menu {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-}
-
-/* 权限被拒后的引导条，与卡片同风格但用暖色强调 */
-.perm-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  background: #2a2a2a;
-  border-radius: 4rpx;
-  border-left: 6rpx solid #d4a04f;
-  padding: 28rpx 32rpx;
-  margin-bottom: 32rpx;
-  box-shadow: 0 10rpx 30rpx rgba(0, 0, 0, 0.2);
-}
-
-.perm-content {
-  display: flex;
-  flex-direction: column;
-  margin-right: 24rpx;
-}
-
-.perm-title {
-  font-size: 28rpx;
-  color: #e8c789;
-  margin-bottom: 8rpx;
-}
-
-.perm-desc {
-  font-size: 22rpx;
-  color: #999999;
-}
-
-.perm-btn {
-  flex-shrink: 0;
-  margin: 0;
-  padding: 0 32rpx;
-  height: 60rpx;
-  line-height: 60rpx;
-  font-size: 24rpx;
-  font-weight: 400;
-  color: #1f1f1f;
-  background: #d4a04f;
-  border-radius: 4rpx;
-}
-
-.perm-btn::after {
-  border: none;
-}
-
-.card {
-  background: #2a2a2a;
-  border-radius: 4rpx; /* Sharper corners for modern/stone look */
-  padding: 48rpx 50rpx;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  transition: all 0.3s ease;
-  border-left: 6rpx solid #8fbc8f; /* Accent line */
-  box-shadow: 0 10rpx 30rpx rgba(0, 0, 0, 0.2);
-}
-
-.card:active {
-  transform: scale(0.98);
-  background: #333333;
-}
-
-.card-content {
-  display: flex;
-  flex-direction: column;
-}
-
-.card-title {
-  font-size: 36rpx;
-  font-weight: 500;
-  color: #ffffff;
-  margin-bottom: 12rpx;
-}
-
-.card-desc {
-  font-size: 24rpx;
-  color: #999999;
-}
-
-.card-action {
+.cover-mark {
   width: 60rpx;
   height: 60rpx;
+  border: 14rpx solid #8fbc8f;
+  border-radius: 50%;
+  box-sizing: border-box;
+}
+
+.scene-details {
   display: flex;
   align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  border: 1px solid #444;
-  margin-left: 70rpx;
+  justify-content: space-between;
+  gap: 16rpx;
+  min-height: 88rpx;
+  padding: 18rpx 24rpx;
+  box-sizing: border-box;
 }
 
-.arrow {
-  width: 16rpx;
-  height: 16rpx;
-  border-top: 2px solid #e8e8e8;
-  border-right: 2px solid #e8e8e8;
-  transform: rotate(45deg);
-  margin-left: -4rpx;
+.scene-name {
+  min-width: 0;
+  font-size: 30rpx;
+  font-weight: 500;
+  overflow-wrap: anywhere;
 }
 
-.footer {
-  text-align: center;
-  padding-bottom: 40rpx;
+.skeleton {
+  background: #383838;
 }
 
-.footer-logo {
-  width: 500rpx;
-  height: 500rpx;
+.skeleton-name {
+  width: 55%;
+  height: 28rpx;
+  border-radius: 6rpx;
+}
+
+.more-scenes {
+  margin: 32rpx auto 0;
 }

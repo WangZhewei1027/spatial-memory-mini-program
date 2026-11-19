@@ -1,0 +1,61 @@
+@import "../../styles/tabs.wxss";
+
+.history-list {
+  overflow: hidden;
+  border-radius: 24rpx;
+  background: #2a2a2a;
+}
+
+.history-list .history-row {
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+  width: 100%;
+  max-width: none;
+  min-height: 112rpx;
+  margin: 0;
+  padding: 24rpx 32rpx 24rpx 24rpx;
+  box-sizing: border-box;
+  border-radius: 0;
+  background: transparent;
+  color: #e8e8e8;
+  line-height: 1.4;
+  text-align: left;
+}
+
+.history-row + .history-row {
+  border-top: 1rpx solid #383838;
+}
+
+.history-list .history-row-pressed {
+  background: #333333;
+}
+
+.history-kind {
+  flex-shrink: 0;
+  padding: 8rpx 14rpx;
+  border-radius: 8rpx;
+  background: #313a31;
+  color: #b9d6b9;
+  font-size: 24rpx;
+}
+
+.history-details {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.history-name {
+  font-size: 30rpx;
+  font-weight: 500;
+}
+
+.history-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4rpx 16rpx;
+  margin-top: 6rpx;
+  color: #aaaaaa;
+  font-size: 24rpx;
+}
